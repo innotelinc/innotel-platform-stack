@@ -43,6 +43,12 @@ The remaining platforms are **business functions** built on top:
 | Capstone | AgentOps | Zeus · Authentik · Infisical · Magnate |
 | Rizz Aura | CommunityOps | Authentik · Magnate |
 
+## Documents
+
+- [**Capstone ↔ Zeus convergence**](docs/convergence-capstone-zeus.md) — the
+  deep look at AgentOps/VoiceOps: Capstone standalone, Zeus as the VoIP
+  platform, Capstone as a Zeus add-on.
+
 ## Architecture principles
 
 1. **One job per platform.** Identity, secrets, trust, storage, and revenue are each owned
