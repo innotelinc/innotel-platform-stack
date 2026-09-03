@@ -13,7 +13,7 @@ revenue are platform services; everything else is a business function that consu
 > who consumes whom, how the platforms integrate, the order they deploy in, and the
 > security boundaries between them. Every product repository carries a
 > [docs/stack.md](docs/stack.md)-style section that points back here, so the ecosystem
-> definition lives in exactly one place. **Landing page:** [github.com/innotelinc/innotel-platform-stack](https://github.com/innotelinc/innotel-platform-stack)
+> definition lives in exactly one place. **Landing page:** [innotelinc.github.io/innotel-platform-stack](https://innotelinc.github.io/innotel-platform-stack)
 
 ---
 
