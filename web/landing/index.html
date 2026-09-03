@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Innotel Platform Stack — V1 Enterprise Architecture</title>
+  <meta name="description" content="The canonical Innotel Platform Stack: single-responsibility architecture where Authentik owns identity, Infisical owns secrets, Cerulean owns trust, ONYX owns storage and Magnate owns revenue.">
+  <meta property="og:title" content="Innotel Platform Stack — V1 Enterprise Architecture">
+  <meta property="og:description" content="The Innotel V1 Enterprise Architecture Bundle — 11 platforms, 5 golden layers, zero duplicated responsibility.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0d10'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle'%3E🏛️%3C/text%3E%3C/svg%3E">
+  <style>
+    /* ---- Product theme (Innotel Stack landing, modeled on the ONYX outline) ---- */
+    :root {
+      color-scheme: dark;
+      --p-bg: #0b0d10;
+      --p-bg-elevated: #12151a;
+      --p-surface: #181c22;
+      --p-surface-hover: #1f242c;
+      --p-border: #262c35;
+      --p-text: #f4f7fb;
+      --p-text-secondary: #cdd6e0;
+      --p-text-muted: #a8b2bf;
+      --p-accent: #38bdf8;
+      --p-accent-hover: #7dd3fc;
+      --p-accent-tint: rgba(56, 189, 248, 0.12);
+      --p-success: #3ddc84;
+      --p-warning: #f5b544;
+      --p-danger: #f25f5f;
+      --p-info: #5ac8fa;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --ease: cubic-bezier(.2, .8, .2, 1);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--p-bg);
+      color: var(--p-text);
+      font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::selection { background: var(--p-accent-tint); }
+
+    a { color: var(--p-accent); text-decoration: none; }
+    a:hover { color: var(--p-accent-hover); }
+
+    code, pre {
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+    /* ---- Top bar --------------------------------------------------------- */
+    .topbar {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(11, 13, 16, 0.72);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-bottom: 1px solid var(--p-border);
+    }
+    .topbar-inner {
+      display: flex; align-items: center; gap: 20px;
+      height: 60px;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 650; letter-spacing: 0.04em;
+      color: var(--p-text);
+    }
+    .brand:hover { color: var(--p-text); }
+    .brand .mark {
+      display: grid; place-items: center;
+      width: 26px; height: 26px; border-radius: 8px;
+      background: var(--p-bg-elevated);
+      border: 1px solid var(--p-border);
+      font-size: 15px;
+    }
+    .brand .dot { color: var(--p-accent); }
+    .topbar nav { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+    .topbar nav a {
+      color: var(--p-text-secondary);
+      padding: 6px 12px; border-radius: var(--radius-sm);
+      font-size: 14px;
+      transition: color .15s var(--ease), background .15s var(--ease);
+    }
+    .topbar nav a:hover { color: var(--p-text); background: var(--p-surface-hover); }
+    .topbar .gh {
+      display: inline-flex; align-items: center; gap: 8px;
+      margin-left: 8px;
+      border: 1px solid var(--p-border);
+      border-radius: var(--radius-md);
+      padding: 7px 14px;
+      color: var(--p-text);
+      font-size: 14px;
+      transition: border-color .15s var(--ease), background .15s var(--ease);
+    }
+    .topbar .gh:hover { border-color: var(--p-accent); background: var(--p-accent-tint); color: var(--p-text); }
+
+    /* ---- Hero ------------------------------------------------------------ */
+    .hero { position: relative; overflow: hidden; padding: 96px 0 72px; }
+    .hero::before {
+      content: "";
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(600px 320px at 70% -10%, rgba(56, 189, 248, 0.14), transparent 70%),
+        radial-gradient(500px 300px at 15% 110%, rgba(125, 211, 252, 0.08), transparent 70%);
+      pointer-events: none;
+    }
+    .hero-inner { position: relative; max-width: 760px; }
+    .kicker {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--p-accent-hover);
+      background: var(--p-accent-tint);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 999px;
+      padding: 5px 14px;
+      margin: 0 0 24px;
+    }
+    .kicker .pulse {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--p-success);
+      box-shadow: 0 0 0 0 rgba(61, 220, 132, 0.5);
+      animation: pulse 2.4s var(--ease) infinite;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(61, 220, 132, 0.45); }
+      70% { box-shadow: 0 0 0 9px rgba(61, 220, 132, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(61, 220, 132, 0); }
+    }
+    h1 {
+      font-size: clamp(2.2rem, 5.5vw, 3.4rem);
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+      margin: 0 0 20px;
+      font-weight: 700;
+    }
+    h1 .accent { color: var(--p-accent); }
+    .lede {
+      font-size: 1.125rem;
+      color: var(--p-text-secondary);
+      max-width: 640px;
+      margin: 0 0 32px;
+    }
+    .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      border-radius: var(--radius-md);
+      padding: 11px 20px;
+      font-size: 15px; font-weight: 550;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background .15s var(--ease), border-color .15s var(--ease), transform .15s var(--ease);
+    }
+    .btn-primary { background: var(--p-accent); color: #071018; font-weight: 600; }
+    .btn-primary:hover { background: var(--p-accent-hover); color: #071018; }
+    .btn-secondary { border-color: var(--p-border); color: var(--p-text); background: transparent; }
+    .btn-secondary:hover { border-color: var(--p-accent); background: var(--p-accent-tint); color: var(--p-text); }
+    .quickstart {
+      display: flex; align-items: center; gap: 14px;
+      background: var(--p-bg-elevated);
+      border: 1px solid var(--p-border);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+      max-width: 640px;
+      font-size: 13.5px;
+    }
+    .quickstart code { color: var(--p-text); white-space: nowrap; overflow-x: auto; }
+    .quickstart code .c { color: var(--p-text-muted); }
+    .quickstart .copy {
+      margin-left: auto; flex: 0 0 auto;
+      background: transparent; border: 1px solid var(--p-border);
+      color: var(--p-text-secondary);
+      border-radius: var(--radius-sm);
+      font: inherit; font-size: 12px;
+      padding: 4px 10px; cursor: pointer;
+      transition: border-color .15s var(--ease), color .15s var(--ease);
+    }
+    .quickstart .copy:hover { border-color: var(--p-accent); color: var(--p-text); }
+    .quickstart .copy.copied { color: var(--p-success); border-color: var(--p-success); }
+
+    /* ---- Stat strip ------------------------------------------------------ */
+    .stats {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px; margin: 56px 0 0;
+    }
+    .stat {
+      background: var(--p-bg-elevated);
+      border: 1px solid var(--p-border);
+      border-radius: var(--radius-md);
+      padding: 16px 18px;
+    }
+    .stat b { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+    .stat span { color: var(--p-text-secondary); font-size: 13px; }
+
+    /* ---- Sections -------------------------------------------------------- */
+    section { padding: 64px 0; }
+    section h2 {
+      font-size: 1.7rem; letter-spacing: -0.01em;
+      margin: 0 0 8px;
+    }
+    section .section-sub { color: var(--p-text-secondary); margin: 0 0 32px; max-width: 620px; }
+
+    .grid { display: grid; gap: 14px; }
+    .grid-3 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .grid-2 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+
+    .card {
+      background: var(--p-bg-elevated);
+      border: 1px solid var(--p-border);
+      border-radius: var(--radius-lg);
+      padding: 22px;
+      transition: border-color .15s var(--ease), transform .15s var(--ease);
+    }
+    .card:hover { border-color: #34404f; }
+    .card h3 { margin: 0 0 6px; font-size: 1.02rem; }
+    .card p { margin: 0; color: var(--p-text-secondary); font-size: 14px; }
+    .card .icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 34px; height: 34px;
+      border-radius: var(--radius-md);
+      background: var(--p-accent-tint);
+      margin-bottom: 14px;
+      font-size: 16px;
+    }
+    .card ul { margin: 10px 0 0; padding-left: 18px; color: var(--p-text-secondary); font-size: 14px; }
+    .card ul li { margin: 3px 0; }
+    .card ul li b { color: var(--p-text); font-weight: 600; }
+
+    /* ---- Surfaces table -------------------------------------------------- */
+    .surfaces { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .surface {
+      display: flex; flex-direction: column; gap: 2px;
+      background: var(--p-bg-elevated);
+      border: 1px solid var(--p-border);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      transition: border-color .15s var(--ease);
+    }
+    .surface:hover { border-color: var(--p-accent); }
+    .surface b { font-size: 14.5px; }
+    .surface small { color: var(--p-text-secondary); font-size: 12.5px; }
+    .surface .live {
+      margin-left: auto;
+      font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--p-success);
+      border: 1px solid rgba(61, 220, 132, 0.3);
+      border-radius: 999px;
+      padding: 1px 8px;
+    }
+
+    /* ---- Stack / code ---------------------------------------------------- */
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: center; }
+    @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+    pre.terminal {
+      margin: 0;
+      background: var(--p-bg-elevated);
+      border: 1px solid var(--p-border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      font-size: 13px;
+      line-height: 1.75;
+      overflow-x: auto;
+      color: var(--p-text-secondary);
+    }
+    pre.terminal .p { color: var(--p-accent); }
+    pre.terminal .o { color: var(--p-text); }
+    pre.terminal .ok { color: var(--p-success); }
+    pre.terminal .cmt { color: var(--p-text-muted); }
+
+    /* ---- Roadmap --------------------------------------------------------- */
+    .roadmap { display: grid; gap: 12px; }
+    .mile {
+      display: flex; align-items: baseline; gap: 16px;
+      border: 1px solid var(--p-border);
+      background: var(--p-bg-elevated);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+    }
+    .mile .tag {
+      flex: 0 0 130px;
+      font-weight: 650; font-size: 14px;
+      color: var(--p-text);
+    }
+    .mile .tag em {
+      font-style: normal; color: var(--p-accent);
+      display: block; font-size: 12px; font-weight: 500;
+    }
+    .mile p { margin: 0; color: var(--p-text-secondary); font-size: 14px; }
+    .mile .state {
+      margin-left: auto; flex: 0 0 auto;
+      font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+      border-radius: 999px; padding: 2px 10px;
+    }
+    .mile .state.done { color: var(--p-success); border: 1px solid rgba(61, 220, 132, 0.3); }
+    .mile .state.next { color: var(--p-warning); border: 1px solid rgba(245, 181, 68, 0.3); }
+    .mile .state.later { color: var(--p-text-muted); border: 1px solid var(--p-border); }
+
+    /* ---- Footer ----------------------------------------------------------- */
+    footer {
+      border-top: 1px solid var(--p-border);
+      padding: 32px 0 40px;
+      color: var(--p-text-muted);
+      font-size: 13.5px;
+    }
+    .foot-inner {
+      display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+      justify-content: space-between;
+    }
+    footer a { color: var(--p-text-secondary); }
+    footer a:hover { color: var(--p-text); }
+    .foot-links { display: flex; gap: 18px; flex-wrap: wrap; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#">
+        <span class="mark" aria-hidden="true">🏛️</span>
+        Innotel Stack<span class="dot">.</span>
+      </a>
+      <nav aria-label="Main">
+        <a href="#features">Features</a>
+        <a href="#stack">Stack</a>
+        <a href="#platform">Platform</a>
+        <a href="#roadmap">Roadmap</a>
+        <a href="https://github.com/innotelinc/innotel-platform-stack">Docs</a>
+        <a class="gh" href="https://github.com/innotelinc/innotel-platform-stack">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+          GitHub
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <div class="hero">
+      <div class="wrap hero-inner">
+        <p class="kicker"><span class="pulse" aria-hidden="true"></span> V1 · Enterprise Architecture Bundle</p>
+        <h1>Eleven platforms.<br>Five golden layers.<span class="accent">.</span></h1>
+        <p class="lede">The canonical Innotel Platform Stack: strict single-responsibility architecture where Authentik owns identity, Infisical owns secrets, Cerulean owns trust, ONYX owns storage and Magnate owns revenue — and every other platform is a business function that consumes them. No platform duplicates another's responsibility.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/innotelinc/innotel-platform-stack">Get started</a>
+          <a class="btn btn-secondary" href="https://github.com/innotelinc/innotel-platform-stack">Docs</a>
+        </div>
+        <div class="quickstart">
+          <code><span class="c">$</span> git clone https://github.com/innotelinc/innotel-platform-stack.git && cd innotel-platform-stack</code>
+          <button class="copy" id="copy-btn" type="button" aria-label="Copy quick start command">copy</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><b>11 platforms</b><span>identity → business functions</span></div><div class="stat"><b>5 golden layers</b><span>Identity · Secrets · Trust · Storage · Revenue</span></div><div class="stat"><b>1 rule</b><span>no duplicated responsibility</span></div><div class="stat"><b>9 repos</b><span>each aligned with owns/consumes docs</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Features -->
+    <section id="features">
+      <div class="wrap">
+        <h2>Single responsibility, end to end<span class="accent">.</span></h2>
+        <p class="section-sub">Each platform has exactly one primary responsibility — documented, diagrammed and enforced per repo.</p>
+        <div class="grid grid-3">
+          <div class="card"><span class="icon" aria-hidden="true">🔑</span><h3>Golden rules</h3><p>Authentik = Identity · Infisical = Secrets · Cerulean = Trust · ONYX = Storage · Magnate = Revenue. All others = business functions.</p></div><div class="card"><span class="icon" aria-hidden="true">🧭</span><h3>Ownership matrix</h3><p>Every platform's owns / provides / consumes / does-not-own, in one place.</p></div><div class="card"><span class="icon" aria-hidden="true">🕸️</span><h3>Dependency graph</h3><p>Who consumes whom — and what each layer provides to the ecosystem.</p></div><div class="card"><span class="icon" aria-hidden="true">🔀</span><h3>Integration flows</h3><p>How identity, secrets, trust and revenue flow through every platform.</p></div><div class="card"><span class="icon" aria-hidden="true">🗓️</span><h3>Deployment order</h3><p>The correct bring-up sequence, from identity to business platforms.</p></div><div class="card"><span class="icon" aria-hidden="true">🛡️</span><h3>Security boundaries</h3><p>What each layer must never own — enforced at the doc and repo level.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stack -->
+    <section id="stack">
+      <div class="wrap">
+        <h2>The layers of the ecosystem<span class="accent">.</span></h2>
+        <p class="section-sub">Five foundation layers, six business platforms, and the agent layer on top — each with its own repo and stack doc.</p>
+        <div class="split">
+          <div>
+            <div class="grid" style="gap:14px">
+              <div class="card"><span class="icon" aria-hidden="true">🔑</span><h3>Foundation layers</h3><p>Authentik (IdentityOps), Infisical (SecretOps), Cerulean (TrustOps), ONYX (StorageOps), Magnate (RevenueOps).</p></div><div class="card"><span class="icon" aria-hidden="true">🏢</span><h3>Business platforms</h3><p>Monarch (MediaOps), Zeus (VoiceOps), Oasis (MailOps), Signara (DocumentOps), Rizz Aura (CommunityOps).</p></div><div class="card"><span class="icon" aria-hidden="true">🤖</span><h3>Agent layer</h3><p>Capstone (AgentOps) — voice AI agents over Zeus telephony.</p></div><div class="card"><span class="icon" aria-hidden="true">📐</span><h3>The bundle</h3><p>Matrix, diagrams, integration flows, deployment order, security boundaries.</p></div>
+            </div>
+          </div>
+          <pre class="terminal"><span class="cmt"># the five golden rules</span>
+$ <span class="p">cat</span> README.md
+<span class="ok">Authentik   = Identity</span>
+<span class="ok">Infisical   = Secrets</span>
+<span class="ok">Cerulean    = Trust</span>
+<span class="ok">ONYX        = Storage</span>
+<span class="ok">Magnate     = Revenue</span>
+<span class="ok">All others  = Business Functions</span></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Platform surfaces -->
+    <section id="platform">
+      <div class="wrap">
+        <h2>The eleven platforms<span class="accent">.</span></h2>
+        <p class="section-sub">Each platform ships its own repo and docs/stack.md, all aligned to this bundle.</p>
+        <div class="surfaces">
+          <a class="surface" href="https://github.com/innotelinc/authentik"><b>Authentik</b><small>github.com/innotelinc/authentik · IdentityOps</small></a><a class="surface" href="https://github.com/innotelinc/infisical"><b>Infisical</b><small>github.com/innotelinc/infisical · SecretOps</small></a><a class="surface" href="https://github.com/innotelinc/cerulean"><b>Cerulean</b><small>github.com/innotelinc/cerulean · TrustOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/onyx"><b>ONYX</b><small>github.com/innotelinc/onyx · StorageOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/magnate"><b>Magnate</b><small>github.com/innotelinc/magnate · RevenueOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/monarch"><b>Monarch</b><small>github.com/innotelinc/monarch · MediaOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/zeus"><b>Zeus</b><small>github.com/innotelinc/zeus · VoiceOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/mail-platform"><b>Oasis</b><small>github.com/innotelinc/mail-platform · MailOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/signara"><b>Signara</b><small>github.com/innotelinc/signara · DocumentOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/rizzaura"><b>Rizz Aura</b><small>github.com/innotelinc/rizzaura · CommunityOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/capstone"><b>Capstone</b><small>github.com/innotelinc/capstone · AgentOps</small><span class="live">live</span></a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Roadmap -->
+    <section id="roadmap">
+      <div class="wrap">
+        <h2>Roadmap<span class="accent">.</span></h2>
+        <p class="section-sub">V1 shipped across all repos; ecosystem convergence work is tracked here.</p>
+        <div class="roadmap">
+          <div class="mile"><span class="tag">V1 <em>"Bundle"</em></span><p>Canonical architecture bundle + per-repo stack docs + Infisical rollout.</p><span class="state done">done</span></div><div class="mile"><span class="tag">V1.1 <em>"Convergence"</em></span><p>Capstone ↔ Zeus: agents as a Zeus add-on, mirrored platform structure.</p><span class="state next">next</span></div><div class="mile"><span class="tag">V2 <em>"RFC"</em></span><p>RFC-driven evolution of every boundary in this document.</p><span class="state later">later</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot-inner">
+      <span>Innotel Platform Stack — V1 Enterprise Architecture · Innotel Labs</span>
+      <span class="foot-links">
+        <a href="https://github.com/innotelinc/innotel-platform-stack">GitHub</a>
+        <a href="https://github.com/innotelinc/innotel-platform-stack">Docs</a>
+        <a href="https://github.com/innotelinc/innotel-platform-stack/releases">Releases</a>
+      </span>
+    </div>
+  </footer>
+
+  <script>
+    // Copy-to-clipboard for the quick-start one-liner (progressive enhancement).
+    document.getElementById('copy-btn').addEventListener('click', function () {
+      var cmd = 'git clone https://github.com/innotelinc/innotel-platform-stack.git && cd innotel-platform-stack';
+      var self = this;
+      function done() {
+        self.textContent = 'copied';
+        self.classList.add('copied');
+        setTimeout(function () {
+          self.textContent = 'copy';
+          self.classList.remove('copied');
+        }, 2000);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cmd).then(done, done);
+      } else {
+        done();
+      }
+    });
+  </script>
+</body>
+</html>
