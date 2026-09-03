@@ -290,7 +290,7 @@ Deployment order:
 | Magnate (RevenueOps) | [innotelinc/jellyfin-subscription-platform](https://github.com/innotelinc/jellyfin-subscription-platform) | [docs/stack.md](https://github.com/innotelinc/jellyfin-subscription-platform/blob/main/docs/stack.md) |
 | Monarch (MediaOps) | [innotelinc/monarch](https://github.com/innotelinc/monarch) | [docs/stack.md](https://github.com/innotelinc/monarch/blob/main/docs/stack.md) |
 | Zeus (VoiceOps) | [innotelinc/zeus](https://github.com/innotelinc/zeus) | [docs/stack.md](https://github.com/innotelinc/zeus/blob/main/docs/stack.md) |
-| Oasis (MailOps) | [innotelinc/mail-platform](https://github.com/innotelinc/mail-platform) | [docs/stack.md](https://github.com/innotelinc/mail-platform/blob/main/docs/stack.md) |
+| Oasis (MailOps) | [innotelinc/oasis](https://github.com/innotelinc/oasis) | [docs/stack.md](https://github.com/innotelinc/oasis/blob/main/docs/stack.md) |
 | Signara (DocumentOps) | [innotelinc/signara](https://github.com/innotelinc/signara) | [docs/stack.md](https://github.com/innotelinc/signara/blob/main/docs/stack.md) |
 | Capstone (AgentOps) | [innotelinc/capstone](https://github.com/innotelinc/capstone) | [docs/stack.md](https://github.com/innotelinc/capstone/blob/main/docs/stack.md) |
 | Rizz Aura (CommunityOps) | [innotelinc/rizzaura-platform](https://github.com/innotelinc/rizzaura-platform) | [docs/stack.md](https://github.com/innotelinc/rizzaura-platform/blob/main/docs/stack.md) |
