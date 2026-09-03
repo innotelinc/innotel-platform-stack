@@ -42,6 +42,7 @@ The remaining platforms are **business functions** built on top:
 | Signara | DocumentOps | Authentik · Cerulean · Infisical · ONYX · Magnate |
 | Capstone | AgentOps | Zeus · Authentik · Infisical · Magnate |
 | Rizz Aura | CommunityOps | Authentik · Magnate |
+| zapit | TransferOps | Authentik (optional) |
 
 ## Documents
 
@@ -120,6 +121,8 @@ The remaining platforms are **business functions** built on top:
               └─────────────┘
 
               Rizz Aura (CommunityOps) rides on Authentik + Magnate
+              zapit (TransferOps) rides on Authentik (optional) — files
+              never touch storage: transfer is ephemeral, ONYX stays StorageOps
 ```
 
 ## Platform responsibilities
@@ -192,6 +195,12 @@ The remaining platforms are **business functions** built on top:
   engine.
 - **Consumes:** Authentik · Magnate.
 
+#### zapit — TransferOps (edge utility)
+- **Owns:** ephemeral peer-to-peer transfer (WebRTC data channels), room codes, relay
+  fallback, Zings (text snippets), QR pairing.
+- **Consumes:** Authentik (optional SSO; zero-login is the default).
+- **Explicitly does not own:** storage (ONYX), identity (Authentik), billing (Magnate).
+
 ## Dependency graph
 
 ```
@@ -238,6 +247,7 @@ Deployment order:
 | Signing / agreements / audit | DocumentOps | Signara |
 | Voice AI agents / telephony automation | AgentOps | Capstone |
 | Leaderboards / reputation / community | CommunityOps | Rizz Aura |
+| Ephemeral P2P transfer / relay | TransferOps | zapit |
 
 ## Integration flows
 
@@ -284,6 +294,7 @@ Deployment order:
 | Signara (DocumentOps) | [innotelinc/signara](https://github.com/innotelinc/signara) | [docs/stack.md](https://github.com/innotelinc/signara/blob/main/docs/stack.md) |
 | Capstone (AgentOps) | [innotelinc/capstone](https://github.com/innotelinc/capstone) | [docs/stack.md](https://github.com/innotelinc/capstone/blob/main/docs/stack.md) |
 | Rizz Aura (CommunityOps) | [innotelinc/rizzaura-platform](https://github.com/innotelinc/rizzaura-platform) | [docs/stack.md](https://github.com/innotelinc/rizzaura-platform/blob/main/docs/stack.md) |
+| zapit (TransferOps) | [innotelinc/zapit](https://github.com/innotelinc/zapit) | [docs/stack.md](https://github.com/innotelinc/zapit/blob/main/docs/stack.md) |
 
 ---
 
