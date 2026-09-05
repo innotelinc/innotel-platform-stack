@@ -30,7 +30,7 @@ services** — horizontal capabilities everything else consumes:
 | Infisical = Secrets | Infisical | SecretOps |
 | Cerulean = Trust | Cerulean | TrustOps |
 | ONYX = Storage | ONYX | StorageOps |
-| Magnate = Revenue | Magnate | RevenueOps |
+| Magnate = Billing Platform | Magnate | RevenueOps |
 | NPM Edge = Edge | NPM Edge | EdgeOps |
 
 The remaining platforms are **business functions** built on top:
