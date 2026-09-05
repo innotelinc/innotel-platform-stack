@@ -353,7 +353,7 @@
       <div class="wrap hero-inner">
         <p class="kicker"><span class="pulse" aria-hidden="true"></span> V1 · Enterprise Architecture Bundle</p>
         <h1>Fourteen platforms.<br>Six golden layers.<span class="accent">.</span></h1>
-        <p class="lede">The canonical Innotel Platform Stack: strict single-responsibility architecture where Authentik owns identity, Infisical owns secrets, Cerulean owns trust, ONYX owns storage, Magnate owns revenue and NPM Edge owns the edge — and every other platform is a business function that consumes them. No platform duplicates another's responsibility.</p>
+        <p class="lede">The canonical Innotel Platform Stack: strict single-responsibility architecture where Cerulean runs the shared identity and secrets plane — Authentik at <b>auth.cerulean.innotel.us</b> (one login for every platform), Infisical at <b>secrets.cerulean.innotel.us</b> — and owns trust; ONYX owns storage, Magnate owns revenue, NPM Edge owns the edge, and every other platform is a business function that consumes them. No platform duplicates another's responsibility, and any login goes through Cerulean.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="https://github.com/innotelinc/innotel-platform-stack">Get started</a>
           <a class="btn btn-secondary" href="https://github.com/innotelinc/innotel-platform-stack">Docs</a>
@@ -387,7 +387,7 @@
         <div class="split">
           <div>
             <div class="grid" style="gap:14px">
-              <div class="card"><span class="icon" aria-hidden="true">🔑</span><h3>Foundation layers</h3><p>Authentik (IdentityOps), Infisical (SecretOps), Cerulean (TrustOps), ONYX (StorageOps), Magnate (RevenueOps), NPM Edge (EdgeOps).</p></div><div class="card"><span class="icon" aria-hidden="true">🏢</span><h3>Business platforms</h3><p>Monarch (MediaOps), Zeus (VoiceOps), Oasis (MailOps), Signara (DocumentOps), Rizz Aura (CommunityOps), AuthenIQ (LearningOps).</p></div><div class="card"><span class="icon" aria-hidden="true">🤖</span><h3>Agent layer</h3><p>Capstone (AgentOps) — voice AI agents over Zeus telephony.</p></div><div class="card"><span class="icon" aria-hidden="true">📐</span><h3>The bundle</h3><p>Matrix, diagrams, integration flows, deployment order, security boundaries.</p></div>
+              <div class="card"><span class="icon" aria-hidden="true">🔑</span><h3>Foundation layers</h3><p>Cerulean (Auth &amp; Trust) hosts Authentik (<b>auth.cerulean.innotel.us</b>) and Infisical (<b>secrets.cerulean.innotel.us</b>); ONYX (StorageOps), Magnate (RevenueOps), NPM Edge (EdgeOps). Every platform's <b>auth.&lt;platform&gt;.innotel.us</b> alias fronts the same Cerulean Authentik — SSO everywhere, one identity.</p></div><div class="card"><span class="icon" aria-hidden="true">🏢</span><h3>Business platforms</h3><p>Monarch (MediaOps), Zeus (VoiceOps), Oasis (MailOps), Signara (DocumentOps), Rizz Aura (CommunityOps), AuthenIQ (LearningOps).</p></div><div class="card"><span class="icon" aria-hidden="true">🤖</span><h3>Agent layer</h3><p>Capstone (AgentOps) — voice AI agents over Zeus telephony.</p></div><div class="card"><span class="icon" aria-hidden="true">📐</span><h3>The bundle</h3><p>Matrix, diagrams, integration flows, deployment order, security boundaries.</p></div>
             </div>
           </div>
           <pre class="terminal"><span class="cmt"># the six golden rules</span>

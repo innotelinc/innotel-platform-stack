@@ -154,10 +154,21 @@ The remaining platforms are **business functions** built on top:
   Signara · Capstone.
 - **Does not own:** identity, billing, DNS records, certificates (lifecycle), storage.
 
-#### Cerulean — TrustOps
+#### Cerulean — Auth & Trust stack
 - **Owns:** certificate lifecycle, ACME automation, PKI, DNS automation, certificate
   discovery, certificate deployment, trust monitoring, DNS health, compliance reporting,
   trust scoring.
+- **Hosts the shared identity and secrets plane.** Cerulean runs the stack's Authentik
+  and Infisical instances — it is the **single login point for every platform**. All
+  sign-in, signup, and password flows go through its Authentik at
+  `https://auth.cerulean.innotel.us`; secrets live in its Infisical at
+  `https://secrets.cerulean.innotel.us`.
+- **Per-platform auth aliases.** Every platform's documented login endpoint
+  (`auth.<platform>.innotel.us` — e.g. `auth.magnate.innotel.us`, `auth.zeus.innotel.us`,
+  `auth.capstone.innotel.us`) is an edge alias that fronts the same Cerulean Authentik,
+  so each platform keeps a stable, branded login URL while identity stays centralized.
+  The legacy `auth.innotel.us` host was consolidated into Cerulean and serves the same
+  instance.
 - **Consumes:** Authentik (identity), Infisical (secrets).
 - **Does not own:** users, passwords, payment processing.
 
@@ -325,9 +336,14 @@ Rules that hold in both:
 
 ## Integration flows
 
-- **Identity flow:** user → Authentik (OIDC) → service issues session → every platform
-  trusts the same identity. Disable the user in Authentik and every consuming platform
-  loses them instantly.
+- **Identity flow:** user → Cerulean's Authentik (`auth.cerulean.innotel.us`, or the
+  platform's `auth.<platform>.innotel.us` alias) → OIDC → service issues session → every
+  platform trusts the same identity. Disable the user in Authentik and every consuming
+  platform loses them instantly. Any login goes through Cerulean — no platform runs its
+  own login page or password store.
+- **Secret flow:** credentials live in Cerulean's Infisical (`secrets.cerulean.innotel.us`)
+  and are pulled into each platform's `.env` at setup; service credentials, API keys, and
+  TLS private keys are written to Infisical, never committed.
 - **Secret flow:** setup pulls credentials from Infisical (project-scoped, per-environment)
   into the stack; service credentials, API keys, and TLS private keys are written to
   Infisical, never committed. `infisical://` references resolve at runtime where supported.
