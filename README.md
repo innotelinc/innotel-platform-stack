@@ -4,8 +4,8 @@
 
 **INNOTEL V1 Enterprise Architecture Bundle — the canonical single-responsibility platform ecosystem.**
 
-One stack. Every platform owns exactly one job. Identity, secrets, trust, storage, and
-revenue are platform services; everything else is a business function that consumes them.
+One stack. Every platform owns exactly one job. Identity, secrets, trust, storage, revenue,
+and edge are platform services; everything else is a business function that consumes them.
 
 </div>
 
@@ -21,7 +21,7 @@ revenue are platform services; everything else is a business function that consu
 
 The Innotel ecosystem is a portfolio of self-hostable platforms that follow strict
 **single-responsibility** principles: every platform owns one primary domain of
-responsibility, and no platform duplicates another's. Five of them are **platform
+responsibility, and no platform duplicates another's. Six of them are **platform
 services** — horizontal capabilities everything else consumes:
 
 | Golden rule | Platform | Classification |
@@ -31,6 +31,7 @@ services** — horizontal capabilities everything else consumes:
 | Cerulean = Trust | Cerulean | TrustOps |
 | ONYX = Storage | ONYX | StorageOps |
 | Magnate = Revenue | Magnate | RevenueOps |
+| NPM Edge = Edge | NPM Edge | EdgeOps |
 
 The remaining platforms are **business functions** built on top:
 
@@ -160,12 +161,14 @@ The remaining platforms are **business functions** built on top:
   storage, media storage, NAS features, virtualization storage.
 - **Does not own:** identity, billing, certificates.
 
-#### Magnate — RevenueOps
-- **Owns:** subscriptions, plans, billing, invoices, payments, revenue analytics, coupons,
-  trials, entitlements, customer accounts, usage metering.
-- **Provides billing to:** Monarch · Zeus · Oasis · Signara · Cerulean · Capstone ·
-  Rizz Aura.
-- **Does not own:** identity, media, storage.
+### Edge platform
+
+#### NPM Edge — EdgeOps
+- **Owns:** public HTTP/S routing, TLS termination at the edge, proxy hosts, access lists,
+  generated Nginx configuration, and recoverable NPM state.
+- **Consumes:** Cerulean (DNS and certificate lifecycle), Infisical (secrets), and
+  Authentik/application platforms indirectly through proxied services.
+- **Does not own:** authoritative DNS, identity, billing, application data, or long-term storage.
 
 ### Business platforms
 
@@ -240,9 +243,9 @@ Identity (Authentik) ────────► Secrets (Infisical)
 Deployment order:
 
 1. **Authentik** (identity must exist first — everyone consumes it).
-2. **Infisical** (secrets next — Cerulean, ONYX, Magnate and every business platform read
+2. **Infisical** (secrets next — Cerulean, ONYX, Magnate, NPM Edge and every business platform read
    credentials from it).
-3. **Cerulean · ONYX · Magnate** (trust, storage, and revenue in parallel — nothing above
+3. **Cerulean · ONYX · Magnate · NPM Edge** (trust, storage, revenue, and edge in parallel — nothing above
    them works without at least one).
 4. **Business platforms** (Monarch, Zeus, Oasis, Signara — then Capstone on top of Zeus;
    Rizz Aura can ride anywhere after Authentik + Magnate, and AuthenIQ after
@@ -256,6 +259,7 @@ Deployment order:
 | Identity / SSO / MFA | IdentityOps | Authentik |
 | Secrets / keys / tokens | SecretOps | Infisical |
 | Certificates / PKI / DNS | TrustOps | Cerulean |
+| Public routing / TLS / proxy recovery | EdgeOps | NPM Edge |
 | Storage / backups / snapshots | StorageOps | ONYX |
 | Billing / subscriptions / entitlements | RevenueOps | Magnate |
 | Streaming / media | MediaOps | Monarch |
@@ -311,6 +315,7 @@ Deployment order:
 | Oasis (MailOps) | [innotelinc/oasis](https://github.com/innotelinc/oasis) | [docs/stack.md](https://github.com/innotelinc/oasis/blob/main/docs/stack.md) |
 | Signara (DocumentOps) | [innotelinc/signara](https://github.com/innotelinc/signara) | [docs/stack.md](https://github.com/innotelinc/signara/blob/main/docs/stack.md) |
 | Capstone (AgentOps) | [innotelinc/capstone](https://github.com/innotelinc/capstone) | [docs/stack.md](https://github.com/innotelinc/capstone/blob/main/docs/stack.md) |
+| NPM Edge (EdgeOps) | [innotelinc/npm](https://github.com/innotelinc/npm) | [ABOUT.md](https://github.com/innotelinc/npm/blob/develop/ABOUT.md) |
 | Rizz Aura (CommunityOps) | [innotelinc/rizzaura-platform](https://github.com/innotelinc/rizzaura-platform) | [docs/stack.md](https://github.com/innotelinc/rizzaura-platform/blob/main/docs/stack.md) |
 | zapit (TransferOps) | [innotelinc/zapit](https://github.com/innotelinc/zapit) | [docs/stack.md](https://github.com/innotelinc/zapit/blob/main/docs/stack.md) |
 | AuthenIQ (LearningOps) | [innotelinc/authentiq](https://github.com/innotelinc/authentiq) | [docs/stack.md](https://github.com/innotelinc/authentiq/blob/main/docs/stack.md) |
