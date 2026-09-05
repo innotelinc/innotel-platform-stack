@@ -44,7 +44,7 @@ The remaining platforms are **business functions** built on top:
 | Capstone | AgentOps | Zeus · Authentik · Infisical · Magnate · NPM Edge |
 | Rizz Aura | CommunityOps | Authentik · Magnate · NPM Edge |
 | zapit | TransferOps | Authentik (optional) |
-| AuthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara |
+| AuthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge |
 
 ## Documents
 
@@ -203,7 +203,7 @@ The remaining platforms are **business functions** built on top:
   course completions and completion evidence.
 - **Provides:** learning delivery and completion records that feed Signara's signed
   course certificate workflows.
-- **Consumes:** Authentik · Infisical · Cerulean · ONYX · Magnate · Signara.
+- **Consumes:** Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge.
 - **Does not own:** identity, secrets, certificates/DNS, storage, billing, or signing.
   AuthenIQ emits completion evidence only — Signara remains the sole signer.
 
