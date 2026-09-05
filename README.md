@@ -175,6 +175,19 @@ The remaining platforms are **business functions** built on top:
   Authentik/application platforms indirectly through proxied services.
 - **Does not own:** authoritative DNS, identity, billing, application data, or long-term storage.
 
+**DNS & TLS convention (one wildcard per platform zone).** Every platform owns its own
+second-level zone under the apex, and TLS is **one wildcard cert per zone** —
+`*.magnate.innotel.us`, `*.monarch.innotel.us`, `*.zeus.innotel.us`, `*.signara.innotel.us`,
+`*.capstone.innotel.us`, and so on — never `*.innotel.us`, which matches only a single label
+and cannot cover `app.<platform>.innotel.us`-style hosts. Wildcards are issued with a
+**DNS-01 challenge** against the shared BIND (RFC 2136 / nsupdate, `cerulean` TSIG key),
+so no `_acme-challenge` records need manual management, and every proxy host under the zone
+attaches the same wildcard (exact-match per-host certs are only used for deeper multi-label
+names a one-label wildcard cannot reach, e.g. `backend.api.capstone.innotel.us`). DNS for each proxy-host name
+is a **CNAME to the apex** (`<host>.<zone>.innotel.us → innotel.us.`) in the same BIND zone.
+Bring-up scripts (`scripts/npm-proxy-hosts.py` per repo, or Cerulean's provisioning) follow
+this pattern so re-running them never re-issues or detaches certs.
+
 ### Business platforms
 
 #### Monarch — MediaOps
@@ -259,6 +272,37 @@ Deployment order:
    Rizz Aura can ride anywhere after Authentik + Magnate, and AuthenIQ after
    Authentik + Infisical + Magnate — it also consumes Signara for signed course
    certificates).
+
+### One stack vs split deployment
+
+Every platform ships a self-contained Compose file plus a stdlib-only
+`scripts/npm-proxy-hosts.py` provisioner, so the same code runs **either as one
+all-encompassing stack on a single host or as individual platforms on separate hosts**
+behind the shared edge — no code changes either way, only DNS/forward addresses:
+
+| Topology | Layout | How it's wired |
+| --- | --- | --- |
+| **Unified (all-in-one)** | Every platform's Compose stack on one box; NPM Edge
+  (or the bundled NPM) and BIND can run on the same host | Platform `setup.sh` runs
+  locally; proxy hosts forward to `127.0.0.1`/compose service names; wildcard DNS-01 +
+  CNAMEs target the local BIND. This is the model for a self-contained appliance
+  (e.g. offline/USB deploys) |
+| **Split (per-platform hosts)** | Each platform on its own machine (or VPS), all
+  pointing at one shared NPM Edge + BIND | Platform `.env` sets `NPM_MODE=remote`,
+  `NPM_BASE_URL=https://proxy.innotel.us`, `NPM_FORWARD_HOST=<its own IP>` and the
+  `DNS_TSIG_*`/`BIND_*` credentials; the provisioner writes that host's subdomain
+  CNAME/A records via nsupdate and forwards from the shared edge. Required when a
+  platform must be reachable from another network or runs on dedicated hardware |
+
+Rules that hold in both:
+
+- **Wildcards are per platform zone** (`*.magnate.innotel.us`, …), never `*.innotel.us` —
+  see the NPM Edge convention above.
+- DNS records and TLS are provisioned by the platform's own idempotent script, so a host
+  can move between topologies by re-running `setup.sh`/`npm-proxy-hosts.py` after changing
+  `.env` — nothing is hand-edited in NPM or BIND.
+- Certificates (Cerulean), secrets (Infisical) and identity (Authentik) stay centralized
+  in both models; only the app + its data move.
 
 ## Service ownership matrix
 
