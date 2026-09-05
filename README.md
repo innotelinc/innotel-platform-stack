@@ -37,12 +37,12 @@ The remaining platforms are **business functions** built on top:
 
 | Platform | Classification | Consumes |
 |---|---|---|
-| Monarch | MediaOps | Authentik · Infisical · ONYX · Magnate · Cerulean |
-| Zeus | VoiceOps | Authentik · Infisical · Magnate · Cerulean |
-| Oasis | MailOps | Authentik · Infisical · Cerulean · Magnate |
-| Signara | DocumentOps | Authentik · Cerulean · Infisical · ONYX · Magnate |
-| Capstone | AgentOps | Zeus · Authentik · Infisical · Magnate |
-| Rizz Aura | CommunityOps | Authentik · Magnate |
+| Monarch | MediaOps | Authentik · Infisical · ONYX · Magnate · Cerulean · NPM Edge |
+| Zeus | VoiceOps | Authentik · Infisical · Magnate · Cerulean · NPM Edge |
+| Oasis | MailOps | Authentik · Infisical · Cerulean · Magnate · NPM Edge |
+| Signara | DocumentOps | Authentik · Cerulean · Infisical · ONYX · Magnate · NPM Edge |
+| Capstone | AgentOps | Zeus · Authentik · Infisical · Magnate · NPM Edge |
+| Rizz Aura | CommunityOps | Authentik · Magnate · NPM Edge |
 | zapit | TransferOps | Authentik (optional) |
 | AuthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara |
 
@@ -105,6 +105,11 @@ The remaining platforms are **business functions** built on top:
      └───────────────┬───────┴───────────────┬───────┘
                      │                       │
                      ▼                       ▼
+       ┌──────────────────────────────────────────┐
+       │        NPM EDGE — EdgeOps (edge)         │
+       └──────────────────────────────────────────┘
+                             │
+                             ▼
        ┌──────────────────────────────────────────┐
        │            BUSINESS PLATFORMS            │
        └──────────────────────────────────────────┘
@@ -175,22 +180,22 @@ The remaining platforms are **business functions** built on top:
 #### Monarch — MediaOps
 - **Owns:** streaming, media libraries, user profiles, watch history, recommendations,
   collections, live TV, playback, media discovery.
-- **Consumes:** Authentik · Infisical · ONYX · Magnate · Cerulean.
+- **Consumes:** Authentik · Infisical · ONYX · Magnate · Cerulean · NPM Edge.
 - **Does not own:** storage, billing, identity.
 
 #### Zeus — VoiceOps
 - **Owns:** VoIP, SIP, SMS, PBX, phone numbers, call routing, mobile PWA, communications.
-- **Consumes:** Authentik · Infisical · Magnate · Cerulean.
+- **Consumes:** Authentik · Infisical · Magnate · Cerulean · NPM Edge.
 
 #### Oasis — MailOps
 - **Owns:** email, calendars, contacts, collaboration, mail security, mail routing, team
   communications.
-- **Consumes:** Authentik · Infisical · Cerulean · Magnate.
+- **Consumes:** Authentik · Infisical · Cerulean · Magnate · NPM Edge.
 
 #### Signara — DocumentOps
 - **Owns:** document signing, agreements, templates, audit trails, signature workflows,
   compliance evidence, identity verification.
-- **Consumes:** Authentik · Cerulean · Infisical · ONYX · Magnate.
+- **Consumes:** Authentik · Cerulean · Infisical · ONYX · Magnate · NPM Edge.
 
 #### AuthenIQ — LearningOps
 - **Owns:** course catalog and enrollment, courseware delivery, assessments, learner
@@ -205,12 +210,12 @@ The remaining platforms are **business functions** built on top:
 #### Capstone — AgentOps
 - **Owns:** voice AI agents, call screening, AI receptionists, speech processing, voice
   workflows, telephony automation.
-- **Consumes:** Zeus · Authentik · Infisical · Magnate.
+- **Consumes:** Zeus · Authentik · Infisical · Magnate · NPM Edge.
 
 #### Rizz Aura — CommunityOps
 - **Owns:** leaderboards, reputation, rankings, achievements, communities, competition
   engine.
-- **Consumes:** Authentik · Magnate.
+- **Consumes:** Authentik · Magnate · NPM Edge.
 
 #### zapit — TransferOps (edge utility)
 - **Owns:** ephemeral peer-to-peer transfer (WebRTC data channels), room codes, relay
@@ -285,6 +290,9 @@ Deployment order:
 - **Revenue flow:** Magnate Checkout → webhook → Authentik group membership
   (`paid_users`) → access granted in the consuming platform; cancellation deactivates the
   user and access dies.
+- **Edge flow:** NPM Edge fronts every public host — proxy hosts are provisioned
+  idempotently through the NPM API by setup scripts and Cerulean, and the certificates
+  NPM attaches come from Cerulean's trust lifecycle.
 
 ## Security boundaries
 
