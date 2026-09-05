@@ -6,7 +6,7 @@
   <title>Innotel Platform Stack — V1 Enterprise Architecture</title>
   <meta name="description" content="The canonical Innotel Platform Stack: single-responsibility architecture where Authentik owns identity, Infisical owns secrets, Cerulean owns trust, ONYX owns storage and Magnate owns revenue.">
   <meta property="og:title" content="Innotel Platform Stack — V1 Enterprise Architecture">
-  <meta property="og:description" content="The Innotel V1 Enterprise Architecture Bundle — 12 platforms, 5 golden layers, zero duplicated responsibility.">
+  <meta property="og:description" content="The Innotel V1 Enterprise Architecture Bundle — 13 platforms, 5 golden layers, zero duplicated responsibility.">
   <meta property="og:type" content="website">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0d10'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle'%3E🏛️%3C/text%3E%3C/svg%3E">
   <style>
@@ -352,7 +352,7 @@
     <div class="hero">
       <div class="wrap hero-inner">
         <p class="kicker"><span class="pulse" aria-hidden="true"></span> V1 · Enterprise Architecture Bundle</p>
-        <h1>Eleven platforms.<br>Five golden layers.<span class="accent">.</span></h1>
+        <h1>Thirteen platforms.<br>Five golden layers.<span class="accent">.</span></h1>
         <p class="lede">The canonical Innotel Platform Stack: strict single-responsibility architecture where Authentik owns identity, Infisical owns secrets, Cerulean owns trust, ONYX owns storage and Magnate owns revenue — and every other platform is a business function that consumes them. No platform duplicates another's responsibility.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="https://github.com/innotelinc/innotel-platform-stack">Get started</a>
@@ -363,7 +363,7 @@
           <button class="copy" id="copy-btn" type="button" aria-label="Copy quick start command">copy</button>
         </div>
         <div class="stats">
-          <div class="stat"><b>12 platforms</b><span>identity → business functions</span></div><div class="stat"><b>5 golden layers</b><span>Identity · Secrets · Trust · Storage · Revenue</span></div><div class="stat"><b>1 rule</b><span>no duplicated responsibility</span></div><div class="stat"><b>10 repos</b><span>each aligned with owns/consumes docs</span></div>
+          <div class="stat"><b>13 platforms</b><span>identity → business functions</span></div><div class="stat"><b>5 golden layers</b><span>Identity · Secrets · Trust · Storage · Revenue</span></div><div class="stat"><b>1 rule</b><span>no duplicated responsibility</span></div><div class="stat"><b>11 repos</b><span>each aligned with owns/consumes docs</span></div>
         </div>
       </div>
     </div>
@@ -387,7 +387,7 @@
         <div class="split">
           <div>
             <div class="grid" style="gap:14px">
-              <div class="card"><span class="icon" aria-hidden="true">🔑</span><h3>Foundation layers</h3><p>Authentik (IdentityOps), Infisical (SecretOps), Cerulean (TrustOps), ONYX (StorageOps), Magnate (RevenueOps).</p></div><div class="card"><span class="icon" aria-hidden="true">🏢</span><h3>Business platforms</h3><p>Monarch (MediaOps), Zeus (VoiceOps), Oasis (MailOps), Signara (DocumentOps), Rizz Aura (CommunityOps).</p></div><div class="card"><span class="icon" aria-hidden="true">🤖</span><h3>Agent layer</h3><p>Capstone (AgentOps) — voice AI agents over Zeus telephony.</p></div><div class="card"><span class="icon" aria-hidden="true">📐</span><h3>The bundle</h3><p>Matrix, diagrams, integration flows, deployment order, security boundaries.</p></div>
+              <div class="card"><span class="icon" aria-hidden="true">🔑</span><h3>Foundation layers</h3><p>Authentik (IdentityOps), Infisical (SecretOps), Cerulean (TrustOps), ONYX (StorageOps), Magnate (RevenueOps).</p></div><div class="card"><span class="icon" aria-hidden="true">🏢</span><h3>Business platforms</h3><p>Monarch (MediaOps), Zeus (VoiceOps), Oasis (MailOps), Signara (DocumentOps), Rizz Aura (CommunityOps), AuthenIQ (LearningOps).</p></div><div class="card"><span class="icon" aria-hidden="true">🤖</span><h3>Agent layer</h3><p>Capstone (AgentOps) — voice AI agents over Zeus telephony.</p></div><div class="card"><span class="icon" aria-hidden="true">📐</span><h3>The bundle</h3><p>Matrix, diagrams, integration flows, deployment order, security boundaries.</p></div>
             </div>
           </div>
           <pre class="terminal"><span class="cmt"># the five golden rules</span>
@@ -405,11 +405,11 @@ $ <span class="p">cat</span> README.md
     <!-- Platform surfaces -->
     <section id="platform">
       <div class="wrap">
-        <h2>The twelve platforms<span class="accent">.</span></h2>
+        <h2>The thirteen platforms<span class="accent">.</span></h2>
         <p class="section-sub">Each platform ships its own repo and docs/stack.md, all aligned to this bundle.</p>
         <div class="surfaces">
           <a class="surface" href="https://github.com/innotelinc/authentik"><b>Authentik</b><small>github.com/innotelinc/authentik · IdentityOps</small></a><a class="surface" href="https://github.com/innotelinc/infisical"><b>Infisical</b><small>github.com/innotelinc/infisical · SecretOps</small></a><a class="surface" href="https://github.com/innotelinc/cerulean"><b>Cerulean</b><small>github.com/innotelinc/cerulean · TrustOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/onyx"><b>ONYX</b><small>github.com/innotelinc/onyx · StorageOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/magnate"><b>Magnate</b><small>github.com/innotelinc/magnate · RevenueOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/monarch"><b>Monarch</b><small>github.com/innotelinc/monarch · MediaOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/zeus"><b>Zeus</b><small>github.com/innotelinc/zeus · VoiceOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/oasis"><b>Oasis</b><small>github.com/innotelinc/oasis · MailOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/signara"><b>Signara</b><small>github.com/innotelinc/signara · DocumentOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/rizzaura"><b>Rizz Aura</b><small>github.com/innotelinc/rizzaura · CommunityOps</small><span class="live">live</span></a>            <a class="surface" href="https://github.com/innotelinc/capstone"><b>Capstone</b><small>github.com/innotelinc/capstone · AgentOps</small><span class="live">live</span></a>
-            <a class="surface" href="https://github.com/innotelinc/zapit"><b>zapit</b><small>github.com/innotelinc/zapit · TransferOps</small><span class="live">live</span></a>
+            <a class="surface" href="https://github.com/innotelinc/zapit"><b>zapit</b><small>github.com/innotelinc/zapit · TransferOps</small><span class="live">live</span></a><a class="surface" href="https://github.com/innotelinc/authentiq"><b>AuthenIQ</b><small>github.com/innotelinc/authentiq · LearningOps</small><span class="live">live</span></a>
         </div>
       </div>
     </section>

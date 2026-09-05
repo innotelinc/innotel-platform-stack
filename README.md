@@ -43,6 +43,7 @@ The remaining platforms are **business functions** built on top:
 | Capstone | AgentOps | Zeus · Authentik · Infisical · Magnate |
 | Rizz Aura | CommunityOps | Authentik · Magnate |
 | zapit | TransferOps | Authentik (optional) |
+| AuthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara |
 
 ## Documents
 
@@ -123,6 +124,9 @@ The remaining platforms are **business functions** built on top:
               Rizz Aura (CommunityOps) rides on Authentik + Magnate
               zapit (TransferOps) rides on Authentik (optional) — files
               never touch storage: transfer is ephemeral, ONYX stays StorageOps
+              AuthenIQ (LearningOps) rides on Authentik · Infisical · Cerulean ·
+              ONYX · Magnate and sends completion evidence to Signara for
+              signed course certificates
 ```
 
 ## Platform responsibilities
@@ -185,6 +189,16 @@ The remaining platforms are **business functions** built on top:
   compliance evidence, identity verification.
 - **Consumes:** Authentik · Cerulean · Infisical · ONYX · Magnate.
 
+#### AuthenIQ — LearningOps
+- **Owns:** course catalog and enrollment, courseware delivery, assessments, learner
+  records, AI interactive classrooms (multi-agent lessons, quizzes, simulations),
+  course completions and completion evidence.
+- **Provides:** learning delivery and completion records that feed Signara's signed
+  course certificate workflows.
+- **Consumes:** Authentik · Infisical · Cerulean · ONYX · Magnate · Signara.
+- **Does not own:** identity, secrets, certificates/DNS, storage, billing, or signing.
+  AuthenIQ emits completion evidence only — Signara remains the sole signer.
+
 #### Capstone — AgentOps
 - **Owns:** voice AI agents, call screening, AI receptionists, speech processing, voice
   workflows, telephony automation.
@@ -220,6 +234,7 @@ Identity (Authentik) ────────► Secrets (Infisical)
                    ▼
               Capstone
         (Rizz Aura ──► Authentik, Magnate)
+        (AuthenIQ ──► Authentik · Infisical · Cerulean · ONYX · Magnate · Signara)
 ```
 
 Deployment order:
@@ -230,7 +245,9 @@ Deployment order:
 3. **Cerulean · ONYX · Magnate** (trust, storage, and revenue in parallel — nothing above
    them works without at least one).
 4. **Business platforms** (Monarch, Zeus, Oasis, Signara — then Capstone on top of Zeus;
-   Rizz Aura can ride anywhere after Authentik + Magnate).
+   Rizz Aura can ride anywhere after Authentik + Magnate, and AuthenIQ after
+   Authentik + Infisical + Magnate — it also consumes Signara for signed course
+   certificates).
 
 ## Service ownership matrix
 
@@ -248,6 +265,7 @@ Deployment order:
 | Voice AI agents / telephony automation | AgentOps | Capstone |
 | Leaderboards / reputation / community | CommunityOps | Rizz Aura |
 | Ephemeral P2P transfer / relay | TransferOps | zapit |
+| Learning / courses / AI classrooms | LearningOps | AuthenIQ |
 
 ## Integration flows
 
@@ -295,6 +313,7 @@ Deployment order:
 | Capstone (AgentOps) | [innotelinc/capstone](https://github.com/innotelinc/capstone) | [docs/stack.md](https://github.com/innotelinc/capstone/blob/main/docs/stack.md) |
 | Rizz Aura (CommunityOps) | [innotelinc/rizzaura-platform](https://github.com/innotelinc/rizzaura-platform) | [docs/stack.md](https://github.com/innotelinc/rizzaura-platform/blob/main/docs/stack.md) |
 | zapit (TransferOps) | [innotelinc/zapit](https://github.com/innotelinc/zapit) | [docs/stack.md](https://github.com/innotelinc/zapit/blob/main/docs/stack.md) |
+| AuthenIQ (LearningOps) | [innotelinc/authentiq](https://github.com/innotelinc/authentiq) | [docs/stack.md](https://github.com/innotelinc/authentiq/blob/main/docs/stack.md) |
 
 ---
 
