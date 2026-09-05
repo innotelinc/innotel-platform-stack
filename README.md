@@ -341,6 +341,26 @@ Rules that hold in both:
   platform trusts the same identity. Disable the user in Authentik and every consuming
   platform loses them instantly. Any login goes through Cerulean — no platform runs its
   own login page or password store.
+- **Registered OIDC providers (Cerulean Authentik).** One OAuth2/OIDC provider + application
+  per consuming service, all carrying the default `openid profile email` (+ `groups`) scope
+  mappings so userinfo/token claims are populated:
+
+  | Client ID | Application | Redirect |
+  |---|---|---|
+  | `cerulean` | Cerulean portal | `cerulean.innotel.us/api/auth/oidc/callback` |
+  | `capstone-dashboard` | Capstone Dashboard | `dashboard.capstone.innotel.us/api/auth/callback` |
+  | `magnate-admin` | Magnate Admin | `admin.magnate.innotel.us/api/auth/authentik/callback` |
+  | `monarch-web` | Monarch (Homarr) | `monarch.innotel.us/api/auth/callback/oidc` |
+  | `signara-web` | Signara | `app.signara.innotel.us/api/auth/callback` |
+  | `oasis-app` (public) / `oasis-admin` / `oasis-files` / `oasis-mail` / `oasis-api` | Oasis | per `docs/SSO.md` |
+  | `onyx-platform` | ONYX Platform | regex `app./admin.onyx.innotel.us/*` |
+  | `rizz-aura-web` | Rizz Aura | `api.rizz.innotel.us/api/auth/callback` |
+  | `zapit` (public PKCE) | ZapIt | `zapp.innotel.us/api/auth/callback` |
+  | `pm3` `pm4` `incus` `mail` `monit` | migrated legacy apps | per legacy config |
+
+  Monarch additionally consumes Cerulean via the **`jellyfin-ldap` LDAP outpost** (Jellyfin
+  logins resolve against Cerulean users — `paid_users` gates access, `jellyfin_admins` get
+  admin), so disabling a user in Cerulean blocks their media login too.
 - **Secret flow:** credentials live in Cerulean's Infisical (`secrets.cerulean.innotel.us`)
   and are pulled into each platform's `.env` at setup; service credentials, API keys, and
   TLS private keys are written to Infisical, never committed.
