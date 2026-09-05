@@ -235,6 +235,9 @@ Identity (Authentik) ────────► Secrets (Infisical)
                    ▼
             Revenue (Magnate)
                    │
+                   ▼
+            Edge (NPM Edge)
+                   │
         ┌──────────┼──────────┬──────────────┐
         ▼          ▼          ▼              ▼
      Monarch     Zeus      Oasis         Signara
