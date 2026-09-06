@@ -17,7 +17,7 @@ SERVICE_PORT="${3:?Missing port}"
 shift 3
 TAGS="${*:-$SERVICE_NAME}"
 
-CONSUL="${REGISTRY_ADDR:-10.10.1.1:8500}"
+CONSUL="${REGISTRY_ADDR:-localhost:8500}"
 
 # Register via HTTP API
 curl -s --max-time 5 -X PUT "http://${CONSUL}/v1/agent/service/register" \

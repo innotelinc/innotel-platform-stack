@@ -88,6 +88,10 @@ export_group_env() {
     export CONSUL_SERVER_FLAG="-server=false"
     export CONSUL_SERVER_ADDR="$(get_mesh_ip 1)"
   fi
+
+  # Registry address for service registration/discovery (mesh IP of Consul)
+  export REGISTRY_ADDR="$(get_mesh_ip 1):8500"
+  export CONSUL="$REGISTRY_ADDR"
 }
 
 ensure_env() {
@@ -108,15 +112,18 @@ compose() {
 
 cmd_mesh() {
   info "Starting WireGuard mesh network..."
-  compose "${STACK_DIR}/mesh" up -d
+  docker compose -f "${STACK_DIR}/mesh/docker-compose.mesh.yml" up -d
   ok "Mesh network running. Consul UI: http://localhost:8500"
 }
 
 cmd_up() {
-  local target="${1:-all}"
   ensure_env
 
-  if [ "$target" = "all" ]; then
+  # Multiple groups: ./stack.sh up 2 3 4  (runs them together on one host)
+  local all_targets="$*"
+  if [ -z "$all_targets" ]; then all_targets="all"; fi
+
+  if [ "$all_targets" = "all" ]; then
     # Start mesh first
     cmd_mesh
     # Start all groups
@@ -125,6 +132,27 @@ cmd_up() {
     done
     return
   fi
+
+  # Multiple explicit groups: start mesh once, then each group
+  local num_count=0
+  for t in $all_targets; do
+    case "$t" in
+      [1-5]) num_count=$((num_count+1)) ;;
+    esac
+  done
+  if [ "$num_count" -gt 1 ]; then
+    if ! docker network ls 2>/dev/null | grep -q innotel-mesh-net; then
+      cmd_mesh
+    fi
+    for t in $all_targets; do
+      case "$t" in
+        [1-5]) cmd_up "$t" ;;
+      esac
+    done
+    return
+  fi
+
+  local target="${1:-all}"
 
   if [ "$target" = "mesh" ]; then
     cmd_mesh
@@ -173,18 +201,38 @@ cmd_up() {
 }
 
 cmd_down() {
-  local target="${1:-all}"
   ensure_env
 
-  if [ "$target" = "all" ]; then
+  # Multiple groups: ./stack.sh down 2 3 4
+  local all_targets="$*"
+  if [ -z "$all_targets" ]; then all_targets="all"; fi
+
+  if [ "$all_targets" = "all" ]; then
     for num in 1 2 3 4 5; do
       cmd_down "$num"
     done
     info "Stopping mesh..."
-    compose "${STACK_DIR}/mesh" down
+    docker compose -f "${STACK_DIR}/mesh/docker-compose.mesh.yml" down
     ok "All groups stopped"
     return
   fi
+
+  local num_count=0
+  for t in $all_targets; do
+    case "$t" in
+      [1-5]) num_count=$((num_count+1)) ;;
+    esac
+  done
+  if [ "$num_count" -gt 1 ]; then
+    for t in $all_targets; do
+      case "$t" in
+        [1-5]) cmd_down "$t" ;;
+      esac
+    done
+    return
+  fi
+
+  local target="${1:-all}"
 
   local dir
   dir=$(get_group_dir "$target")
@@ -386,7 +434,7 @@ cmd="${1:-help}"
 shift 2>/dev/null || true
 
 case "$cmd" in
-  up)       cmd_up "$@" ;;
+  up|combined) cmd_up "$@" ;;
   down)     cmd_down "$@" ;;
   status)   cmd_status "$@" ;;
   logs)     cmd_logs "$@" ;;
@@ -401,6 +449,9 @@ case "$cmd" in
     echo "Usage: ./stack.sh <command> [args]\n"
     echo "Commands:"
     echo "  up      [group|all]   Start group(s) and extensions"
+    echo "          e.g. ./stack.sh up 2           (group 2 alone)"
+    echo "               ./stack.sh up 3 4         (groups 3+4 on one server)"
+    echo "               ./stack.sh up all         (everything, single server)"
     echo "  down    [group|all]   Stop group(s)"
     echo "  status  [group|all]   Show running services"
     echo "  logs    [group]       Tail group logs"

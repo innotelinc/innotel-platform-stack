@@ -120,9 +120,34 @@ gets its own Docker network to avoid collisions.
 
 1. Clone the repo on each server
 2. Fill in `.env` with that server's IP and keys
-3. On Server 1: `./stack.sh up 1` (starts Consul + mesh)
+3. On Server 1: `./stack.sh up 1` (starts Consul server + mesh)
 4. On Servers 2-5: `./stack.sh up <group>` (joins mesh, registers with Consul)
 5. Any server: `./stack.sh discover <service>` (finds it anywhere)
+
+## Flexible Grouping (any combination, any host)
+
+Groups are independent Docker projects that all join the **same shared mesh
+network** — so you can run any combination on any server:
+
+```bash
+# Group 2 completely alone on one server
+./stack.sh up 2
+
+# Groups 3 + 4 together on a single server (verified working)
+./stack.sh up 3 4
+
+# Everything on one box
+./stack.sh up all
+
+# Spread differently: voice+social on one box, media alone
+./stack.sh up 2 4     # on server A
+./stack.sh up 3       # on server B
+```
+
+Each group keeps its own Docker network (`g1-net` … `g5-net`) to avoid
+collisions, and every group joins the shared `innotel-mesh-net` where the
+mesh's Consul agent lives. Services on the same host reach Consul directly as
+`mesh-consul:8500`; services on other hosts reach it over the WireGuard mesh.
 
 ## Port Map
 

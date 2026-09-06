@@ -181,6 +181,12 @@ cp .env.example .env   # fill in server IPs, WG keys, etc.
 
 # Single-server mode (everything on one box)
 ./stack.sh up all
+
+# Any combination on any server — groups are independent projects
+# that join the same shared mesh:
+./stack.sh up 2        # group 2 alone
+./stack.sh up 3 4      # groups 3+4 together on one server
+./stack.sh up 2 4      # voice + social on one box, media elsewhere
 ```
 
 ### Universal Extension System

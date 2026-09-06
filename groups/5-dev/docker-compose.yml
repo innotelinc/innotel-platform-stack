@@ -1,15 +1,12 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Group 5 — DEV
 # Atlas (Gitea + Chef + Convex) + Oasis (Zimbra mail server)
-# + WireGuard mesh node
+# + joins the shared WireGuard mesh
 # ══════════════════════════════════════════════════════════════════════════════
 # RAM: ~4 GiB | Ports: 3000, 8443, 25, 587, 993, 51820
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: innotel-group5
-
-include:
-  - ../../mesh/docker-compose.mesh.yml
 
 services:
   # ═══ ATLAS (Development Platform) ══════════════════════════════════════════
@@ -31,7 +28,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   gitea-db:
     image: postgres:16-alpine
@@ -65,7 +62,7 @@ services:
       - gitea
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ── Convex (self-hosted backend) ──────────────────────────────────────────
   convex:
@@ -78,7 +75,7 @@ services:
       - convex-data:/convex/data
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ═══ OASIS (Mail Server) ═════════════════════════════════════════════════
 
@@ -134,7 +131,7 @@ services:
       - oasis-redis
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ── Consul registration ────────────────────────────────────────────────────
   consul-reg-g5:
@@ -152,7 +149,7 @@ services:
           ADDR=$(echo "$$svc" | cut -d'|' -f2)
           PORT=$(echo "$$svc" | cut -d'|' -f3)
           TAGS=$(echo "$$svc" | cut -d'|' -f4)
-          curl -s -X PUT http://consul:8500/v1/agent/service/register \
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
             -H 'Content-Type: application/json' \
             -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
             >/dev/null
@@ -160,7 +157,7 @@ services:
         done
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
 volumes:
   gitea-data:
@@ -173,3 +170,5 @@ volumes:
 networks:
   default:
     name: g5-net
+  innotel-mesh-net:
+    external: true

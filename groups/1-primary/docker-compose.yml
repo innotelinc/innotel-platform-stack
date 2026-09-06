@@ -1,15 +1,12 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Group 1 — PRIMARY
 # Cerulean (Authentik + DNS/certs) + AthenIQ (Open edX LMS) + Magnate (billing)
-# + Consul service registry server + WireGuard mesh node
+# + Consul service registry server + joins the shared WireGuard mesh
 # ══════════════════════════════════════════════════════════════════════════════
 # RAM: ~8 GiB | Ports: 3003, 9000, 9443, 18080, 3010, 8500, 51820
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: innotel-group1
-
-include:
-  - ../../mesh/docker-compose.mesh.yml
 
 services:
   # ═══ CERULEAN ═════════════════════════════════════════════════════════════
@@ -34,7 +31,7 @@ services:
       retries: 3
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   authentik-server:
     image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2024.12.2}
@@ -61,7 +58,7 @@ services:
         condition: service_healthy
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   authentik-worker:
     image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2024.12.2}
@@ -85,7 +82,7 @@ services:
         condition: service_healthy
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   authentik-postgres:
     image: postgres:16-alpine
@@ -135,7 +132,7 @@ services:
       - infisical-redis
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   infisical-db:
     image: postgres:16-alpine
@@ -172,7 +169,7 @@ services:
     command: server -dev -dev-root-token-id=root
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ═══ ATHENIQ (Open edX LMS) ══════════════════════════════════════════════
   # Tutor manages its own containers; we reference the tutor compose here.
@@ -197,7 +194,7 @@ services:
       retries: 5
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   tutor-mongodb:
     image: docker.io/mongo:7.0.39
@@ -235,7 +232,7 @@ services:
       - tutor-redis
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   tutor-cms:
     image: docker.io/overhangio/openedx:22.0.2
@@ -253,7 +250,7 @@ services:
       - tutor-redis
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   tutor-caddy:
     image: docker.io/overhangio/tutor:22.0.2
@@ -266,7 +263,7 @@ services:
       - tutor-cms
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   tutor-meilisearch:
     image: docker.io/getmeili/meilisearch:v1.36.0
@@ -297,7 +294,7 @@ services:
       - magnate-db
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   magnate-db:
     image: postgres:16-alpine
@@ -336,7 +333,7 @@ services:
           ADDR=$(echo "$$svc" | cut -d'|' -f2)
           PORT=$(echo "$$svc" | cut -d'|' -f3)
           TAGS=$(echo "$$svc" | cut -d'|' -f4)
-          curl -s -X PUT http://consul:8500/v1/agent/service/register \
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
             -H 'Content-Type: application/json' \
             -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
             >/dev/null
@@ -344,9 +341,7 @@ services:
         done
     networks:
       - default
-      - mesh-net
-    depends_on:
-      - consul
+      - innotel-mesh-net
 
 volumes:
   cerulean-data:
@@ -367,3 +362,5 @@ volumes:
 networks:
   default:
     name: g1-net
+  innotel-mesh-net:
+    external: true

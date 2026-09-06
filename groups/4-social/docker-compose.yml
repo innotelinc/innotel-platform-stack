@@ -1,15 +1,12 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Group 4 — SOCIAL
 # Rizzaura (global leaderboard) + ONYX (NAS/infrastructure)
-# + WireGuard mesh node
+# + joins the shared WireGuard mesh
 # ══════════════════════════════════════════════════════════════════════════════
 # RAM: ~6 GiB | Ports: 3010-3013, 8000, 8080, 9001, 51820
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: innotel-group4
-
-include:
-  - ../../mesh/docker-compose.mesh.yml
 
 services:
   # ═══ RIZZAURA (Leaderboard) ═══════════════════════════════════════════════
@@ -35,7 +32,7 @@ services:
       - rizz-data:/app/data
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   rizz-app:
     build:
@@ -51,7 +48,7 @@ services:
       - rizz-api
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   rizz-rankings:
     build:
@@ -98,7 +95,7 @@ services:
       - rizz-api
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ═══ ONYX (NAS / Storage) ═════════════════════════════════════════════════
 
@@ -179,7 +176,7 @@ services:
       - onyx-core
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   onyx-snapd:
     build:
@@ -250,7 +247,7 @@ services:
     restart: unless-stopped
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   onyx-objectstore:
     build:
@@ -296,7 +293,7 @@ services:
           ADDR=$(echo "$$svc" | cut -d'|' -f2)
           PORT=$(echo "$$svc" | cut -d'|' -f3)
           TAGS=$(echo "$$svc" | cut -d'|' -f4)
-          curl -s -X PUT http://consul:8500/v1/agent/service/register \
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
             -H 'Content-Type: application/json' \
             -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
             >/dev/null
@@ -304,7 +301,7 @@ services:
         done
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
 volumes:
   rizz-data:
@@ -322,3 +319,5 @@ volumes:
 networks:
   default:
     name: g4-net
+  innotel-mesh-net:
+    external: true

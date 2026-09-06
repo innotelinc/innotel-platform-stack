@@ -1,15 +1,12 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Group 3 — MEDIA
 # Monarch — Jellyfin streaming, *arr automation, NPM edge (80/443)
-# + WireGuard mesh node
+# + joins the shared WireGuard mesh
 # ══════════════════════════════════════════════════════════════════════════════
 # RAM: ~8 GiB | Ports: 80, 443, 81, 8096, 9696, 8989, 7878, 51820
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: innotel-group3
-
-include:
-  - ../../mesh/docker-compose.mesh.yml
 
 x-common: &common
   restart: unless-stopped
@@ -34,7 +31,7 @@ services:
       - npm-letsencrypt:/etc/letsencrypt
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ═══ Jellyfin (streaming core) ═════════════════════════════════════════════
   jellyfin:
@@ -52,7 +49,7 @@ services:
       - TZ=UTC
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ═══ Jellyseerr (requests) ════════════════════════════════════════════════
   jellyseerr:
@@ -67,7 +64,7 @@ services:
       - jellyseerr-config:/config
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ═══ *arr Automation ═══════════════════════════════════════════════════════
   sonarr:
@@ -84,7 +81,7 @@ services:
       - PGID=1000
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   radarr:
     <<: *common
@@ -100,7 +97,7 @@ services:
       - PGID=1000
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   lidarr:
     <<: *common
@@ -229,7 +226,7 @@ services:
       - jellyfin
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   monarch-health:
     <<: *common
@@ -261,7 +258,7 @@ services:
           ADDR=$(echo "$$svc" | cut -d'|' -f2)
           PORT=$(echo "$$svc" | cut -d'|' -f3)
           TAGS=$(echo "$$svc" | cut -d'|' -f4)
-          curl -s -X PUT http://consul:8500/v1/agent/service/register \
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
             -H 'Content-Type: application/json' \
             -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
             >/dev/null
@@ -269,7 +266,7 @@ services:
         done
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
 volumes:
   npm-data:
@@ -289,3 +286,5 @@ volumes:
 networks:
   default:
     name: g3-net
+  innotel-mesh-net:
+    external: true

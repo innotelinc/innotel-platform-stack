@@ -15,7 +15,7 @@
 set -euo pipefail
 
 SERVICE="${1:?Usage: discover-service.sh <service-name>}"
-CONSUL="${REGISTRY_ADDR:-10.10.1.1:8500}"
+CONSUL="${REGISTRY_ADDR:-localhost:8500}"
 
 RESULT=$(curl -s --max-time 5 "http://${CONSUL}/v1/health/service/${SERVICE}?passing=true" | \
   python3 -c "

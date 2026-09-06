@@ -1,15 +1,12 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Group 2 — VOICE
 # Capstone (AI voice agents over Asterisk/FreePBX) + Zeus (VoIP PBX + fax)
-# + OmniRoute (single LLM gateway) + WireGuard mesh node
+# + OmniRoute (single LLM gateway) + joins the shared WireGuard mesh
 # ══════════════════════════════════════════════════════════════════════════════
 # RAM: ~6 GiB | Ports: 8083, 3000, 3001, 3478, 20128, 51820
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: innotel-group2
-
-include:
-  - ../../mesh/docker-compose.mesh.yml
 
 services:
   # ═══ CAPSTONE (AI Voice Agents) ═══════════════════════════════════════════
@@ -31,7 +28,7 @@ services:
       retries: 10
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   capstone-redis:
     image: redis:7
@@ -65,7 +62,7 @@ services:
       - capstone-redis
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   capstone-freepbx:
     build:
@@ -81,7 +78,7 @@ services:
       - capstone-freepbx-data:/var/lib/freepbx
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ── Standalone coturn (only runs if Zeus coturn is absent) ──────────────────
   capstone-coturn:
@@ -107,7 +104,7 @@ services:
       - "--verbose"
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ═══ ZEUS (VoIP PBX) ═════════════════════════════════════════════════════
 
@@ -129,7 +126,7 @@ services:
       start_period: 30s
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   zeus-coturn:
     image: coturn/coturn:latest
@@ -153,7 +150,7 @@ services:
       - "--verbose"
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ── OmniRoute (single LLM gateway for ALL stacks) ─────────────────────────
   omniroute:
@@ -171,7 +168,7 @@ services:
       retries: 3
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
   # ── Consul registration ────────────────────────────────────────────────────
   consul-reg-g2:
@@ -190,7 +187,7 @@ services:
           ADDR=$(echo "$$svc" | cut -d'|' -f2)
           PORT=$(echo "$$svc" | cut -d'|' -f3)
           TAGS=$(echo "$$svc" | cut -d'|' -f4)
-          curl -s -X PUT http://consul:8500/v1/agent/service/register \
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
             -H 'Content-Type: application/json' \
             -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
             >/dev/null
@@ -198,7 +195,7 @@ services:
         done
     networks:
       - default
-      - mesh-net
+      - innotel-mesh-net
 
 volumes:
   capstone-postgres:
@@ -209,3 +206,5 @@ volumes:
 networks:
   default:
     name: g2-net
+  innotel-mesh-net:
+    external: true

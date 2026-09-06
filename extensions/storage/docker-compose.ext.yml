@@ -32,7 +32,7 @@ services:
     command:
       - |
         sleep 10
-        curl -s --max-time 5 -X PUT http://${REGISTRY_ADDR:-10.10.1.1:8500}/v1/agent/service/register \
+        curl -s --max-time 5 -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
           -H 'Content-Type: application/json' \
           -d '{
             "Name": "minio",
