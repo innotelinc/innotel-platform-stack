@@ -30,7 +30,7 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 # ── Group definitions ─────────────────────────────────────────────────────────
 declare -A STACK_GROUPS=(
-  [1]="primary|Cerulean + AthenIQ + Magnate|~8 GiB"
+  [1]="primary|Cerulean + AthenIQ + Magnate + Signara|~10 GiB"
   [2]="voice|Capstone + Zeus + OmniRoute|~6 GiB"
   [3]="media|Monarch (Jellyfin + *arr + NPM)|~8 GiB"
   [4]="social|Rizzaura + ONYX|~6 GiB"

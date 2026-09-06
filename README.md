@@ -155,8 +155,8 @@ Each group runs on its own server and discovers others via Consul.
 │  │  Cerulean  │  │  Capstone  │  │  Monarch   │  │  Rizzaura  │  │   Atlas    │
 │  │  AthenIQ   │  │   Zeus     │  │  Jellyfin  │  │   ONYX     │  │   Oasis    │
 │  │  Magnate   │  │ OmniRoute  │  │    *arr    │  │            │  │   Gitea    │
-│  │  Consul    │  │            │  │    NPM     │  │            │  │   Chef     │
-│  │  ~8 GiB    │  │  ~6 GiB    │  │  ~8 GiB    │  │  ~6 GiB    │  │  ~4 GiB    │
+│  │  Signara   │  │            │  │    NPM     │  │            │  │   Chef     │
+│  │  ~10 GiB   │  │  ~6 GiB    │  │  ~8 GiB    │  │  ~6 GiB    │  │  ~4 GiB    │
 │  └────────────┘  └────────────┘  └────────────┘  └────────────┘  └────────────┘
 │                                                                          │
 │  Consul Registry (10.10.1.1:8500) — every group registers here          │

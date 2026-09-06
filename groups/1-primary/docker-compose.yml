@@ -1,9 +1,10 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Group 1 — PRIMARY
 # Cerulean (Authentik + DNS/certs) + AthenIQ (Open edX LMS) + Magnate (billing)
-# + Consul service registry server + joins the shared WireGuard mesh
+# + Signara (DocumentOps — signed course certificates) + Consul service registry
+# server + joins the shared WireGuard mesh
 # ══════════════════════════════════════════════════════════════════════════════
-# RAM: ~8 GiB | Ports: 3003, 9000, 9443, 18080, 3010, 8500, 51820
+# RAM: ~10 GiB | Ports: 3003, 9000, 9443, 18080, 3010, 8000, 3000, 8500, 51820
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: innotel-group1
@@ -314,6 +315,166 @@ services:
     networks:
       - default
 
+  # ═══ SIGNARA (DocumentOps — signed course certificates) ═════════════════════
+  # Completion records from AthenIQ are pushed here by scripts/cert-bridge.py
+  # and run through Signara's signing workflow (single Authentik = Cerulean).
+
+  signara-postgres:
+    image: postgres:16-alpine
+    container_name: g1-signara-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-signara}
+      POSTGRES_PASSWORD: ${SIGNARA_PG_PASSWORD:-signarapass}
+      POSTGRES_DB: ${POSTGRES_DB:-signara}
+    volumes:
+      - signara-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-signara}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - default
+
+  signara-redis:
+    image: redis:7-alpine
+    container_name: g1-signara-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${SIGNARA_REDIS_PASSWORD:-signararedis}", "--appendonly", "yes"]
+    volumes:
+      - signara-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${SIGNARA_REDIS_PASSWORD:-signararedis}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - default
+
+  signara-minio:
+    image: minio/minio:RELEASE.2024-09-13T20-26-02Z
+    container_name: g1-signara-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-signara}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-signaraminio}
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    volumes:
+      - signara-minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - default
+
+  signara-meilisearch:
+    image: getmeili/meilisearch:v1.10
+    container_name: g1-signara-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILISEARCH_API_KEY:-change-me}
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - signara-meili:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - default
+
+  signara-migrate:
+    image: ${SIGNARA_API_IMAGE:-ghcr.io/innotelinc/signara-api:latest}
+    container_name: g1-signara-migrate
+    env_file: ../../../signara-trust-platform/.env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-signara}:${SIGNARA_PG_PASSWORD:-signarapass}@signara-postgres:5432/${POSTGRES_DB:-signara}?schema=public
+    command: ["node_modules/.bin/prisma", "migrate", "deploy", "--schema", "packages/database/prisma/schema.prisma"]
+    depends_on:
+      signara-postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - default
+
+  signara-api:
+    image: ${SIGNARA_API_IMAGE:-ghcr.io/innotelinc/signara-api:latest}
+    build:
+      context: ../../../signara-trust-platform
+      dockerfile: apps/api/Dockerfile
+    container_name: g1-signara-api
+    restart: unless-stopped
+    env_file: ../../../signara-trust-platform/.env
+    environment:
+      NODE_ENV: production
+      API_PORT: 8000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-signara}:${SIGNARA_PG_PASSWORD:-signarapass}@signara-postgres:5432/${POSTGRES_DB:-signara}?schema=public
+      REDIS_URL: redis://:${SIGNARA_REDIS_PASSWORD:-signararedis}@signara-redis:6379
+      S3_ENDPOINT: http://signara-minio:9000
+      MEILISEARCH_HOST: http://signara-meilisearch:7700
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:-https://auth.cerulean.innotel.us/application/o/signara/jwks/}
+      OIDC_TOKEN_URL: ${OIDC_TOKEN_URL:-https://auth.cerulean.innotel.us/application/o/token/}
+      OIDC_USERINFO_URL: ${OIDC_USERINFO_URL:-https://auth.cerulean.innotel.us/application/o/userinfo/}
+    ports:
+      - "${SIGNARA_API_PORT:-8000}:8000"
+    depends_on:
+      signara-migrate:
+        condition: service_completed_successfully
+      signara-postgres:
+        condition: service_healthy
+      signara-redis:
+        condition: service_healthy
+      signara-minio:
+        condition: service_healthy
+      signara-meilisearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - default
+      - innotel-mesh-net
+
+  signara-frontend:
+    image: ${SIGNARA_WEB_IMAGE:-ghcr.io/innotelinc/signara-web:latest}
+    build:
+      context: ../../../signara-trust-platform
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${API_URL:-https://api.signara.innotel.us}
+        NEXT_PUBLIC_WEB_URL: ${WEB_URL:-https://app.signara.innotel.us}
+    container_name: g1-signara-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${API_URL:-https://api.signara.innotel.us}
+      NEXT_PUBLIC_WEB_URL: ${WEB_URL:-https://app.signara.innotel.us}
+    ports:
+      - "${SIGNARA_WEB_PORT:-3000}:3000"
+    depends_on:
+      signara-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+      - innotel-mesh-net
+
   # ── Consul service registration ─────────────────────────────────────────────
   consul-reg-g1:
     image: curlimages/curl:latest
@@ -328,7 +489,8 @@ services:
           "infisical|${MESH_SERVER_IP:-10.10.1.1}|8080|secrets,vault" \
           "vault|${MESH_SERVER_IP:-10.10.1.1}|8200|secrets,vault" \
           "lms|${MESH_SERVER_IP:-10.10.1.1}|18080|education,primary" \
-          "magnate|${MESH_SERVER_IP:-10.10.1.1}|3010|billing,primary"; do
+          "magnate|${MESH_SERVER_IP:-10.10.1.1}|3010|billing,primary" \
+          "signara|${MESH_SERVER_IP:-10.10.1.1}|8000|trust,docs,signing"; do
           NAME=$(echo "$$svc" | cut -d'|' -f1)
           ADDR=$(echo "$$svc" | cut -d'|' -f2)
           PORT=$(echo "$$svc" | cut -d'|' -f3)
@@ -358,6 +520,10 @@ volumes:
   tutor-cms-data:
   tutor-meilisearch:
   magnate-db:
+  signara-postgres:
+  signara-redis:
+  signara-minio:
+  signara-meili:
 
 networks:
   default:
