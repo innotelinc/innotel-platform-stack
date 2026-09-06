@@ -44,7 +44,7 @@ The remaining platforms are **business functions** built on top:
 | Capstone | AgentOps | Zeus · Authentik · Infisical · Magnate · NPM Edge |
 | Rizz Aura | CommunityOps | Authentik · Magnate · NPM Edge |
 | zapit | TransferOps | Authentik (optional) |
-| AuthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge |
+| AthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge |
 | Atlas | CodeOps | Authentik · Infisical · Cerulean · Magnate · NPM Edge |
 
 ## Documents
@@ -131,7 +131,7 @@ The remaining platforms are **business functions** built on top:
               Rizz Aura (CommunityOps) rides on Authentik + Magnate
               zapit (TransferOps) rides on Authentik (optional) — files
               never touch storage: transfer is ephemeral, ONYX stays StorageOps
-              AuthenIQ (LearningOps) rides on Authentik · Infisical · Cerulean ·
+              AthenIQ (LearningOps) rides on Authentik · Infisical · Cerulean ·
               ONYX · Magnate and sends completion evidence to Signara for
               signed course certificates
               Atlas (CodeOps) holds every repo + the AI app builder; it rides
@@ -225,7 +225,7 @@ this pattern so re-running them never re-issues or detaches certs.
   compliance evidence, identity verification.
 - **Consumes:** Authentik · Cerulean · Infisical · ONYX · Magnate · NPM Edge.
 
-#### AuthenIQ — LearningOps
+#### AthenIQ — LearningOps
 - **Owns:** course catalog and enrollment, courseware delivery, assessments, learner
   records, AI interactive classrooms (multi-agent lessons, quizzes, simulations),
   course completions and completion evidence.
@@ -233,7 +233,7 @@ this pattern so re-running them never re-issues or detaches certs.
   course certificate workflows.
 - **Consumes:** Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge.
 - **Does not own:** identity, secrets, certificates/DNS, storage, billing, or signing.
-  AuthenIQ emits completion evidence only — Signara remains the sole signer.
+  AthenIQ emits completion evidence only — Signara remains the sole signer.
 
 #### Atlas — CodeOps
 - **Owns:** repositories, forks, pull requests, code review, issues/boards, wikis,
@@ -283,7 +283,7 @@ Identity (Authentik) ────────► Secrets (Infisical)
                    ▼
               Capstone
         (Rizz Aura ──► Authentik, Magnate)
-        (AuthenIQ ──► Authentik · Infisical · Cerulean · ONYX · Magnate · Signara)
+        (AthenIQ ──► Authentik · Infisical · Cerulean · ONYX · Magnate · Signara)
         (Atlas ──► Authentik · Infisical · Cerulean · Magnate)
 ```
 
@@ -295,7 +295,7 @@ Deployment order:
 3. **Cerulean · ONYX · Magnate · NPM Edge** (trust, storage, revenue, and edge in parallel — nothing above
    them works without at least one).
 4. **Business platforms** (Monarch, Zeus, Oasis, Signara — then Capstone on top of Zeus;
-   Rizz Aura can ride anywhere after Authentik + Magnate, AuthenIQ after
+   Rizz Aura can ride anywhere after Authentik + Magnate, AthenIQ after
    Authentik + Infisical + Magnate — it also consumes Signara for signed course
    certificates, and Atlas after Authentik + Infisical + Magnate to host this
    ecosystem's code and CI).
@@ -348,7 +348,7 @@ Rules that hold in both:
 | Voice AI agents / telephony automation | AgentOps | Capstone |
 | Leaderboards / reputation / community | CommunityOps | Rizz Aura |
 | Ephemeral P2P transfer / relay | TransferOps | zapit |
-| Learning / courses / AI classrooms | LearningOps | AuthenIQ |
+| Learning / courses / AI classrooms | LearningOps | AthenIQ |
 | Source control / CI / AI app building | CodeOps | Atlas |
 
 ## Integration flows
@@ -428,7 +428,7 @@ Rules that hold in both:
 | NPM Edge (EdgeOps) | [innotelinc/npm](https://github.com/innotelinc/npm) | [ABOUT.md](https://github.com/innotelinc/npm/blob/develop/ABOUT.md) |
 | Rizz Aura (CommunityOps) | [innotelinc/rizzaura-platform](https://github.com/innotelinc/rizzaura-platform) | [docs/stack.md](https://github.com/innotelinc/rizzaura-platform/blob/main/docs/stack.md) |
 | zapit (TransferOps) | [innotelinc/zapit](https://github.com/innotelinc/zapit) | [docs/stack.md](https://github.com/innotelinc/zapit/blob/main/docs/stack.md) |
-| AuthenIQ (LearningOps) | [innotelinc/authentiq](https://github.com/innotelinc/authentiq) | [docs/stack.md](https://github.com/innotelinc/authentiq/blob/main/docs/stack.md) |
+| AthenIQ (LearningOps) | [innotelinc/atheniq](https://github.com/innotelinc/atheniq) | [docs/stack.md](https://github.com/innotelinc/atheniq/blob/main/docs/stack.md) |
 | Atlas (CodeOps) | [innotelinc/atlas](https://github.com/innotelinc/atlas) | [docs/stack.md](https://github.com/innotelinc/atlas/blob/main/docs/stack.md) |
 
 ---
