@@ -31,7 +31,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   gitea-db:
     image: postgres:16-alpine
@@ -65,7 +65,7 @@ services:
       - gitea
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ── Convex (self-hosted backend) ──────────────────────────────────────────
   convex:
@@ -78,7 +78,7 @@ services:
       - convex-data:/convex/data
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ═══ OASIS (Mail Server) ═════════════════════════════════════════════════
 
@@ -118,7 +118,7 @@ services:
 
   oasis-mail:
     build:
-      context: ../../oasis-mail-platform
+      context: ../../../oasis-mail-platform
     container_name: g5-oasis-mail
     restart: unless-stopped
     ports:
@@ -134,7 +134,7 @@ services:
       - oasis-redis
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ── Consul registration ────────────────────────────────────────────────────
   consul-reg-g5:
@@ -148,19 +148,19 @@ services:
           "gitea|${MESH_SERVER_IP:-10.10.5.1}|3000|dev,git,code" \
           "chef|${MESH_SERVER_IP:-10.10.5.1}|3210|dev,build,convex" \
           "oasis-mail|${MESH_SERVER_IP:-10.10.5.1}|587|mail,smtp"; do
-          NAME=$(echo "$svc" | cut -d'|' -f1)
-          ADDR=$(echo "$svc" | cut -d'|' -f2)
-          PORT=$(echo "$svc" | cut -d'|' -f3)
-          TAGS=$(echo "$svc" | cut -d'|' -f4)
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
           curl -s -X PUT http://consul:8500/v1/agent/service/register \
             -H 'Content-Type: application/json' \
-            -d "{\"Name\":\"$NAME\",\"Address\":\"$ADDR\",\"Port\":$PORT,\"Tags\":[\"${TAGS// /\", \"}\"]}" \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
             >/dev/null
-          echo "[g5] Registered $NAME at $ADDR:$PORT"
+          echo "[g5] Registered $$NAME at $$ADDR:$$PORT"
         done
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
 volumes:
   gitea-data:
@@ -173,5 +173,3 @@ volumes:
 networks:
   default:
     name: g5-net
-  innotel-mesh-net:
-    external: true

@@ -103,6 +103,7 @@ extensions/my-extension/
 | `cerulean-dns`  | BIND authoritative DNS + ACME        | cerulean-auth       |
 | `omniroute-llm` | OpenAI-compatible LLM gateway        | —                   |
 | `monitoring`    | Prometheus + Grafana                 | cerulean-auth       |
+| `minio-storage` | S3-compatible object storage         | —                   |
 
 ## Single-Server Mode
 

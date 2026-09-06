@@ -20,7 +20,7 @@ TAGS="${*:-$SERVICE_NAME}"
 CONSUL="${REGISTRY_ADDR:-10.10.1.1:8500}"
 
 # Register via HTTP API
-curl -s -X PUT "http://${CONSUL}/v1/agent/service/register" \
+curl -s --max-time 5 -X PUT "http://${CONSUL}/v1/agent/service/register" \
   -d "{
     \"Name\": \"${SERVICE_NAME}\",
     \"Address\": \"${SERVICE_ADDR}\",

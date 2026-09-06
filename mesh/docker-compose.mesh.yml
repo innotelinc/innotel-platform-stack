@@ -1,14 +1,13 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # WireGuard Mesh — cross-network overlay for all Innotel groups
 # ══════════════════════════════════════════════════════════════════════════════
-# Each server runs this stack.  The mesh creates a flat 10.10.0.0/16 network
-# so every container on every server can reach every other container by its
-# mesh IP, regardless of physical network.
+# Each group compose `include`s this file, so every server runs:
+#   - a WireGuard node joining the 10.10.0.0/16 overlay
+#   - a Consul agent (server on Group 1, client everywhere else)
 #
-# Usage:
-#   docker compose -f mesh/docker-compose.mesh.yml up -d
-#
-# Per-server config lives in mesh/wg/serverN.env (see .env.example for IPs).
+# Cross-server traffic flows: container → mesh-net → wg tunnel → mesh-net on
+# the other server → target container.  Services discover each other through
+# Consul, which returns mesh IPs (10.10.x.x) reachable over the tunnel.
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: innotel-mesh
@@ -27,7 +26,7 @@ services:
       - TZ=UTC
       - SERVERURL=${SERVER_PUBLIC_IP}
       - SERVERPORT=${MESH_PORT:-51820}
-      - PEERS=${MESH_PEERS:-4}          # one peer per other server
+      - PEERS=${MESH_PEERS:-4}
       - PEERDNS=1.1.1.1
       - INTERNAL_SUBNET=${MESH_SUBNET:-10.10.1.0}
       - ALLOWEDIPS=${MESH_ALLOWEDIPS:-10.10.0.0/16}
@@ -35,7 +34,7 @@ services:
       - ./wg/data:/config
       - /lib/modules:/lib/modules
     ports:
-      - ${MESH_PORT:-51820}:51820/udp
+      - "${MESH_PORT:-51820}:51820/udp"
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
       - net.ipv4.ip_forward=1
@@ -45,36 +44,36 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      - mesh-net
 
-  # ── Service Registry (Consul) ─────────────────────────────────────────────
-  # Lightweight Consul agent for service discovery.
-  # Group 1 runs the server; all others run client agents.
+  # ── Consul agent (server on Group 1, client elsewhere) ────────────────────
   consul:
     image: hashicorp/consul:1.19
     container_name: mesh-consul
     restart: unless-stopped
     volumes:
       - ./registry/data:/consul/data
-      - ./registry/config:/consul/config
     ports:
-      - 8500:8500
-      - 8600:8600/udp
+      - "8500:8500"
+      - "8600:8600/udp"
     command: >
       agent
         -bind=0.0.0.0
         -client=0.0.0.0
         -datacenter=innotel
         -data-dir=/consul/data
-        -config-dir=/consul/config
         -ui
+        -retry-join=${CONSUL_SERVER_ADDR:-10.10.1.1}
         ${CONSUL_SERVER_FLAG:-}
     healthcheck:
       test: ["CMD", "consul", "members"]
       interval: 15s
       timeout: 5s
       retries: 3
+    networks:
+      - mesh-net
 
 networks:
-  default:
+  mesh-net:
     name: innotel-mesh-net
-    driver: bridge

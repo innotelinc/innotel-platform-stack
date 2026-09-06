@@ -1,0 +1,14 @@
+name: minio-storage
+version: 1.0.0
+description: MinIO S3-compatible object storage for any group
+group: any
+mesh_service: true
+mesh_dependencies: []
+local_dependencies: []
+compose_file: docker-compose.ext.yml
+env_file: .env.example
+ports:
+  - "9000:9000"
+  - "9001:9001"
+volumes:
+  - minio-data

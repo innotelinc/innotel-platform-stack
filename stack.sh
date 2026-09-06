@@ -29,7 +29,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 # ── Group definitions ─────────────────────────────────────────────────────────
-declare -A GROUPS=(
+declare -A STACK_GROUPS=(
   [1]="primary|Cerulean + AthenIQ + Magnate|~8 GiB"
   [2]="voice|Capstone + Zeus + OmniRoute|~6 GiB"
   [3]="media|Monarch (Jellyfin + *arr + NPM)|~8 GiB"
@@ -45,12 +45,49 @@ err()   { echo -e "${RED}[error]${NC} $*" >&2; }
 
 get_group_dir() {
   local num="$1"
-  echo "${STACK_DIR}/groups/${num}-$(echo "${GROUPS[$num]}" | cut -d'|' -f1)"
+  echo "${STACK_DIR}/groups/${num}-$(echo "${STACK_GROUPS[$num]}" | cut -d'|' -f1)"
 }
 
 get_mesh_ip() {
   local num="$1"
-  grep "SERVER_${num}_" "$ENV_FILE" 2>/dev/null | grep "_IP=" | head -1 | cut -d= -f2
+  grep "SERVER_${num}_" "$ENV_FILE" 2>/dev/null \
+    | grep "_IP=" | grep -v "PUBLIC_IP" | head -1 | cut -d= -f2
+}
+
+get_public_ip() {
+  local num="$1"
+  grep "SERVER_${num}_PUBLIC_IP=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2
+}
+
+mesh_subnet_for() {
+  # Derive the /24 WireGuard subnet from the server mesh IP (10.10.x.1 → 10.10.x.0)
+  local ip="$1"
+  echo "${ip%.*}.0"
+}
+
+export_group_env() {
+  local num="$1"
+  local mesh_ip public_ip
+  mesh_ip=$(get_mesh_ip "$num")
+  public_ip=$(get_public_ip "$num")
+
+  if [ -n "$mesh_ip" ]; then
+    export MESH_SERVER_IP="$mesh_ip"
+    export MESH_SUBNET="$(mesh_subnet_for "$mesh_ip")"
+    export INTERNAL_SUBNET="$(mesh_subnet_for "$mesh_ip")"
+  fi
+  if [ -n "$public_ip" ]; then
+    export SERVER_PUBLIC_IP="$public_ip"
+  fi
+
+  # Group 1 runs the Consul server; all others are clients
+  if [ "$num" = "1" ]; then
+    export CONSUL_SERVER_FLAG="-server=true -bootstrap-expect=1"
+    export CONSUL_SERVER_ADDR="$mesh_ip"
+  else
+    export CONSUL_SERVER_FLAG="-server=false"
+    export CONSUL_SERVER_ADDR="$(get_mesh_ip 1)"
+  fi
 }
 
 ensure_env() {
@@ -101,26 +138,22 @@ cmd_up() {
     exit 1
   fi
 
-  local info_str="${GROUPS[$target]}"
+  local info_str="${STACK_GROUPS[$target]}"
   local name=$(echo "$info_str" | cut -d'|' -f1)
   local desc=$(echo "$info_str" | cut -d'|' -f2)
   local ram=$(echo "$info_str" | cut -d'|' -f3)
 
   info "Starting Group ${target} — ${desc} (${ram})..."
 
-  # Set mesh IP for this group's server
-  local mesh_ip
-  mesh_ip=$(get_mesh_ip "$target")
-  if [ -n "$mesh_ip" ]; then
-    export MESH_SERVER_IP="$mesh_ip"
-  fi
+  # Export this group's mesh config (IP, subnet, Consul role)
+  export_group_env "$target"
 
   # Bring up the mesh if not running
   if ! docker network ls 2>/dev/null | grep -q innotel-mesh-net; then
     cmd_mesh
   fi
 
-  # Start the group
+  # Start the group (include: merges mesh + consul from this file)
   compose "$dir" up -d
 
   # Enable any active extensions
@@ -194,7 +227,7 @@ cmd_status() {
       continue
     fi
 
-    local info_str="${GROUPS[$num]}"
+    local info_str="${STACK_GROUPS[$num]}"
     local name=$(echo "$info_str" | cut -d'|' -f1)
     local desc=$(echo "$info_str" | cut -d'|' -f2)
     local ram=$(echo "$info_str" | cut -d'|' -f3)
@@ -204,7 +237,22 @@ cmd_status() {
     local dir
     dir=$(get_group_dir "$num")
     if [ -d "$dir" ]; then
-      compose "$dir" ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "  (not running)"
+      # Export placeholder values so status works even without a full .env
+      export AUTHENTIK_PG_PASSWORD="${AUTHENTIK_PG_PASSWORD:-placeholder}"
+      export AUTHENTIK_SECRET_KEY="${AUTHENTIK_SECRET_KEY:-placeholder}"
+      export TUTOR_MYSQL_ROOT_PASSWORD="${TUTOR_MYSQL_ROOT_PASSWORD:-placeholder}"
+      export OASIS_PG_PASSWORD="${OASIS_PG_PASSWORD:-placeholder}"
+      export REDIS_PASSWORD="${REDIS_PASSWORD:-placeholder}"
+      export INFISICAL_PG_PASSWORD="${INFISICAL_PG_PASSWORD:-placeholder}"
+      local ps_out
+      ps_out=$(compose "$dir" ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null) || true
+      if [ -n "$ps_out" ] && ! echo "$ps_out" | grep -q "^NAME"; then
+        echo "  (not running)"
+      elif [ -z "$ps_out" ]; then
+        echo "  (not running)"
+      else
+        echo "$ps_out"
+      fi
     fi
 
     # Show active extensions
@@ -297,7 +345,7 @@ cmd_disable() {
 cmd_list() {
   echo -e "\n${BOLD}═══ Groups ═══${NC}"
   for num in 1 2 3 4 5; do
-    local info_str="${GROUPS[$num]}"
+    local info_str="${STACK_GROUPS[$num]}"
     local name=$(echo "$info_str" | cut -d'|' -f1)
     local desc=$(echo "$info_str" | cut -d'|' -f2)
     local ram=$(echo "$info_str" | cut -d'|' -f3)
@@ -316,7 +364,7 @@ cmd_list() {
   echo -e "\n${BOLD}═══ Services (via Consul) ═══${NC}"
   ensure_env
   local consul_addr="${REGISTRY_ADDR:-10.10.1.1:8500}"
-  curl -s "http://${consul_addr}/v1/catalog/services" 2>/dev/null | \
+  curl -s --max-time 3 "http://${consul_addr}/v1/catalog/services" 2>/dev/null | \
     python3 -c "import sys,json; [print(f'  {k}') for k in sorted(json.load(sys.stdin).keys())]" 2>/dev/null || \
     echo "  (Consul not reachable — start with: ./stack.sh up mesh)"
 }

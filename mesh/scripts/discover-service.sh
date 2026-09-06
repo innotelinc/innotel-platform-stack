@@ -17,7 +17,7 @@ set -euo pipefail
 SERVICE="${1:?Usage: discover-service.sh <service-name>}"
 CONSUL="${REGISTRY_ADDR:-10.10.1.1:8500}"
 
-RESULT=$(curl -s "http://${CONSUL}/v1/health/service/${SERVICE}?passing=true" | \
+RESULT=$(curl -s --max-time 5 "http://${CONSUL}/v1/health/service/${SERVICE}?passing=true" | \
   python3 -c "
 import sys, json
 services = json.load(sys.stdin)

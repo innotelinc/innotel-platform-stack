@@ -1,18 +1,23 @@
 # ══════════════════════════════════════════════════════════════════════════════
-# Extension: omniroute-llm — OmniRoute LLM gateway for any group
+# Extension: minio-storage — S3 object storage for any group
 # ══════════════════════════════════════════════════════════════════════════════
 
 services:
-  omniroute:
-    image: ${OMNIROUTE_IMAGE:-diegosouzapw/omniroute:latest}
-    container_name: ext-omniroute
+  minio:
+    image: minio/minio:latest
+    container_name: ext-minio
     restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env}
     ports:
-      - "${OMNIROUTE_PORT:-20128}:20128"
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - omniroute-data:/data
+      - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:20128/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -20,38 +25,38 @@ services:
       - default
       - innotel-mesh-net
 
-  consul-reg-llm:
+  consul-reg-minio:
     image: curlimages/curl:latest
-    container_name: ext-consul-reg-llm
+    container_name: ext-consul-reg-minio
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         sleep 10
-        curl -s -X PUT http://${REGISTRY_ADDR:-10.10.1.1:8500}/v1/agent/service/register \
+        curl -s --max-time 5 -X PUT http://${REGISTRY_ADDR:-10.10.1.1:8500}/v1/agent/service/register \
           -H 'Content-Type: application/json' \
           -d '{
-            "Name": "omniroute",
+            "Name": "minio",
             "Address": "${MESH_SERVER_IP}",
-            "Port": ${OMNIROUTE_PORT:-20128},
-            "Tags": ["llm","ai","openai-compatible"],
+            "Port": ${MINIO_PORT:-9000},
+            "Tags": ["storage","s3","object-store"],
             "Check": {
-              "TCP": "${MESH_SERVER_IP}:${OMNIROUTE_PORT:-20128}",
+              "TCP": "${MESH_SERVER_IP}:${MINIO_PORT:-9000}",
               "Interval": "15s",
               "Timeout": "5s"
             }
           }'
-        echo "[llm] Registered omniroute at ${MESH_SERVER_IP}:${OMNIROUTE_PORT:-20128}"
+        echo "[storage] Registered minio at ${MESH_SERVER_IP}:${MINIO_PORT:-9000}"
     networks:
       - default
       - innotel-mesh-net
     depends_on:
-      - omniroute
+      - minio
 
 volumes:
-  omniroute-data:
+  minio-data:
 
 networks:
   default:
-    name: ext-llm-net
+    name: ext-storage-net
   innotel-mesh-net:
     external: true

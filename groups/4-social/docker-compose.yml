@@ -16,7 +16,7 @@ services:
 
   rizz-api:
     build:
-      context: ../../rizzaura-platform
+      context: ../../../rizzaura-platform
       dockerfile: api/Dockerfile
     container_name: g4-rizz-api
     restart: unless-stopped
@@ -35,11 +35,11 @@ services:
       - rizz-data:/app/data
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   rizz-app:
     build:
-      context: ../../rizzaura-platform
+      context: ../../../rizzaura-platform
       dockerfile: apps/app/Dockerfile
     container_name: g4-rizz-app
     restart: unless-stopped
@@ -51,11 +51,11 @@ services:
       - rizz-api
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   rizz-rankings:
     build:
-      context: ../../rizzaura-platform
+      context: ../../../rizzaura-platform
       dockerfile: apps/rankings/Dockerfile
     container_name: g4-rizz-rankings
     restart: unless-stopped
@@ -70,7 +70,7 @@ services:
 
   rizz-community:
     build:
-      context: ../../rizzaura-platform
+      context: ../../../rizzaura-platform
       dockerfile: apps/community/Dockerfile
     container_name: g4-rizz-community
     restart: unless-stopped
@@ -85,7 +85,7 @@ services:
 
   rizz-admin:
     build:
-      context: ../../rizzaura-platform
+      context: ../../../rizzaura-platform
       dockerfile: apps/admin/Dockerfile
     container_name: g4-rizz-admin
     restart: unless-stopped
@@ -98,13 +98,13 @@ services:
       - rizz-api
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ═══ ONYX (NAS / Storage) ═════════════════════════════════════════════════
 
   onyx-privd:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/onyx-privd.Dockerfile
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-privd:${IMAGE_TAG:-latest}
     container_name: g4-onyx-privd
@@ -118,7 +118,7 @@ services:
 
   onyx-storaged:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/onyx-storaged.Dockerfile
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-storaged:${IMAGE_TAG:-latest}
     container_name: g4-onyx-storaged
@@ -133,7 +133,7 @@ services:
 
   onyx-shared:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/go-service.Dockerfile
       args: { SERVICE: onyx-shared }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-shared:${IMAGE_TAG:-latest}
@@ -144,7 +144,7 @@ services:
 
   onyx-core:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/go-service.Dockerfile
       args: { SERVICE: onyx-core }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-core:${IMAGE_TAG:-latest}
@@ -162,7 +162,7 @@ services:
 
   onyx-api:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/go-service.Dockerfile
       args: { SERVICE: onyx-api }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-api:${IMAGE_TAG:-latest}
@@ -179,11 +179,11 @@ services:
       - onyx-core
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   onyx-snapd:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/go-service.Dockerfile
       args: { SERVICE: onyx-snapd }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-snapd:${IMAGE_TAG:-latest}
@@ -197,7 +197,7 @@ services:
 
   onyx-backupd:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/go-service.Dockerfile
       args: { SERVICE: onyx-backupd }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-backupd:${IMAGE_TAG:-latest}
@@ -212,7 +212,7 @@ services:
 
   onyx-vmm:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/go-service.Dockerfile
       args: { SERVICE: onyx-vmm }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-vmm:${IMAGE_TAG:-latest}
@@ -225,7 +225,7 @@ services:
 
   onyx-appd:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/go-service.Dockerfile
       args: { SERVICE: onyx-appd }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-appd:${IMAGE_TAG:-latest}
@@ -238,7 +238,7 @@ services:
 
   onyx-ai:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/go-service.Dockerfile
       args: { SERVICE: onyx-ai }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-ai:${IMAGE_TAG:-latest}
@@ -250,11 +250,11 @@ services:
     restart: unless-stopped
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   onyx-objectstore:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/go-service.Dockerfile
       args: { SERVICE: onyx-objectstore }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-objectstore:${IMAGE_TAG:-latest}
@@ -271,7 +271,7 @@ services:
 
   onyx-web:
     build:
-      context: ../../onyx-oss-platform
+      context: ../../../onyx-oss-platform
       dockerfile: docker/onyx-web/Dockerfile
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-web:${IMAGE_TAG:-latest}
     container_name: g4-onyx-web
@@ -292,19 +292,19 @@ services:
           "rizz-app|${MESH_SERVER_IP:-10.10.4.1}|3010|social,leaderboard" \
           "onyx-api|${MESH_SERVER_IP:-10.10.4.1}|8080|storage,nas" \
           "onyx-objectstore|${MESH_SERVER_IP:-10.10.4.1}|9001|storage,s3"; do
-          NAME=$(echo "$svc" | cut -d'|' -f1)
-          ADDR=$(echo "$svc" | cut -d'|' -f2)
-          PORT=$(echo "$svc" | cut -d'|' -f3)
-          TAGS=$(echo "$svc" | cut -d'|' -f4)
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
           curl -s -X PUT http://consul:8500/v1/agent/service/register \
             -H 'Content-Type: application/json' \
-            -d "{\"Name\":\"$NAME\",\"Address\":\"$ADDR\",\"Port\":$PORT,\"Tags\":[\"${TAGS// /\", \"}\"]}" \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
             >/dev/null
-          echo "[g4] Registered $NAME at $ADDR:$PORT"
+          echo "[g4] Registered $$NAME at $$ADDR:$$PORT"
         done
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
 volumes:
   rizz-data:
@@ -322,5 +322,3 @@ volumes:
 networks:
   default:
     name: g4-net
-  innotel-mesh-net:
-    external: true

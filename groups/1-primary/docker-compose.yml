@@ -12,36 +12,17 @@ include:
   - ../../mesh/docker-compose.mesh.yml
 
 services:
-  # ── Consul server (this is the authoritative registry) ──────────────────────
-  consul-server:
-    image: hashicorp/consul:1.19
-    container_name: g1-consul-server
-    restart: unless-stopped
-    ports:
-      - "8500:8500"
-    volumes:
-      - ./consul/data:/consul/data
-    command: >
-      agent -server -bootstrap-expect=1 -ui -client=0.0.0.0
-        -bind=0.0.0.0 -datacenter=innotel -data-dir=/consul/data
-    healthcheck:
-      test: ["CMD", "consul", "members"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - default
-      - innotel-mesh-net
-
   # ═══ CERULEAN ═════════════════════════════════════════════════════════════
   # Auth & trust backbone — Authentik SSO, Infisical secrets, Vault
+  # (Consul server comes from the included mesh compose; stack.sh sets
+  #  CONSUL_SERVER_FLAG=-server=true for this group)
 
   cerulean:
     build:
-      context: ../../cerulean-dns-platform
+      context: ../../../cerulean-dns-platform
     container_name: g1-cerulean
     restart: unless-stopped
-    env_file: ../../cerulean-dns-platform/.env
+    env_file: ../../../cerulean-dns-platform/.env
     ports:
       - "${CERULEAN_PORT:-3003}:3003"
     volumes:
@@ -53,14 +34,14 @@ services:
       retries: 3
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   authentik-server:
     image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2024.12.2}
     container_name: g1-authentik-server
     restart: unless-stopped
     command: server
-    env_file: ../../cerulean-dns-platform/.env
+    env_file: ../../../cerulean-dns-platform/.env
     environment:
       AUTHENTIK_REDIS__HOST: g1-authentik-redis
       AUTHENTIK_POSTGRESQL__HOST: g1-authentik-postgres
@@ -74,20 +55,20 @@ services:
       - authentik-media:/media
       - authentik-templates:/templates
     depends_on:
-      g1-authentik-postgres:
+      authentik-postgres:
         condition: service_healthy
-      g1-authentik-redis:
+      authentik-redis:
         condition: service_healthy
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   authentik-worker:
     image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2024.12.2}
     container_name: g1-authentik-worker
     restart: unless-stopped
     command: worker
-    env_file: ../../cerulean-dns-platform/.env
+    env_file: ../../../cerulean-dns-platform/.env
     environment:
       AUTHENTIK_REDIS__HOST: g1-authentik-redis
       AUTHENTIK_POSTGRESQL__HOST: g1-authentik-postgres
@@ -98,13 +79,13 @@ services:
       - authentik-media:/media
       - authentik-templates:/templates
     depends_on:
-      g1-authentik-postgres:
+      authentik-postgres:
         condition: service_healthy
-      g1-authentik-redis:
+      authentik-redis:
         condition: service_healthy
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   authentik-postgres:
     image: postgres:16-alpine
@@ -150,11 +131,11 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - g1-infisical-db
-      - g1-infisical-redis
+      - infisical-db
+      - infisical-redis
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   infisical-db:
     image: postgres:16-alpine
@@ -191,7 +172,7 @@ services:
     command: server -dev -dev-root-token-id=root
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ═══ ATHENIQ (Open edX LMS) ══════════════════════════════════════════════
   # Tutor manages its own containers; we reference the tutor compose here.
@@ -216,7 +197,7 @@ services:
       retries: 5
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   tutor-mongodb:
     image: docker.io/mongo:7.0.39
@@ -254,7 +235,7 @@ services:
       - tutor-redis
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   tutor-cms:
     image: docker.io/overhangio/openedx:22.0.2
@@ -272,7 +253,7 @@ services:
       - tutor-redis
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   tutor-caddy:
     image: docker.io/overhangio/tutor:22.0.2
@@ -285,7 +266,7 @@ services:
       - tutor-cms
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   tutor-meilisearch:
     image: docker.io/getmeili/meilisearch:v1.36.0
@@ -301,22 +282,22 @@ services:
   # ═══ MAGNATE (Billing) ═══════════════════════════════════════════════════
   magnate:
     build:
-      context: ../../magnate-subscription-platform
+      context: ../../../magnate-subscription-platform
     container_name: g1-magnate
     restart: unless-stopped
     ports:
       - "${MAGNATE_PORT:-3010}:3010"
     environment:
-      DATABASE_URL: postgresql://magnate:${MAGNATE_PG_PASSWORD:-magnatepass}@g1-magnate-db:5432/magnate
+      DATABASE_URL: postgresql://magnate:${MAGNATE_PG_PASSWORD:-magnatepass}@magnate-db:5432/magnate
       AUTHENTIK_BASE_URL: https://auth.cerulean.innotel.us
       AUTHENTIK_CLIENT_ID: magnate
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     depends_on:
-      - g1-magnate-db
+      - magnate-db
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   magnate-db:
     image: postgres:16-alpine
@@ -351,21 +332,21 @@ services:
           "vault|${MESH_SERVER_IP:-10.10.1.1}|8200|secrets,vault" \
           "lms|${MESH_SERVER_IP:-10.10.1.1}|18080|education,primary" \
           "magnate|${MESH_SERVER_IP:-10.10.1.1}|3010|billing,primary"; do
-          NAME=$(echo "$svc" | cut -d'|' -f1)
-          ADDR=$(echo "$svc" | cut -d'|' -f2)
-          PORT=$(echo "$svc" | cut -d'|' -f3)
-          TAGS=$(echo "$svc" | cut -d'|' -f4)
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
           curl -s -X PUT http://consul:8500/v1/agent/service/register \
             -H 'Content-Type: application/json' \
-            -d "{\"Name\":\"$NAME\",\"Address\":\"$ADDR\",\"Port\":$PORT,\"Tags\":[\"${TAGS// /\", \"}\"]}" \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
             >/dev/null
-          echo "[g1] Registered $NAME at $ADDR:$PORT"
+          echo "[g1] Registered $$NAME at $$ADDR:$$PORT"
         done
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
     depends_on:
-      - consul-server
+      - consul
 
 volumes:
   cerulean-data:
@@ -386,5 +367,3 @@ volumes:
 networks:
   default:
     name: g1-net
-  innotel-mesh-net:
-    external: true

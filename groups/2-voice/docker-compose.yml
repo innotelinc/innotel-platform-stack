@@ -31,7 +31,7 @@ services:
       retries: 10
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   capstone-redis:
     image: redis:7
@@ -50,7 +50,7 @@ services:
 
   capstone-api:
     build:
-      context: ../../capstone-voice-aiagent-platform
+      context: ../../../capstone-voice-aiagent-platform
     container_name: g2-capstone-api
     restart: unless-stopped
     ports:
@@ -65,11 +65,11 @@ services:
       - capstone-redis
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   capstone-freepbx:
     build:
-      context: ../../capstone-voice-aiagent-platform
+      context: ../../../capstone-voice-aiagent-platform
       dockerfile: Dockerfile.freepbx
     container_name: g2-capstone-freepbx
     restart: unless-stopped
@@ -81,7 +81,7 @@ services:
       - capstone-freepbx-data:/var/lib/freepbx
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ── Standalone coturn (only runs if Zeus coturn is absent) ──────────────────
   capstone-coturn:
@@ -107,13 +107,13 @@ services:
       - "--verbose"
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ═══ ZEUS (VoIP PBX) ═════════════════════════════════════════════════════
 
   zeus-portal:
     build:
-      context: ../../zeus-pbx-platform
+      context: ../../../zeus-pbx-platform
     container_name: g2-zeus-portal
     restart: unless-stopped
     ports:
@@ -129,7 +129,7 @@ services:
       start_period: 30s
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   zeus-coturn:
     image: coturn/coturn:latest
@@ -153,7 +153,7 @@ services:
       - "--verbose"
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ── OmniRoute (single LLM gateway for ALL stacks) ─────────────────────────
   omniroute:
@@ -171,7 +171,7 @@ services:
       retries: 3
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ── Consul registration ────────────────────────────────────────────────────
   consul-reg-g2:
@@ -186,19 +186,19 @@ services:
           "capstone-freepbx|${MESH_SERVER_IP:-10.10.2.1}|8083|voice,pbx" \
           "zeus-portal|${MESH_SERVER_IP:-10.10.2.1}|3001|voice,pbx,portal" \
           "omniroute|${MESH_SERVER_IP:-10.10.2.1}|20128|llm,ai,gateway"; do
-          NAME=$(echo "$svc" | cut -d'|' -f1)
-          ADDR=$(echo "$svc" | cut -d'|' -f2)
-          PORT=$(echo "$svc" | cut -d'|' -f3)
-          TAGS=$(echo "$svc" | cut -d'|' -f4)
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
           curl -s -X PUT http://consul:8500/v1/agent/service/register \
             -H 'Content-Type: application/json' \
-            -d "{\"Name\":\"$NAME\",\"Address\":\"$ADDR\",\"Port\":$PORT,\"Tags\":[\"${TAGS// /\", \"}\"]}" \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
             >/dev/null
-          echo "[g2] Registered $NAME at $ADDR:$PORT"
+          echo "[g2] Registered $$NAME at $$ADDR:$$PORT"
         done
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
 volumes:
   capstone-postgres:
@@ -209,5 +209,3 @@ volumes:
 networks:
   default:
     name: g2-net
-  innotel-mesh-net:
-    external: true

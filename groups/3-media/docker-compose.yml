@@ -34,7 +34,7 @@ services:
       - npm-letsencrypt:/etc/letsencrypt
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ═══ Jellyfin (streaming core) ═════════════════════════════════════════════
   jellyfin:
@@ -52,7 +52,7 @@ services:
       - TZ=UTC
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ═══ Jellyseerr (requests) ════════════════════════════════════════════════
   jellyseerr:
@@ -67,7 +67,7 @@ services:
       - jellyseerr-config:/config
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   # ═══ *arr Automation ═══════════════════════════════════════════════════════
   sonarr:
@@ -84,7 +84,7 @@ services:
       - PGID=1000
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   radarr:
     <<: *common
@@ -100,7 +100,7 @@ services:
       - PGID=1000
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   lidarr:
     <<: *common
@@ -217,7 +217,7 @@ services:
   # ═══ Monarch Intelligence ═════════════════════════════════════════════════
   monarch-api:
     build:
-      context: ../../monarch-media-platform
+      context: ../../../monarch-media-platform
     container_name: g3-monarch-api
     restart: unless-stopped
     ports:
@@ -229,7 +229,7 @@ services:
       - jellyfin
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
   monarch-health:
     <<: *common
@@ -257,19 +257,19 @@ services:
           "qbittorrent|${MESH_SERVER_IP:-10.10.3.1}|8080|media,downloads" \
           "npm|${MESH_SERVER_IP:-10.10.3.1}|81|edge,proxy,tls" \
           "monarch-api|${MESH_SERVER_IP:-10.10.3.1}|3100|media,intelligence"; do
-          NAME=$(echo "$svc" | cut -d'|' -f1)
-          ADDR=$(echo "$svc" | cut -d'|' -f2)
-          PORT=$(echo "$svc" | cut -d'|' -f3)
-          TAGS=$(echo "$svc" | cut -d'|' -f4)
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
           curl -s -X PUT http://consul:8500/v1/agent/service/register \
             -H 'Content-Type: application/json' \
-            -d "{\"Name\":\"$NAME\",\"Address\":\"$ADDR\",\"Port\":$PORT,\"Tags\":[\"${TAGS// /\", \"}\"]}" \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
             >/dev/null
-          echo "[g3] Registered $NAME at $ADDR:$PORT"
+          echo "[g3] Registered $$NAME at $$ADDR:$$PORT"
         done
     networks:
       - default
-      - innotel-mesh-net
+      - mesh-net
 
 volumes:
   npm-data:
@@ -289,5 +289,3 @@ volumes:
 networks:
   default:
     name: g3-net
-  innotel-mesh-net:
-    external: true
