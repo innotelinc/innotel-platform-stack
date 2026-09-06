@@ -164,11 +164,14 @@ to Capstone's structural bar so the two projects feel like one platform.
 
 **Phase 2 — Capstone consumes Zeus (the add-on)**
 
-> Status: unchanged in code, but the Zeus-side prerequisites have landed
-> (portal API spec above, entitlements G7, transfer-resolve G3, converge
-> tool G1/G2/G4) — the remaining bullets are Capstone's own `ZEUS_*`
-> config, ARI re-pointing, and agent-side SMS/fax/voicemail actions
-> against the new spec.
+> Status: in progress. The Zeus-side prerequisites have landed (portal API
+> spec above, entitlements G7, transfer-resolve G3, converge tool
+> G1/G2/G4). Capstone now ships the `ZEUS_*` config (`.env.example`) and a
+> reference client (`scripts/zeus_client.py`, unit tests in CI) implementing
+> the SMS/fax/voicemail/resolve contract from `docs/portal-api.md`.
+> Remaining: wire dograh agent tools to that client, the one-click
+> "register agent on Zeus" flow, and the ARI pointer change
+> (`CAPSTONE_PBX=standalone|zeus`) onto the shared PBX.
 
 - [ ] Capstone `ZEUS_*` config: `ZEUS_API_URL` / `ZEUS_API_TOKEN` / ARI creds
 - [ ] ARI wiring targets Zeus's Asterisk; Capstone's bundled PBX becomes
