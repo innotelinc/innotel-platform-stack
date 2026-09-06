@@ -7,7 +7,8 @@
 #
 # Example:
 #   ./register-service.sh cerulean 10.10.1.1 3003 auth primary
-#   ./register-service.sh lms 10.10.1.1 18080 education primary
+#   ./register-service.sh lms 10.10.1.1 18000 education primary
+#   ./register-service.sh cms 10.10.1.1 18001 education cms
 # ══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 

@@ -158,7 +158,8 @@ mesh's Consul agent lives. Services on the same host reach Consul directly as
 | 1     | Infisical        | 8080      | 10.10.1.1:8080          |
 | 1     | Vault            | 8200      | 10.10.1.1:8200          |
 | 1     | Consul           | 8500      | 10.10.1.1:8500          |
-| 1     | LMS (Caddy)      | 18080     | 10.10.1.1:18080         |
+| 1     | LMS origin       | 18000     | 10.10.1.1:18000         |
+| 1     | CMS origin       | 18001     | 10.10.1.1:18001         |
 | 1     | Magnate          | 3010      | 10.10.1.1:3010          |
 | 2     | Capstone API     | 3000      | 10.10.2.1:3000          |
 | 2     | FreePBX          | 8083      | 10.10.2.1:8083          |

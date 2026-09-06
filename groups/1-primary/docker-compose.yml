@@ -4,7 +4,7 @@
 # + Signara (DocumentOps — signed course certificates) + Consul service registry
 # server + joins the shared WireGuard mesh
 # ══════════════════════════════════════════════════════════════════════════════
-# RAM: ~10 GiB | Ports: 3003, 9000, 9443, 18080, 3010, 8000, 3000, 8500, 51820
+# RAM: ~10 GiB | Ports: 3003, 9000, 9443, 18000, 18001, 3010, 8000, 3000, 8500, 51820
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: innotel-group1
@@ -217,10 +217,14 @@ services:
     networks:
       - default
 
+  # LMS/CMS publish their origin ports directly (18000/18001). Public hostnames
+  # (learn./studio.) terminate at the shared NPM edge — no local Caddy.
   tutor-lms:
     image: docker.io/overhangio/openedx:22.0.2
     container_name: g1-tutor-lms
     restart: unless-stopped
+    ports:
+      - "${OPENEDX_LMS_PORT:-18000}:18000"
     command: ./lms.sh gunicorn -b 0.0.0.0:18000 -w 2 --timeout 120
     environment:
       SERVICE_VARIANT: lms
@@ -239,6 +243,8 @@ services:
     image: docker.io/overhangio/openedx:22.0.2
     container_name: g1-tutor-cms
     restart: unless-stopped
+    ports:
+      - "${OPENEDX_CMS_PORT:-18001}:18001"
     command: ./cms.sh gunicorn -b 0.0.0.0:18001 -w 2 --timeout 120
     environment:
       SERVICE_VARIANT: cms
@@ -249,19 +255,6 @@ services:
       - tutor-mysql
       - tutor-mongodb
       - tutor-redis
-    networks:
-      - default
-      - innotel-mesh-net
-
-  tutor-caddy:
-    image: docker.io/overhangio/tutor:22.0.2
-    container_name: g1-tutor-caddy
-    restart: unless-stopped
-    ports:
-      - "${OPENEDX_CADDY_PORT:-18080}:80"
-    depends_on:
-      - tutor-lms
-      - tutor-cms
     networks:
       - default
       - innotel-mesh-net
@@ -488,7 +481,8 @@ services:
           "authentik|${MESH_SERVER_IP:-10.10.1.1}|9000|auth,sso,oidc" \
           "infisical|${MESH_SERVER_IP:-10.10.1.1}|8080|secrets,vault" \
           "vault|${MESH_SERVER_IP:-10.10.1.1}|8200|secrets,vault" \
-          "lms|${MESH_SERVER_IP:-10.10.1.1}|18080|education,primary" \
+          "lms|${MESH_SERVER_IP:-10.10.1.1}|18000|education,primary" \
+          "cms|${MESH_SERVER_IP:-10.10.1.1}|18001|education,cms" \
           "magnate|${MESH_SERVER_IP:-10.10.1.1}|3010|billing,primary" \
           "signara|${MESH_SERVER_IP:-10.10.1.1}|8000|trust,docs,signing"; do
           NAME=$(echo "$$svc" | cut -d'|' -f1)
