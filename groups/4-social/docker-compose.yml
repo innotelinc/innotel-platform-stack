@@ -1,0 +1,326 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Group 4 — SOCIAL
+# Rizzaura (global leaderboard) + ONYX (NAS/infrastructure)
+# + WireGuard mesh node
+# ══════════════════════════════════════════════════════════════════════════════
+# RAM: ~6 GiB | Ports: 3010-3013, 8000, 8080, 9001, 51820
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: innotel-group4
+
+include:
+  - ../../mesh/docker-compose.mesh.yml
+
+services:
+  # ═══ RIZZAURA (Leaderboard) ═══════════════════════════════════════════════
+
+  rizz-api:
+    build:
+      context: ../../rizzaura-platform
+      dockerfile: api/Dockerfile
+    container_name: g4-rizz-api
+    restart: unless-stopped
+    ports:
+      - "${RIZZ_API_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: sqlite:///data/state.json
+      AUTHENTIK_BASE_URL: https://auth.cerulean.innotel.us
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - rizz-data:/app/data
+    networks:
+      - default
+      - innotel-mesh-net
+
+  rizz-app:
+    build:
+      context: ../../rizzaura-platform
+      dockerfile: apps/app/Dockerfile
+    container_name: g4-rizz-app
+    restart: unless-stopped
+    ports:
+      - "${RIZZ_APP_PORT:-3010}:3010"
+    environment:
+      API_URL: http://g4-rizz-api:8000
+    depends_on:
+      - rizz-api
+    networks:
+      - default
+      - innotel-mesh-net
+
+  rizz-rankings:
+    build:
+      context: ../../rizzaura-platform
+      dockerfile: apps/rankings/Dockerfile
+    container_name: g4-rizz-rankings
+    restart: unless-stopped
+    ports:
+      - "${RIZZ_RANKINGS_PORT:-3011}:3011"
+    environment:
+      API_URL: http://g4-rizz-api:8000
+    depends_on:
+      - rizz-api
+    networks:
+      - default
+
+  rizz-community:
+    build:
+      context: ../../rizzaura-platform
+      dockerfile: apps/community/Dockerfile
+    container_name: g4-rizz-community
+    restart: unless-stopped
+    ports:
+      - "${RIZZ_COMMUNITY_PORT:-3012}:3012"
+    environment:
+      API_URL: http://g4-rizz-api:8000
+    depends_on:
+      - rizz-api
+    networks:
+      - default
+
+  rizz-admin:
+    build:
+      context: ../../rizzaura-platform
+      dockerfile: apps/admin/Dockerfile
+    container_name: g4-rizz-admin
+    restart: unless-stopped
+    ports:
+      - "${RIZZ_ADMIN_PORT:-3013}:3013"
+    environment:
+      API_URL: http://g4-rizz-api:8000
+      AUTHENTIK_BASE_URL: https://auth.cerulean.innotel.us
+    depends_on:
+      - rizz-api
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # ═══ ONYX (NAS / Storage) ═════════════════════════════════════════════════
+
+  onyx-privd:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/onyx-privd.Dockerfile
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-privd:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-privd
+    privileged: true
+    volumes:
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+    restart: unless-stopped
+    networks:
+      - default
+
+  onyx-storaged:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/onyx-storaged.Dockerfile
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-storaged:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-storaged
+    privileged: true
+    volumes:
+      - /mnt/onyx:/mnt/onyx
+      - onyx-sockets:/run/onyx
+    command: ["--mount-root", "/mnt/onyx"]
+    restart: unless-stopped
+    networks:
+      - default
+
+  onyx-shared:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-shared }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-shared:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-shared
+    restart: unless-stopped
+    networks:
+      - default
+
+  onyx-core:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-core }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-core:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-core
+    volumes:
+      - /mnt/onyx:/mnt/onyx
+      - onyx-sockets:/run/onyx
+    command: ["--device-mount-root", "/mnt/onyx"]
+    restart: unless-stopped
+    depends_on:
+      - onyx-storaged
+      - onyx-shared
+    networks:
+      - default
+
+  onyx-api:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-api }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-api:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-api
+    volumes:
+      - onyx-sockets:/run/onyx
+    environment:
+      AUTHENTIK_BASE_URL: https://auth.cerulean.innotel.us
+    command: ["--listen", "0.0.0.0:8080"]
+    restart: unless-stopped
+    ports:
+      - "${ONYX_API_PORT:-8080}:8080"
+    depends_on:
+      - onyx-core
+    networks:
+      - default
+      - innotel-mesh-net
+
+  onyx-snapd:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-snapd }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-snapd:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-snapd
+    volumes:
+      - /mnt/onyx:/mnt/onyx
+      - onyx-sockets:/run/onyx
+    restart: unless-stopped
+    networks:
+      - default
+
+  onyx-backupd:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-backupd }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-backupd:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-backupd
+    command: ["--http-listen", "0.0.0.0:8084"]
+    volumes:
+      - /mnt/onyx:/mnt/onyx
+      - onyx-sockets:/run/onyx
+    restart: unless-stopped
+    networks:
+      - default
+
+  onyx-vmm:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-vmm }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-vmm:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-vmm
+    volumes:
+      - onyx-sockets:/run/onyx
+    restart: unless-stopped
+    networks:
+      - default
+
+  onyx-appd:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-appd }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-appd:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-appd
+    volumes:
+      - onyx-sockets:/run/onyx
+    restart: unless-stopped
+    networks:
+      - default
+
+  onyx-ai:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-ai }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-ai:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-ai
+    volumes:
+      - onyx-sockets:/run/onyx
+    environment:
+      OMNIROUTE_URL: http://${OMNIRROUTE_MESH_ADDR:-10.10.2.1}:${OMNIROUTE_PORT:-20128}
+    restart: unless-stopped
+    networks:
+      - default
+      - innotel-mesh-net
+
+  onyx-objectstore:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-objectstore }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-objectstore:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-objectstore
+    command: ["--http-listen", "0.0.0.0:9000"]
+    volumes:
+      - /mnt/onyx:/mnt/onyx
+      - onyx-sockets:/run/onyx
+    restart: unless-stopped
+    ports:
+      - "${ONYX_OBJECTSTORE_PORT:-9001}:9000"
+    networks:
+      - default
+
+  onyx-web:
+    build:
+      context: ../../onyx-oss-platform
+      dockerfile: docker/onyx-web/Dockerfile
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-web:${IMAGE_TAG:-latest}
+    container_name: g4-onyx-web
+    restart: unless-stopped
+    networks:
+      - default
+
+  # ── Consul registration ────────────────────────────────────────────────────
+  consul-reg-g4:
+    image: curlimages/curl:latest
+    container_name: g4-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "rizz-api|${MESH_SERVER_IP:-10.10.4.1}|8000|social,leaderboard" \
+          "rizz-app|${MESH_SERVER_IP:-10.10.4.1}|3010|social,leaderboard" \
+          "onyx-api|${MESH_SERVER_IP:-10.10.4.1}|8080|storage,nas" \
+          "onyx-objectstore|${MESH_SERVER_IP:-10.10.4.1}|9001|storage,s3"; do
+          NAME=$(echo "$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$svc" | cut -d'|' -f2)
+          PORT=$(echo "$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://consul:8500/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$NAME\",\"Address\":\"$ADDR\",\"Port\":$PORT,\"Tags\":[\"${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g4] Registered $NAME at $ADDR:$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+
+volumes:
+  rizz-data:
+  onyx-sockets:
+  onyx-config:
+  onyx-core-state:
+  onyx-api-state:
+  onyx-snapd-state:
+  onyx-backupd-state:
+  onyx-vmm-state:
+  onyx-appd-state:
+  onyx-ai-state:
+  onyx-objectstore-state:
+
+networks:
+  default:
+    name: g4-net
+  innotel-mesh-net:
+    external: true

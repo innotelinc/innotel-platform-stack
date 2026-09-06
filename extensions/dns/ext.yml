@@ -1,0 +1,13 @@
+name: cerulean-dns
+version: 1.0.0
+description: Cerulean DNS — BIND authoritative + ACME DNS-01 challenge
+group: any
+mesh_service: true
+mesh_dependencies:
+  - cerulean-auth
+local_dependencies: []
+compose_file: docker-compose.ext.yml
+env_file: .env.example
+ports:
+  - "53:53/udp"
+  - "53:53/tcp"

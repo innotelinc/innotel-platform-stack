@@ -1,0 +1,76 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Extension: monitoring — Prometheus + Grafana
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ext-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+    networks:
+      - default
+      - innotel-mesh-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ext-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - default
+      - innotel-mesh-net
+
+  consul-reg-monitor:
+    image: curlimages/curl:latest
+    container_name: ext-consul-reg-monitor
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 10
+        curl -s -X PUT http://consul:8500/v1/agent/service/register \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "Name": "grafana",
+            "Address": "${MESH_SERVER_IP}",
+            "Port": ${GRAFANA_PORT:-3000},
+            "Tags": ["monitoring","grafana","dashboards"]
+          }'
+        curl -s -X PUT http://consul:8500/v1/agent/service/register \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "Name": "prometheus",
+            "Address": "${MESH_SERVER_IP}",
+            "Port": 9090,
+            "Tags": ["monitoring","prometheus","metrics"]
+          }'
+        echo "[monitor] Registered prometheus + grafana at ${MESH_SERVER_IP}"
+    networks:
+      - default
+      - innotel-mesh-net
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  default:
+    name: ext-monitor-net
+  innotel-mesh-net:
+    external: true

@@ -1,0 +1,9 @@
+.env
+*.local
+extensions/.extensions.*
+groups/*/.extensions.*
+mesh/wg/data/
+mesh/registry/data/
+groups/*/consul/data/
+extensions/*/bind/
+extensions/*/acme/

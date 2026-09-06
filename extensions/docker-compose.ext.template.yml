@@ -1,0 +1,38 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Extension base template — copy this for new extensions
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+  my-extension:
+    image: ${MY_EXT_IMAGE:-my-extension:latest}
+    container_name: ${MY_EXT_NAME:-my-extension}
+    restart: unless-stopped
+    ports:
+      - "${MY_EXT_PORT:-8080}:8080"
+    environment:
+      # Cross-mesh dependencies are injected by the orchestrator:
+      # DEP_AUTHENTIK_ADDR, DEP_AUTHENTIK_PORT, etc.
+      - REGISTRY_ADDR=${REGISTRY_ADDR:-10.10.1.1:8500}
+      - SERVICE_NAME=my-extension
+      - SERVICE_ADDR=${MESH_SERVER_IP}
+      - SERVICE_PORT=8080
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # Optional: auto-register with Consul
+  # consul-register:
+  #   image: curlimages/curl:latest
+  #   entrypoint: ["/bin/sh", "-c"]
+  #   command:
+  #     - |
+  #       sleep 5
+  #       curl -s -X PUT http://consul:8500/v1/agent/service/register \
+  #         -d '{"Name":"my-extension","Address":"${MESH_SERVER_IP}","Port":8080}'
+  #   depends_on: [my-extension]
+
+networks:
+  default:
+    name: my-extension-net
+  innotel-mesh-net:
+    external: true

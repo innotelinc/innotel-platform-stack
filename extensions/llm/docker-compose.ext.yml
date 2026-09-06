@@ -1,0 +1,57 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Extension: omniroute-llm — OmniRoute LLM gateway for any group
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+  omniroute:
+    image: ${OMNIROUTE_IMAGE:-diegosouzapw/omniroute:latest}
+    container_name: ext-omniroute
+    restart: unless-stopped
+    ports:
+      - "${OMNIROUTE_PORT:-20128}:20128"
+    volumes:
+      - omniroute-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:20128/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+      - innotel-mesh-net
+
+  consul-reg-llm:
+    image: curlimages/curl:latest
+    container_name: ext-consul-reg-llm
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 10
+        curl -s -X PUT http://consul:8500/v1/agent/service/register \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "Name": "omniroute",
+            "Address": "${MESH_SERVER_IP}",
+            "Port": ${OMNIROUTE_PORT:-20128},
+            "Tags": ["llm","ai","openai-compatible"],
+            "Check": {
+              "TCP": "${MESH_SERVER_IP}:${OMNIROUTE_PORT:-20128}",
+              "Interval": "15s",
+              "Timeout": "5s"
+            }
+          }'
+        echo "[llm] Registered omniroute at ${MESH_SERVER_IP}:${OMNIROUTE_PORT:-20128}"
+    networks:
+      - default
+      - innotel-mesh-net
+    depends_on:
+      - omniroute
+
+volumes:
+  omniroute-data:
+
+networks:
+  default:
+    name: ext-llm-net
+  innotel-mesh-net:
+    external: true

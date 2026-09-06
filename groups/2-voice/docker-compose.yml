@@ -1,0 +1,213 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Group 2 — VOICE
+# Capstone (AI voice agents over Asterisk/FreePBX) + Zeus (VoIP PBX + fax)
+# + OmniRoute (single LLM gateway) + WireGuard mesh node
+# ══════════════════════════════════════════════════════════════════════════════
+# RAM: ~6 GiB | Ports: 8083, 3000, 3001, 3478, 20128, 51820
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: innotel-group2
+
+include:
+  - ../../mesh/docker-compose.mesh.yml
+
+services:
+  # ═══ CAPSTONE (AI Voice Agents) ═══════════════════════════════════════════
+
+  capstone-postgres:
+    image: pgvector/pgvector:pg17
+    container_name: g2-capstone-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: capstone
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${CAPSTONE_POSTGRES_PASSWORD:-capstonepass}
+    volumes:
+      - capstone-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - default
+      - innotel-mesh-net
+
+  capstone-redis:
+    image: redis:7
+    container_name: g2-capstone-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${CAPSTONE_REDIS_PASSWORD:-redissecret}"]
+    volumes:
+      - capstone-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${CAPSTONE_REDIS_PASSWORD:-redissecret}", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    networks:
+      - default
+
+  capstone-api:
+    build:
+      context: ../../capstone-voice-aiagent-platform
+    container_name: g2-capstone-api
+    restart: unless-stopped
+    ports:
+      - "${CAPSTONE_API_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:${CAPSTONE_POSTGRES_PASSWORD:-capstonepass}@g2-capstone-postgres:5432/capstone
+      REDIS_URL: redis://:${CAPSTONE_REDIS_PASSWORD:-redissecret}@g2-capstone-redis:6379
+      OMNIROUTE_URL: http://g2-omniroute:20128
+      AUTHENTIK_BASE_URL: https://auth.cerulean.innotel.us
+    depends_on:
+      - capstone-postgres
+      - capstone-redis
+    networks:
+      - default
+      - innotel-mesh-net
+
+  capstone-freepbx:
+    build:
+      context: ../../capstone-voice-aiagent-platform
+      dockerfile: Dockerfile.freepbx
+    container_name: g2-capstone-freepbx
+    restart: unless-stopped
+    ports:
+      - "${CAPSTONE_FREERPBX_PORT:-8083}:80"
+      - "5060:5060/udp"
+      - "5061:5061/tcp"
+    volumes:
+      - capstone-freepbx-data:/var/lib/freepbx
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # ── Standalone coturn (only runs if Zeus coturn is absent) ──────────────────
+  capstone-coturn:
+    image: coturn/coturn:latest
+    container_name: g2-capstone-coturn
+    profiles: ["standalone"]
+    restart: unless-stopped
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "5349:5349"
+    command:
+      - "-n"
+      - "--log-file=stdout"
+      - "--fingerprint"
+      - "--lt-cred-mech"
+      - "--no-multicast-peers"
+      - "--no-cli"
+      - "--no-tlsv1"
+      - "--no-tlsv1_1"
+      - "--listening-port=3478"
+      - "--tls-listening-port=5349"
+      - "--verbose"
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # ═══ ZEUS (VoIP PBX) ═════════════════════════════════════════════════════
+
+  zeus-portal:
+    build:
+      context: ../../zeus-pbx-platform
+    container_name: g2-zeus-portal
+    restart: unless-stopped
+    ports:
+      - "${ZEUS_PORT:-3001}:3000"
+    environment:
+      AUTHENTIK_BASE_URL: https://auth.cerulean.innotel.us
+      OMNIROUTE_URL: http://g2-omniroute:20128
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    networks:
+      - default
+      - innotel-mesh-net
+
+  zeus-coturn:
+    image: coturn/coturn:latest
+    container_name: g2-zeus-coturn
+    restart: unless-stopped
+    ports:
+      - "${ZEUS_COTURN_PORT:-3478}:3478"
+      - "3478:3478/udp"
+      - "5349:5349"
+    command:
+      - "-n"
+      - "--log-file=stdout"
+      - "--fingerprint"
+      - "--lt-cred-mech"
+      - "--no-multicast-peers"
+      - "--no-cli"
+      - "--no-tlsv1"
+      - "--no-tlsv1_1"
+      - "--listening-port=3478"
+      - "--tls-listening-port=5349"
+      - "--verbose"
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # ── OmniRoute (single LLM gateway for ALL stacks) ─────────────────────────
+  omniroute:
+    image: ${OMNIROUTE_IMAGE:-diegosouzapw/omniroute:latest}
+    container_name: g2-omniroute
+    restart: unless-stopped
+    ports:
+      - "${OMNIROUTE_PORT:-20128}:20128"
+    volumes:
+      - omniroute-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:20128/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # ── Consul registration ────────────────────────────────────────────────────
+  consul-reg-g2:
+    image: curlimages/curl:latest
+    container_name: g2-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "capstone-api|${MESH_SERVER_IP:-10.10.2.1}|3000|voice,ai-agents" \
+          "capstone-freepbx|${MESH_SERVER_IP:-10.10.2.1}|8083|voice,pbx" \
+          "zeus-portal|${MESH_SERVER_IP:-10.10.2.1}|3001|voice,pbx,portal" \
+          "omniroute|${MESH_SERVER_IP:-10.10.2.1}|20128|llm,ai,gateway"; do
+          NAME=$(echo "$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$svc" | cut -d'|' -f2)
+          PORT=$(echo "$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://consul:8500/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$NAME\",\"Address\":\"$ADDR\",\"Port\":$PORT,\"Tags\":[\"${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g2] Registered $NAME at $ADDR:$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+
+volumes:
+  capstone-postgres:
+  capstone-redis:
+  capstone-freepbx-data:
+  omniroute-data:
+
+networks:
+  default:
+    name: g2-net
+  innotel-mesh-net:
+    external: true

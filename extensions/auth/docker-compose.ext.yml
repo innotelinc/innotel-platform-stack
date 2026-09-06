@@ -1,0 +1,129 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Extension: cerulean-auth — Authentik SSO for any group
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+  authentik-server:
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2024.12.2}
+    container_name: ext-authentik-server
+    restart: unless-stopped
+    command: server
+    environment:
+      AUTHENTIK_REDIS__HOST: ext-authentik-redis
+      AUTHENTIK_POSTGRESQL__HOST: ext-authentik-postgres
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_PG_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_PG_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_PG_PASSWORD:?set in .env}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?set in .env}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@innotel.us}
+    ports:
+      - "${AUTHENTIK_PORT:-9000}:9000"
+      - "${AUTHENTIK_TLS_PORT:-9443}:9443"
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+    networks:
+      - default
+      - innotel-mesh-net
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2024.12.2}
+    container_name: ext-authentik-worker
+    restart: unless-stopped
+    command: worker
+    environment:
+      AUTHENTIK_REDIS__HOST: ext-authentik-redis
+      AUTHENTIK_POSTGRESQL__HOST: ext-authentik-postgres
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_PG_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_PG_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_PG_PASSWORD:?set in .env}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?set in .env}
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+    networks:
+      - default
+      - innotel-mesh-net
+
+  authentik-postgres:
+    image: postgres:16-alpine
+    container_name: ext-authentik-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${AUTHENTIK_PG_DB:-authentik}
+      POSTGRES_USER: ${AUTHENTIK_PG_USER:-authentik}
+      POSTGRES_PASSWORD: ${AUTHENTIK_PG_PASSWORD:?set in .env}
+    volumes:
+      - authentik-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AUTHENTIK_PG_USER:-authentik}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  authentik-redis:
+    image: redis:7-alpine
+    container_name: ext-authentik-redis
+    restart: unless-stopped
+    command: --save 60 1 --loglevel warning
+    volumes:
+      - authentik-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  consul-reg-auth:
+    image: curlimages/curl:latest
+    container_name: ext-consul-reg-auth
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 10
+        curl -s -X PUT http://consul:8500/v1/agent/service/register \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "Name": "authentik",
+            "Address": "${MESH_SERVER_IP}",
+            "Port": ${AUTHENTIK_PORT:-9000},
+            "Tags": ["auth","sso","oidc"],
+            "Check": {
+              "TCP": "${MESH_SERVER_IP}:${AUTHENTIK_PORT:-9000}",
+              "Interval": "15s",
+              "Timeout": "5s"
+            }
+          }'
+        echo "[auth] Registered authentik at ${MESH_SERVER_IP}:${AUTHENTIK_PORT:-9000}"
+    networks:
+      - default
+      - innotel-mesh-net
+    depends_on:
+      - authentik-server
+
+volumes:
+  authentik-media:
+  authentik-templates:
+  authentik-postgres:
+  authentik-redis:
+
+networks:
+  default:
+    name: ext-auth-net
+  innotel-mesh-net:
+    external: true

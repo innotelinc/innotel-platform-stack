@@ -1,0 +1,11 @@
+name: omniroute-llm
+version: 1.0.0
+description: OmniRoute LLM gateway — OpenAI-compatible API proxy for any group
+group: any
+mesh_service: true
+mesh_dependencies: []
+local_dependencies: []
+compose_file: docker-compose.ext.yml
+env_file: .env.example
+ports:
+  - "20128:20128"

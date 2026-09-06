@@ -139,6 +139,69 @@ The remaining platforms are **business functions** built on top:
               application data for other platforms
 ```
 
+## Multi-Server Deployment
+
+The stack runs across 5 independent servers connected by a WireGuard mesh.
+Each group runs on its own server and discovers others via Consul.
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                    WireGuard Mesh (10.10.0.0/16)                        │
+│                                                                          │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐
+│  │  Server 1  │  │  Server 2  │  │  Server 3  │  │  Server 4  │  │  Server 5  │
+│  │  10.10.1.1 │  │  10.10.2.1 │  │  10.10.3.1 │  │  10.10.4.1 │  │  10.10.5.1 │
+│  │            │  │            │  │            │  │            │  │            │
+│  │  Cerulean  │  │  Capstone  │  │  Monarch   │  │  Rizzaura  │  │   Atlas    │
+│  │  AthenIQ   │  │   Zeus     │  │  Jellyfin  │  │   ONYX     │  │   Oasis    │
+│  │  Magnate   │  │ OmniRoute  │  │    *arr    │  │            │  │   Gitea    │
+│  │  Consul    │  │            │  │    NPM     │  │            │  │   Chef     │
+│  │  ~8 GiB    │  │  ~6 GiB    │  │  ~8 GiB    │  │  ~6 GiB    │  │  ~4 GiB    │
+│  └────────────┘  └────────────┘  └────────────┘  └────────────┘  └────────────┘
+│                                                                          │
+│  Consul Registry (10.10.1.1:8500) — every group registers here          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### Quick Start
+
+```bash
+# Clone on each server
+git clone https://github.com/innotelinc/innotel-platform-stack.git
+cd innotel-platform-stack
+cp .env.example .env   # fill in server IPs, WG keys, etc.
+
+# Server 1 — starts mesh + Consul + Group 1
+./stack.sh up 1
+
+# Servers 2-5 — join mesh + start their group
+./stack.sh up 2   # on server 2
+./stack.sh up 3   # on server 3
+# ...
+
+# Single-server mode (everything on one box)
+./stack.sh up all
+```
+
+### Universal Extension System
+
+Extensions attach to any group and auto-discover cross-group dependencies:
+
+```bash
+# Enable monitoring (Prometheus + Grafana) on all servers
+./stack.sh enable monitoring all
+
+# Enable Authentik on a specific server
+./stack.sh enable cerulean-auth 4
+
+# Discover any service across the mesh
+./stack.sh discover omniroute   # → 10.10.2.1:20128
+./stack.sh discover authentik   # → 10.10.1.1:9000
+```
+
+See [docs/Architecture.md](docs/Architecture.md) for the full architecture reference
+and [extensions/README.md](extensions/README.md) for the extension authoring guide.
+
 ## Platform responsibilities
 
 ### Platform services (horizontal layers)
@@ -430,6 +493,22 @@ Rules that hold in both:
 | zapit (TransferOps) | [innotelinc/zapit](https://github.com/innotelinc/zapit) | [docs/stack.md](https://github.com/innotelinc/zapit/blob/main/docs/stack.md) |
 | AthenIQ (LearningOps) | [innotelinc/atheniq](https://github.com/innotelinc/atheniq) | [docs/stack.md](https://github.com/innotelinc/atheniq/blob/main/docs/stack.md) |
 | Atlas (CodeOps) | [innotelinc/atlas](https://github.com/innotelinc/atlas) | [docs/stack.md](https://github.com/innotelinc/atlas/blob/main/docs/stack.md) |
+
+## `stack.sh` Commands
+
+| Command | Description |
+|---|---|
+| `./stack.sh up all` | Start everything (single-server mode) |
+| `./stack.sh up <1-5>` | Start a specific group |
+| `./stack.sh down all` | Stop everything |
+| `./stack.sh status` | Show all groups and services |
+| `./stack.sh list` | List groups, extensions, and discovered services |
+| `./stack.sh enable <ext> [group]` | Enable an extension |
+| `./stack.sh disable <ext> [group]` | Disable an extension |
+| `./stack.sh discover <service>` | Find a service by name across all groups |
+| `./stack.sh register <svc> <addr> <port> [tags]` | Register a service manually |
+| `./stack.sh mesh` | Start only the WireGuard mesh |
+| `./stack.sh logs <group>` | Tail logs for a group |
 
 ---
 

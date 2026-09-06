@@ -1,0 +1,64 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Extension: cerulean-dns — BIND authoritative + ACME DNS-01
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+  bind:
+    image: internetsystemsconsortium/bind9:9.19
+    container_name: ext-bind
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+    volumes:
+      - ./bind/zones:/etc/bind/zones
+      - ./bind/named.conf:/etc/bind/named.conf
+    networks:
+      - default
+      - innotel-mesh-net
+
+  acme:
+    image: goacme/lego:v4
+    container_name: ext-acme
+    restart: unless-stopped
+    volumes:
+      - ./acme/certs:/certs
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          lego --email ops@innotel.us --dns rfc2136 \
+            --dns.rfc2136-nameserver ext-bind:53 \
+            --domains "*.${DOMAIN:-innotel.us}" run
+          sleep 604800  # renew weekly
+        done
+    depends_on:
+      - bind
+    networks:
+      - default
+
+  consul-reg-dns:
+    image: curlimages/curl:latest
+    container_name: ext-consul-reg-dns
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 10
+        curl -s -X PUT http://consul:8500/v1/agent/service/register \
+          -H 'Content-Type: application/json' \
+          -d '{
+            "Name": "dns",
+            "Address": "${MESH_SERVER_IP}",
+            "Port": 53,
+            "Tags": ["dns","bind","acme"]
+          }'
+        echo "[dns] Registered DNS at ${MESH_SERVER_IP}:53"
+    networks:
+      - default
+      - innotel-mesh-net
+
+networks:
+  default:
+    name: ext-dns-net
+  innotel-mesh-net:
+    external: true

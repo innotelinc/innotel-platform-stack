@@ -1,0 +1,16 @@
+{
+  "node_name": "consul-server",
+  "server": true,
+  "bootstrap_expect": 1,
+  "ui_config": {
+    "enabled": true
+  },
+  "encrypt": "${REGISTRY_ENCRYPT_KEY}",
+  "addresses": {
+    "http": "0.0.0.0",
+    "grpc": "0.0.0.0"
+  },
+  "connect": {
+    "enabled": true
+  }
+}

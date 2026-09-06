@@ -1,0 +1,15 @@
+name: cerulean-auth
+version: 1.0.0
+description: Cerulean Authentik SSO — single sign-on for any group
+group: any
+mesh_service: true
+mesh_dependencies: []
+local_dependencies: []
+compose_file: docker-compose.ext.yml
+env_file: .env.example
+ports:
+  - "9000:9000"
+  - "9443:9443"
+volumes:
+  - authentik-media
+  - authentik-templates

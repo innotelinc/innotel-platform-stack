@@ -1,0 +1,80 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# WireGuard Mesh — cross-network overlay for all Innotel groups
+# ══════════════════════════════════════════════════════════════════════════════
+# Each server runs this stack.  The mesh creates a flat 10.10.0.0/16 network
+# so every container on every server can reach every other container by its
+# mesh IP, regardless of physical network.
+#
+# Usage:
+#   docker compose -f mesh/docker-compose.mesh.yml up -d
+#
+# Per-server config lives in mesh/wg/serverN.env (see .env.example for IPs).
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: innotel-mesh
+
+services:
+  # ── WireGuard ──────────────────────────────────────────────────────────────
+  wireguard:
+    image: linuxserver/wireguard:latest
+    container_name: mesh-wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=0
+      - PGID=0
+      - TZ=UTC
+      - SERVERURL=${SERVER_PUBLIC_IP}
+      - SERVERPORT=${MESH_PORT:-51820}
+      - PEERS=${MESH_PEERS:-4}          # one peer per other server
+      - PEERDNS=1.1.1.1
+      - INTERNAL_SUBNET=${MESH_SUBNET:-10.10.1.0}
+      - ALLOWEDIPS=${MESH_ALLOWEDIPS:-10.10.0.0/16}
+    volumes:
+      - ./wg/data:/config
+      - /lib/modules:/lib/modules
+    ports:
+      - ${MESH_PORT:-51820}:51820/udp
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv4.ip_forward=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wg", "show", "wg0"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Service Registry (Consul) ─────────────────────────────────────────────
+  # Lightweight Consul agent for service discovery.
+  # Group 1 runs the server; all others run client agents.
+  consul:
+    image: hashicorp/consul:1.19
+    container_name: mesh-consul
+    restart: unless-stopped
+    volumes:
+      - ./registry/data:/consul/data
+      - ./registry/config:/consul/config
+    ports:
+      - 8500:8500
+      - 8600:8600/udp
+    command: >
+      agent
+        -bind=0.0.0.0
+        -client=0.0.0.0
+        -datacenter=innotel
+        -data-dir=/consul/data
+        -config-dir=/consul/config
+        -ui
+        ${CONSUL_SERVER_FLAG:-}
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+networks:
+  default:
+    name: innotel-mesh-net
+    driver: bridge

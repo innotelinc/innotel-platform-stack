@@ -1,0 +1,390 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Group 1 — PRIMARY
+# Cerulean (Authentik + DNS/certs) + AthenIQ (Open edX LMS) + Magnate (billing)
+# + Consul service registry server + WireGuard mesh node
+# ══════════════════════════════════════════════════════════════════════════════
+# RAM: ~8 GiB | Ports: 3003, 9000, 9443, 18080, 3010, 8500, 51820
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: innotel-group1
+
+include:
+  - ../../mesh/docker-compose.mesh.yml
+
+services:
+  # ── Consul server (this is the authoritative registry) ──────────────────────
+  consul-server:
+    image: hashicorp/consul:1.19
+    container_name: g1-consul-server
+    restart: unless-stopped
+    ports:
+      - "8500:8500"
+    volumes:
+      - ./consul/data:/consul/data
+    command: >
+      agent -server -bootstrap-expect=1 -ui -client=0.0.0.0
+        -bind=0.0.0.0 -datacenter=innotel -data-dir=/consul/data
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # ═══ CERULEAN ═════════════════════════════════════════════════════════════
+  # Auth & trust backbone — Authentik SSO, Infisical secrets, Vault
+
+  cerulean:
+    build:
+      context: ../../cerulean-dns-platform
+    container_name: g1-cerulean
+    restart: unless-stopped
+    env_file: ../../cerulean-dns-platform/.env
+    ports:
+      - "${CERULEAN_PORT:-3003}:3003"
+    volumes:
+      - cerulean-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+      - innotel-mesh-net
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2024.12.2}
+    container_name: g1-authentik-server
+    restart: unless-stopped
+    command: server
+    env_file: ../../cerulean-dns-platform/.env
+    environment:
+      AUTHENTIK_REDIS__HOST: g1-authentik-redis
+      AUTHENTIK_POSTGRESQL__HOST: g1-authentik-postgres
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?set in .env}
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    depends_on:
+      g1-authentik-postgres:
+        condition: service_healthy
+      g1-authentik-redis:
+        condition: service_healthy
+    networks:
+      - default
+      - innotel-mesh-net
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2024.12.2}
+    container_name: g1-authentik-worker
+    restart: unless-stopped
+    command: worker
+    env_file: ../../cerulean-dns-platform/.env
+    environment:
+      AUTHENTIK_REDIS__HOST: g1-authentik-redis
+      AUTHENTIK_POSTGRESQL__HOST: g1-authentik-postgres
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?set in .env}
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    depends_on:
+      g1-authentik-postgres:
+        condition: service_healthy
+      g1-authentik-redis:
+        condition: service_healthy
+    networks:
+      - default
+      - innotel-mesh-net
+
+  authentik-postgres:
+    image: postgres:16-alpine
+    container_name: g1-authentik-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: ${AUTHENTIK_PG_PASSWORD:?set in .env}
+    volumes:
+      - authentik-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentik"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  authentik-redis:
+    image: redis:7-alpine
+    container_name: g1-authentik-redis
+    restart: unless-stopped
+    command: --save 60 1 --loglevel warning
+    volumes:
+      - authentik-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  infisical:
+    image: lukechann/infisical:latest
+    container_name: g1-infisical
+    restart: unless-stopped
+    environment:
+      INFISICAL_DATABASE_URL: postgresql://infisical:${INFISICAL_PG_PASSWORD}@g1-infisical-db:5432/infisical
+      INFISICAL_REDIS_URL: redis://g1-infisical-redis:6379
+      SITE_URL: https://secrets.cerulean.innotel.us
+    ports:
+      - "8080:8080"
+    depends_on:
+      - g1-infisical-db
+      - g1-infisical-redis
+    networks:
+      - default
+      - innotel-mesh-net
+
+  infisical-db:
+    image: postgres:16-alpine
+    container_name: g1-infisical-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: infisical
+      POSTGRES_USER: infisical
+      POSTGRES_PASSWORD: ${INFISICAL_PG_PASSWORD:-infisicalpass}
+    volumes:
+      - infisical-db:/var/lib/postgresql/data
+    networks:
+      - default
+
+  infisical-redis:
+    image: redis:7-alpine
+    container_name: g1-infisical-redis
+    restart: unless-stopped
+    networks:
+      - default
+
+  vault:
+    image: hashicorp/vault:latest
+    container_name: g1-vault
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_ADDR: http://0.0.0.0:8200
+    volumes:
+      - vault-data:/vault/file
+    ports:
+      - "8200:8200"
+    command: server -dev -dev-root-token-id=root
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # ═══ ATHENIQ (Open edX LMS) ══════════════════════════════════════════════
+  # Tutor manages its own containers; we reference the tutor compose here.
+  # For production, run: sudo -u tutor tutor local start
+  # This block is the tutor-managed stack for reference.
+
+  tutor-mysql:
+    image: docker.io/mysql:8.4.11
+    container_name: g1-tutor-mysql
+    restart: unless-stopped
+    command: >
+      mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+      --binlog-expire-logs-seconds=259200 --mysql-native-password=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: ${TUTOR_MYSQL_ROOT_PASSWORD:?set in .env}
+    volumes:
+      - tutor-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+      - innotel-mesh-net
+
+  tutor-mongodb:
+    image: docker.io/mongo:7.0.39
+    container_name: g1-tutor-mongodb
+    restart: unless-stopped
+    command: mongod --storageEngine wiredTiger
+    user: "999:999"
+    volumes:
+      - tutor-mongodb:/data/db
+    networks:
+      - default
+
+  tutor-redis:
+    image: docker.io/redis:7.4.10
+    container_name: g1-tutor-redis
+    restart: unless-stopped
+    volumes:
+      - tutor-redis:/data
+    networks:
+      - default
+
+  tutor-lms:
+    image: docker.io/overhangio/openedx:22.0.2
+    container_name: g1-tutor-lms
+    restart: unless-stopped
+    command: ./lms.sh gunicorn -b 0.0.0.0:18000 -w 2 --timeout 120
+    environment:
+      SERVICE_VARIANT: lms
+      DJANGO_SETTINGS_MODULE: lms.envs.tutor.production
+    volumes:
+      - tutor-lms-data:/openedx/data
+    depends_on:
+      - tutor-mysql
+      - tutor-mongodb
+      - tutor-redis
+    networks:
+      - default
+      - innotel-mesh-net
+
+  tutor-cms:
+    image: docker.io/overhangio/openedx:22.0.2
+    container_name: g1-tutor-cms
+    restart: unless-stopped
+    command: ./cms.sh gunicorn -b 0.0.0.0:18001 -w 2 --timeout 120
+    environment:
+      SERVICE_VARIANT: cms
+      DJANGO_SETTINGS_MODULE: cms.envs.tutor.production
+    volumes:
+      - tutor-cms-data:/openedx/data
+    depends_on:
+      - tutor-mysql
+      - tutor-mongodb
+      - tutor-redis
+    networks:
+      - default
+      - innotel-mesh-net
+
+  tutor-caddy:
+    image: docker.io/overhangio/tutor:22.0.2
+    container_name: g1-tutor-caddy
+    restart: unless-stopped
+    ports:
+      - "${OPENEDX_CADDY_PORT:-18080}:80"
+    depends_on:
+      - tutor-lms
+      - tutor-cms
+    networks:
+      - default
+      - innotel-mesh-net
+
+  tutor-meilisearch:
+    image: docker.io/getmeili/meilisearch:v1.36.0
+    container_name: g1-tutor-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${TUTOR_MEILI_KEY:-miFS50LGWh0Uc75s5upoe3ER}
+    volumes:
+      - tutor-meilisearch:/meili_data
+    networks:
+      - default
+
+  # ═══ MAGNATE (Billing) ═══════════════════════════════════════════════════
+  magnate:
+    build:
+      context: ../../magnate-subscription-platform
+    container_name: g1-magnate
+    restart: unless-stopped
+    ports:
+      - "${MAGNATE_PORT:-3010}:3010"
+    environment:
+      DATABASE_URL: postgresql://magnate:${MAGNATE_PG_PASSWORD:-magnatepass}@g1-magnate-db:5432/magnate
+      AUTHENTIK_BASE_URL: https://auth.cerulean.innotel.us
+      AUTHENTIK_CLIENT_ID: magnate
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    depends_on:
+      - g1-magnate-db
+    networks:
+      - default
+      - innotel-mesh-net
+
+  magnate-db:
+    image: postgres:16-alpine
+    container_name: g1-magnate-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: magnate
+      POSTGRES_USER: magnate
+      POSTGRES_PASSWORD: ${MAGNATE_PG_PASSWORD:-magnatepass}
+    volumes:
+      - magnate-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U magnate"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  # ── Consul service registration ─────────────────────────────────────────────
+  consul-reg-g1:
+    image: curlimages/curl:latest
+    container_name: g1-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "cerulean|${MESH_SERVER_IP:-10.10.1.1}|3003|auth,primary" \
+          "authentik|${MESH_SERVER_IP:-10.10.1.1}|9000|auth,sso,oidc" \
+          "infisical|${MESH_SERVER_IP:-10.10.1.1}|8080|secrets,vault" \
+          "vault|${MESH_SERVER_IP:-10.10.1.1}|8200|secrets,vault" \
+          "lms|${MESH_SERVER_IP:-10.10.1.1}|18080|education,primary" \
+          "magnate|${MESH_SERVER_IP:-10.10.1.1}|3010|billing,primary"; do
+          NAME=$(echo "$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$svc" | cut -d'|' -f2)
+          PORT=$(echo "$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://consul:8500/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$NAME\",\"Address\":\"$ADDR\",\"Port\":$PORT,\"Tags\":[\"${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g1] Registered $NAME at $ADDR:$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+    depends_on:
+      - consul-server
+
+volumes:
+  cerulean-data:
+  authentik-media:
+  authentik-templates:
+  authentik-postgres:
+  authentik-redis:
+  infisical-db:
+  vault-data:
+  tutor-mysql:
+  tutor-mongodb:
+  tutor-redis:
+  tutor-lms-data:
+  tutor-cms-data:
+  tutor-meilisearch:
+  magnate-db:
+
+networks:
+  default:
+    name: g1-net
+  innotel-mesh-net:
+    external: true

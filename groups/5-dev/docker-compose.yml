@@ -1,0 +1,177 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Group 5 — DEV
+# Atlas (Gitea + Chef + Convex) + Oasis (Zimbra mail server)
+# + WireGuard mesh node
+# ══════════════════════════════════════════════════════════════════════════════
+# RAM: ~4 GiB | Ports: 3000, 8443, 25, 587, 993, 51820
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: innotel-group5
+
+include:
+  - ../../mesh/docker-compose.mesh.yml
+
+services:
+  # ═══ ATLAS (Development Platform) ══════════════════════════════════════════
+
+  gitea:
+    image: gitea/gitea:latest
+    container_name: g5-gitea
+    restart: unless-stopped
+    ports:
+      - "${GITEA_PORT:-3000}:3000"
+      - "2222:22"
+    environment:
+      - GITEA__database__DB_TYPE=sqlite3
+      - GITEA__server__ROOT_URL=https://git.${DOMAIN:-innotel.us}
+      - GITEA__server__DOMAIN=git.${DOMAIN:-innotel.us}
+    volumes:
+      - gitea-data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - default
+      - innotel-mesh-net
+
+  gitea-db:
+    image: postgres:16-alpine
+    container_name: g5-gitea-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gitea
+      POSTGRES_USER: gitea
+      POSTGRES_PASSWORD: ${GITEA_PG_PASSWORD:-giteapass}
+    volumes:
+      - gitea-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gitea"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  # ── Chef (app building via Convex) ─────────────────────────────────────────
+  chef:
+    image: ${CHEF_IMAGE:-innotel/chef:latest}
+    container_name: g5-chef
+    restart: unless-stopped
+    environment:
+      CONVEX_URL: http://g5-convex:3210
+      GITEA_URL: http://g5-gitea:3000
+    volumes:
+      - chef-workspace:/workspace
+    depends_on:
+      - gitea
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # ── Convex (self-hosted backend) ──────────────────────────────────────────
+  convex:
+    image: ${CONVEX_IMAGE:-get-convex/convex-backend:latest}
+    container_name: g5-convex
+    restart: unless-stopped
+    ports:
+      - "3210:3210"
+    volumes:
+      - convex-data:/convex/data
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # ═══ OASIS (Mail Server) ═════════════════════════════════════════════════
+
+  oasis-postgres:
+    image: postgres:16.4-alpine
+    container_name: g5-oasis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-oasis}
+      POSTGRES_USER: ${POSTGRES_USER:-oasis}
+      POSTGRES_PASSWORD: ${OASIS_PG_PASSWORD:?set in .env}
+    volumes:
+      - oasis-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oasis} -d ${POSTGRES_DB:-oasis}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  oasis-redis:
+    image: redis:7.4-alpine
+    container_name: g5-oasis-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
+    volumes:
+      - oasis-redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - default
+
+  oasis-mail:
+    build:
+      context: ../../oasis-mail-platform
+    container_name: g5-oasis-mail
+    restart: unless-stopped
+    ports:
+      - "${OASIS_SMTP_PORT:-587}:587"
+      - "${OASIS_IMAP_PORT:-993}:993"
+      - "${OASIS_WEB_PORT:-8443}:443"
+    environment:
+      DATABASE_URL: postgresql://oasis:${OASIS_PG_PASSWORD}@g5-oasis-postgres:5432/oasis
+      REDIS_URL: redis://:${REDIS_PASSWORD}@g5-oasis-redis:6379
+      AUTHENTIK_BASE_URL: https://auth.cerulean.innotel.us
+    depends_on:
+      - oasis-postgres
+      - oasis-redis
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # ── Consul registration ────────────────────────────────────────────────────
+  consul-reg-g5:
+    image: curlimages/curl:latest
+    container_name: g5-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "gitea|${MESH_SERVER_IP:-10.10.5.1}|3000|dev,git,code" \
+          "chef|${MESH_SERVER_IP:-10.10.5.1}|3210|dev,build,convex" \
+          "oasis-mail|${MESH_SERVER_IP:-10.10.5.1}|587|mail,smtp"; do
+          NAME=$(echo "$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$svc" | cut -d'|' -f2)
+          PORT=$(echo "$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://consul:8500/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$NAME\",\"Address\":\"$ADDR\",\"Port\":$PORT,\"Tags\":[\"${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g5] Registered $NAME at $ADDR:$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+
+volumes:
+  gitea-data:
+  gitea-db:
+  chef-workspace:
+  convex-data:
+  oasis-postgres:
+  oasis-redis:
+
+networks:
+  default:
+    name: g5-net
+  innotel-mesh-net:
+    external: true

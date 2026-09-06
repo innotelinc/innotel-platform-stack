@@ -1,0 +1,16 @@
+name: monitoring
+version: 1.0.0
+description: Prometheus + Grafana metrics and dashboards for any group
+group: any
+mesh_service: true
+mesh_dependencies:
+  - cerulean-auth
+local_dependencies: []
+compose_file: docker-compose.ext.yml
+env_file: .env.example
+ports:
+  - "9090:9090"
+  - "3000:3000"
+volumes:
+  - prometheus-data
+  - grafana-data
