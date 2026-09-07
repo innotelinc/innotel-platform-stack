@@ -79,21 +79,18 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${VERSION}"
-          NOTES<<'NOTESEOF'
-          Innotel Platform Stack **$VERSION** — the canonical single-responsibility architecture definition for the whole Innotel ecosystem.
-
-          This release bundles the canonical stack definition, the `stack.sh` orchestrator,
-          the conformity standard, the shared scripts, and the docs snapshot used by every
-          product repository.
-
-          **Artifact**
-          - `innotel-platform-stack-${VERSION#v}.tar.gz` + `sha256`
-
-          **See also**
-          - [docs/stack.md](https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/stack.md) — the owns/consumes map
-          - [docs/standard.md](https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/standard.md) — the repo conformity standard
-          - [scripts/conform-project.sh](https://github.com/innotelinc/innotel-platform-stack/blob/main/scripts/conform-project.sh) — the scaffold/audit tool
-          NOTESEOF
+          NOTES=$(printf '%s\n' \
+            "Innotel Platform Stack **${VERSION}** — the canonical single-responsibility architecture definition for the whole Innotel ecosystem." \
+            "" \
+            "This release bundles the canonical stack definition, the stack.sh orchestrator, the conformity standard, the shared scripts, and the docs snapshot used by every product repository." \
+            "" \
+            "**Artifact**" \
+            "- innotel-platform-stack-${VERSION#v}.tar.gz + sha256" \
+            "" \
+            "**See also**" \
+            "- [docs/stack.md](https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/stack.md) — the owns/consumes map" \
+            "- [docs/standard.md](https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/standard.md) — the repo conformity standard" \
+            "- [scripts/conform-project.sh](https://github.com/innotelinc/innotel-platform-stack/blob/main/scripts/conform-project.sh) — the scaffold/audit tool")
           gh release create "$VERSION" \
             "dist/innotel-platform-stack-${VERSION#v}.tar.gz" \
             "dist/innotel-platform-stack-${VERSION#v}.tar.gz.sha256" \
