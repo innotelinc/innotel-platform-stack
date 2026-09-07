@@ -67,7 +67,7 @@ jobs:
             --exclude='./.github' \
             --exclude='./.gitignore' \
             -czf "dist/$ARCHIVE" \
-            README.md LICENSE docs web groups stack.sh .env.example extensions mesh
+            README.md LICENSE docs web groups stack.sh scripts .env.example extensions mesh
           (cd dist && sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256")
           ls -lh dist/
           echo "bundle=$ARCHIVE" >> "$GITHUB_OUTPUT"
