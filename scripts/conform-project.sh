@@ -753,6 +753,9 @@ audit() {
   [ "$_ok" = ok ] && check "LICENSE is tracked (not gitignored)" true || check "LICENSE is tracked (not gitignored)" false
   _ok=$([ -f "$dir/.env.example" ] && echo ok || true)
   [ "$_ok" = ok ] && check ".env.example exists" true || check ".env.example exists" false
+  # .env.example must be COMMITTED — a fresh clone only has tracked files.
+  _ok=$(git -C "$dir" check-ignore -q .env.example 2>/dev/null && echo ignored || echo ok)
+  [ "$_ok" = ok ] && check ".env.example is tracked (not gitignored)" true || check ".env.example is tracked (not gitignored)" false
   _ok=$([ -f "$dir/.gitignore" ] && echo ok || true)
   [ "$_ok" = ok ] && check ".gitignore exists" true || check ".gitignore exists" false
 
