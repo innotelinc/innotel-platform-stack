@@ -46,7 +46,7 @@ The remaining platforms are **business functions** built on top:
 | zapit | TransferOps | Authentik (optional) |
 | AthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge |
 | Atlas | CodeOps | Authentik · Infisical · Cerulean · Magnate · NPM Edge |
-| Distro | BuilderOps | OmniRoute · NPM Edge · Infisical · Authentik · Magnate |
+| Distro | BuilderOps | OmniRoute · NPM Edge · Infisical · Authentik · Magnate · Cerulean |
 
 ## Documents
 
@@ -323,7 +323,7 @@ this pattern so re-running them never re-issues or detaches certs.
   enforcement, and an admin console.
 - **Provides:** the interactive AI app-building front door — browser → Distro →
   OmniRoute → upstream models.
-- **Consumes:** OmniRoute (AI plane) · NPM Edge · Authentik · Infisical · Magnate (billing).
+- **Consumes:** OmniRoute (AI plane) · NPM Edge · Authentik · Infisical · Magnate (billing) · Cerulean (DNS + certs).
 - **Does not own:** identity, secrets, certificates/DNS, storage, or the
   LLM gateway itself (OmniRoute is a shared platform service / extension).
 
