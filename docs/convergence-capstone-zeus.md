@@ -129,7 +129,7 @@ ops bar. Gap analysis:
 | Ansible playbook for bare-metal PBX | ❌ none | port `ansible/dograh-ari.yml` pattern → `zeus-ari.yml` (optional) |
 | Offline + live-USB ISO deploy | ❌ none | reuse `scripts/build-live-usb.sh` / `build-offline-bundle.sh` |
 | Control Center ops dashboard (services/health/ports/alerts) | ✅ portal `/dashboard/health` ops view + `/api/health` | shared Control Center still open (Capstone dashboard is the recommended owner — §6 Q3) |
-| Observability (OTel → SigNoz) | ❌ none | optional `compose.observability.yml` profile |
+| Observability (OTel → SigNoz) | ✅ optional profile shipped 2026-09-07 | `compose.observability.yml` (zeus- prefixed Capstone topology); app OTel instrumentation optional |
 | Smoke tests (`smoke-test.sh` / `smoke-e2e.sh`) | ✅ `scripts/smoke-test.sh` (portal/edge/PBX/fax/numbers, mirrors Capstone convention) | — |
 | Infisical profile + setup | ✅ | runtime `infisical://` resolution shipped (`docker-entrypoint.sh` + `scripts/infisical-env.mjs`, node --test covered) |
 | Attribution guard + Pages landing | ✅ | done (guard + landing shipped) |
@@ -155,7 +155,7 @@ to Capstone's structural bar so the two projects feel like one platform.
 - [x] Smoke suite — `scripts/smoke-test.sh` (portal, edge, PBX, fax, numbers)
 - [x] Control Center surface — portal `/dashboard/health` ops view shipped;
       a shared Capstone-owned Control Center remains open (see §6 Q3)
-- [ ] Optional OTel → SigNoz profile (unchanged — still open)
+- [x] Optional OTel → SigNoz profile — `compose.observability.yml` + ClickHouse/Keeper/collector configs (zeus- prefixed Capstone topology); app-side OTel instrumentation remains optional
 - [x] `infisical://` runtime secret resolution in the portal (Go-style client
       or TS equivalent — same contract as Cerulean/Onyx; landed 2026-09-07 —
       `docker-entrypoint.sh` resolves refs at boot via
