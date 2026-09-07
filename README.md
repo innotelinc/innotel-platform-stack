@@ -46,6 +46,7 @@ The remaining platforms are **business functions** built on top:
 | zapit | TransferOps | Authentik (optional) |
 | AthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge |
 | Atlas | CodeOps | Authentik · Infisical · Cerulean · Magnate · NPM Edge |
+| Distro | BuilderOps | OmniRoute · NPM Edge · Infisical · Authentik |
 
 ## Documents
 
@@ -156,7 +157,8 @@ Each group runs on its own server and discovers others via Consul.
 │  │  AthenIQ   │  │   Zeus     │  │  Jellyfin  │  │   ONYX     │  │   Oasis    │
 │  │  Magnate   │  │ OmniRoute  │  │    *arr    │  │            │  │   Gitea    │
 │  │  Signara   │  │            │  │    NPM     │  │            │  │   Chef     │
-│  │  ~10 GiB   │  │  ~6 GiB    │  │  ~8 GiB    │  │  ~6 GiB    │  │  ~4 GiB    │
+│  │            │  │            │  │            │  │            │  │  Distro    │
+│  │  ~10 GiB   │  │  ~6 GiB    │  │  ~8 GiB    │  │  ~6 GiB    │  │  ~8 GiB    │
 │  └────────────┘  └────────────┘  └────────────┘  └────────────┘  └────────────┘
 │                                                                          │
 │  Consul Registry (10.10.1.1:8500) — every group registers here          │
@@ -313,6 +315,17 @@ this pattern so re-running them never re-issues or detaches certs.
 - **Consumes:** Authentik · Infisical · Cerulean · Magnate · NPM Edge.
 - **Does not own:** identity, secrets, certificates/DNS, storage, billing, or the
   production runtime of the platforms it helps build — Atlas holds the source.
+
+#### Distro — BuilderOps
+- **Owns:** the in-browser AI app builder (fork of bolt.diy): chat-to-code agent UI,
+  WebContainer sandbox, live preview, file tree, terminal; multi-tenant builder
+  accounts (Distro control plane) with per-user OmniRoute gateway keys, quota/usage
+  enforcement, and an admin console.
+- **Provides:** the interactive AI app-building front door — browser → Distro →
+  OmniRoute → upstream models.
+- **Consumes:** OmniRoute (AI plane) · NPM Edge · Authentik · Infisical.
+- **Does not own:** identity, secrets, certificates/DNS, storage, billing, or the
+  LLM gateway itself (OmniRoute is a shared platform service / extension).
 
 #### Capstone — AgentOps
 - **Owns:** voice AI agents, call screening, AI receptionists, speech processing, voice
@@ -499,6 +512,7 @@ Rules that hold in both:
 | zapit (TransferOps) | [innotelinc/zapit](https://github.com/innotelinc/zapit) | [docs/stack.md](https://github.com/innotelinc/zapit/blob/main/docs/stack.md) |
 | AthenIQ (LearningOps) | [innotelinc/atheniq](https://github.com/innotelinc/atheniq) | [docs/stack.md](https://github.com/innotelinc/atheniq/blob/main/docs/stack.md) |
 | Atlas (CodeOps) | [innotelinc/atlas](https://github.com/innotelinc/atlas) | [docs/stack.md](https://github.com/innotelinc/atlas/blob/main/docs/stack.md) |
+| Distro (BuilderOps) | [innotelinc/distro](https://github.com/innotelinc/distro) | [docs/stack.md](https://github.com/innotelinc/distro/blob/main/docs/stack.md) |
 
 ## `stack.sh` Commands
 

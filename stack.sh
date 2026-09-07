@@ -34,7 +34,7 @@ declare -A STACK_GROUPS=(
   [2]="voice|Capstone + Zeus + OmniRoute|~6 GiB"
   [3]="media|Monarch (Jellyfin + *arr + NPM)|~8 GiB"
   [4]="social|Rizzaura + ONYX|~6 GiB"
-  [5]="dev|Atlas + Oasis|~4 GiB"
+  [5]="dev|Atlas + Oasis + Distro|~8 GiB"
 )
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

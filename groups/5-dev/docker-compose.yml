@@ -1,9 +1,10 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Group 5 — DEV
 # Atlas (Gitea + Chef + Convex) + Oasis (Zimbra mail server)
-# + joins the shared WireGuard mesh
+# + Distro (BuilderOps — in-browser AI app builder) + joins the shared
+# WireGuard mesh
 # ══════════════════════════════════════════════════════════════════════════════
-# RAM: ~4 GiB | Ports: 3000, 8443, 25, 587, 993, 51820
+# RAM: ~8 GiB | Ports: 3000, 8443, 25, 587, 993, 5173, 20128, 20129, 20132, 20140, 51820
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: innotel-group5
@@ -133,7 +134,126 @@ services:
       - default
       - innotel-mesh-net
 
+  # ═══ DISTRO (BuilderOps — in-browser AI app builder) ══════════════════════════
+  # Standalone distro stack mirrored from innotelinc/distro's docker-compose.yml:
+  # a bundled OmniRoute gateway (AI plane) + control plane + web. Distro can
+  # instead consume the shared Group-2 OmniRoute by pointing its env at the mesh
+  # (OPENAI_LIKE_API_BASE_URL / GATEWAY_DASHBOARD_URL) and dropping the gateway
+  # service; docs/stack.md in the distro repo tracks that convergence.
+  # Secrets/env come from the root .env (see .env.example, "Distro (Group 5)").
+
+  distro-redis:
+    image: docker.io/library/redis:8.6.5-alpine
+    container_name: g5-distro-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - distro-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+
+  distro-gateway:
+    image: diegosouzapw/omniroute:${OMNIROUTE_IMAGE_TAG:-latest}
+    container_name: g5-distro-gateway
+    restart: unless-stopped
+    environment:
+      - DATA_DIR=/app/data
+      - PORT=20128
+      - DASHBOARD_PORT=20128
+      - API_PORT=20129
+      - API_HOST=0.0.0.0
+      - LIVE_WS_PORT=20132
+      - LIVE_WS_HOST=0.0.0.0
+      - REDIS_URL=redis://distro-redis:6379
+      - LIVE_WS_ALLOWED_ORIGINS=${LIVE_WS_ALLOWED_ORIGINS:-https://slots.${DOMAIN:-innotel.us},http://localhost:5173}
+      - NODE_OPTIONS=--max-old-space-size=${DISTRO_GATEWAY_MAX_OLD_SPACE_MB:-4096}
+    volumes:
+      - distro-gateway-data:/app/data
+    depends_on:
+      distro-redis:
+        condition: service_healthy
+    ports:
+      - "${DISTRO_GATEWAY_PORT:-20128}:20128"        # dashboard
+      - "${DISTRO_GATEWAY_API_PORT:-20129}:20129"    # OpenAI-compatible API (/v1/*)
+      - "${DISTRO_GATEWAY_WS_PORT:-20132}:20132"     # live workspace websocket
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - default
+      - innotel-mesh-net
+
+  distro-control-plane:
+    build:
+      context: ../../../distro/apps/control-plane
+    image: distro-control-plane:local
+    container_name: g5-distro-control-plane
+    restart: unless-stopped
+    environment:
+      - GATEWAY_DASHBOARD_URL=http://distro-gateway:20128
+      - GATEWAY_ADMIN_PASSWORD=${DISTRO_INITIAL_PASSWORD}
+      - ADMIN_EMAILS=${DISTRO_ADMIN_EMAILS:-}
+    volumes:
+      - distro-control-data:/data
+      # M4 usage sync reads the gateway's own ledger; only valid with the
+      # bundled gateway above. When consuming the shared Group-2 OmniRoute,
+      # drop this mount and rely on the dashboard API sync.
+      - distro-gateway-data:/gateway-data:ro
+    depends_on:
+      distro-gateway:
+        condition: service_healthy
+    ports:
+      - "${DISTRO_CONTROL_PORT:-20140}:20140"
+    networks:
+      - default
+      - innotel-mesh-net
+
+  distro-web:
+    build:
+      context: ../../../distro/apps/web
+      target: bolt-ai-production
+      args:
+        VITE_DEFAULT_MODEL: ${VITE_DEFAULT_MODEL:-gemini/gemini-2.5-flash}
+        VITE_DISTRO_GATEWAY_ONLY: "true"
+        VITE_DISTRO_CONTROL_PLANE: "true"
+        VITE_CONTROL_PLANE_URL: ${VITE_CONTROL_PLANE_URL:-}
+        VITE_PUBLIC_ORIGIN: ${VITE_PUBLIC_ORIGIN:-https://slots.${DOMAIN:-innotel.us}}
+        BUILD_HEAP_MB: ${BUILD_HEAP_MB:-4096}
+    image: distro-web:local
+    container_name: g5-distro-web
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - RUNNING_IN_DOCKER=true
+      - OPENAI_LIKE_API_BASE_URL=http://distro-gateway:20129/v1
+      - OPENAI_LIKE_API_KEY=${OPENAI_LIKE_API_KEY}
+      - DISTRO_ENFORCE_QUOTA=${DISTRO_ENFORCE_QUOTA:-true}
+      - CONTROL_PLANE_INTERNAL_URL=http://distro-control-plane:20140
+    depends_on:
+      distro-gateway:
+        condition: service_healthy
+    ports:
+      - "${DISTRO_WEB_PORT:-5173}:5173"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5173/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - default
+      - innotel-mesh-net
+
   # ── Consul registration ────────────────────────────────────────────────────
+
   consul-reg-g5:
     image: curlimages/curl:latest
     container_name: g5-consul-reg
@@ -144,7 +264,10 @@ services:
         for svc in \
           "gitea|${MESH_SERVER_IP:-10.10.5.1}|3000|dev,git,code" \
           "chef|${MESH_SERVER_IP:-10.10.5.1}|3210|dev,build,convex" \
-          "oasis-mail|${MESH_SERVER_IP:-10.10.5.1}|587|mail,smtp"; do
+          "oasis-mail|${MESH_SERVER_IP:-10.10.5.1}|587|mail,smtp" \
+          "distro-web|${MESH_SERVER_IP:-10.10.5.1}|5173|dev,builder,web" \
+          "distro-gateway|${MESH_SERVER_IP:-10.10.5.1}|20128|llm,ai,openai,distro" \
+          "distro-control-plane|${MESH_SERVER_IP:-10.10.5.1}|20140|dev,accounts,quota"; do
           NAME=$(echo "$$svc" | cut -d'|' -f1)
           ADDR=$(echo "$$svc" | cut -d'|' -f2)
           PORT=$(echo "$$svc" | cut -d'|' -f3)
@@ -166,6 +289,9 @@ volumes:
   convex-data:
   oasis-postgres:
   oasis-redis:
+  distro-gateway-data:
+  distro-redis-data:
+  distro-control-data:
 
 networks:
   default:
