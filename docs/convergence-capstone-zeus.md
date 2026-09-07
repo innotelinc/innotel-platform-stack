@@ -131,7 +131,7 @@ ops bar. Gap analysis:
 | Control Center ops dashboard (services/health/ports/alerts) | ✅ portal `/dashboard/health` ops view + `/api/health` | shared Control Center still open (Capstone dashboard is the recommended owner — §6 Q3) |
 | Observability (OTel → SigNoz) | ❌ none | optional `compose.observability.yml` profile |
 | Smoke tests (`smoke-test.sh` / `smoke-e2e.sh`) | ✅ `scripts/smoke-test.sh` (portal/edge/PBX/fax/numbers, mirrors Capstone convention) | — |
-| Infisical profile + setup | ✅ | runtime `infisical://` resolution (like Cerulean/Onyx) still open |
+| Infisical profile + setup | ✅ | runtime `infisical://` resolution shipped (`docker-entrypoint.sh` + `scripts/infisical-env.mjs`, node --test covered) |
 | Attribution guard + Pages landing | ✅ | done (guard + landing shipped) |
 | Stack doc + role page | ✅ `docs/stack.md` | link convergence doc (below) |
 
@@ -156,8 +156,10 @@ to Capstone's structural bar so the two projects feel like one platform.
 - [x] Control Center surface — portal `/dashboard/health` ops view shipped;
       a shared Capstone-owned Control Center remains open (see §6 Q3)
 - [ ] Optional OTel → SigNoz profile (unchanged — still open)
-- [ ] `infisical://` runtime secret resolution in the portal (Go-style client
-      or TS equivalent — same contract as Cerulean/Onyx)
+- [x] `infisical://` runtime secret resolution in the portal (Go-style client
+      or TS equivalent — same contract as Cerulean/Onyx; landed 2026-09-07 —
+      `docker-entrypoint.sh` resolves refs at boot via
+      `scripts/infisical-env.mjs`, docs/stack.md)
 
 > Ansible (`zeus-ari.yml`) and the offline/live-USB ISO are the remaining
 > bare-metal parity gaps — both optional per §6 Q4.
