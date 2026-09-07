@@ -46,7 +46,7 @@ The remaining platforms are **business functions** built on top:
 | zapit | TransferOps | Authentik (optional) |
 | AthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge |
 | Atlas | CodeOps | Authentik · Infisical · Cerulean · Magnate · NPM Edge |
-| Distro | BuilderOps | OmniRoute · NPM Edge · Infisical · Authentik |
+| Distro | BuilderOps | OmniRoute · NPM Edge · Infisical · Authentik · Magnate |
 
 ## Documents
 
@@ -313,7 +313,7 @@ this pattern so re-running them never re-issues or detaches certs.
 - **Provides:** the canonical git remote and CI for the other platforms' code, and
   the AI app builder that scaffolds new platform applications.
 - **Consumes:** Authentik · Infisical · Cerulean · Magnate · NPM Edge.
-- **Does not own:** identity, secrets, certificates/DNS, storage, billing, or the
+- **Does not own:** identity, secrets, certificates/DNS, storage, or the
   production runtime of the platforms it helps build — Atlas holds the source.
 
 #### Distro — BuilderOps
@@ -323,8 +323,8 @@ this pattern so re-running them never re-issues or detaches certs.
   enforcement, and an admin console.
 - **Provides:** the interactive AI app-building front door — browser → Distro →
   OmniRoute → upstream models.
-- **Consumes:** OmniRoute (AI plane) · NPM Edge · Authentik · Infisical.
-- **Does not own:** identity, secrets, certificates/DNS, storage, billing, or the
+- **Consumes:** OmniRoute (AI plane) · NPM Edge · Authentik · Infisical · Magnate (billing).
+- **Does not own:** identity, secrets, certificates/DNS, storage, or the
   LLM gateway itself (OmniRoute is a shared platform service / extension).
 
 #### Capstone — AgentOps
