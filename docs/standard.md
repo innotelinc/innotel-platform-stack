@@ -191,7 +191,9 @@ pure landing/marketing repo). But any repo that you `docker compose up` for must
 - Assembled/forked repos (Distro, Capstone, Monarch, etc.) keep upstream licenses in-tree and
   document attribution in `THIRD_PARTY_NOTICES.md` (or the README License section) — never
   re-license upstream material.
-- The license file must be the real license text, not a placeholder.
+- The license file must be the **full canonical text** of the chosen license (verbatim AGPL-3.0
+  or MIT body) — GitHub license detection returns NOASSERTION for short notices, which breaks
+  the repo-page license badge. The conformity audit enforces this.
 
 ---
 
