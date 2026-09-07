@@ -747,6 +747,10 @@ audit() {
   [ "$_ok" = ok ] && check "README.md exists" true || check "README.md exists" false
   _ok=$([ -f "$dir/LICENSE" ] && echo ok || true)
   [ "$_ok" = ok ] && check "LICENSE exists" true || check "LICENSE exists" false
+  # LICENSE must be COMMITTED (a fresh clone only has tracked files) — a
+  # file that merely exists locally but is gitignored fails CI audits.
+  _ok=$(git -C "$dir" check-ignore -q LICENSE 2>/dev/null && echo ignored || echo ok)
+  [ "$_ok" = ok ] && check "LICENSE is tracked (not gitignored)" true || check "LICENSE is tracked (not gitignored)" false
   _ok=$([ -f "$dir/.env.example" ] && echo ok || true)
   [ "$_ok" = ok ] && check ".env.example exists" true || check ".env.example exists" false
   _ok=$([ -f "$dir/.gitignore" ] && echo ok || true)
