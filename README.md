@@ -314,6 +314,10 @@ this pattern so re-running them never re-issues or detaches certs.
   the AI app builder that scaffolds new platform applications.
 - **Consumes:** Authentik · Infisical · Cerulean · Magnate · NPM Edge.
 - **Does not own:** identity, secrets, certificates/DNS, storage, or the
+- **Integrates with:** Atlas (CodeOps) — Distro builds apps live in the browser;
+  Atlas ships them via Gitea + Chef/Convex. Distro exports to Atlas git remaps;
+  Atlas scaffolds Convex backends for Distro-built apps. Both share OmniRoute,
+  Magnate, Authentik, Infisical, Cerulean, and NPM Edge.
   production runtime of the platforms it helps build — Atlas holds the source.
 
 #### Distro — BuilderOps
@@ -325,6 +329,10 @@ this pattern so re-running them never re-issues or detaches certs.
   OmniRoute → upstream models.
 - **Consumes:** OmniRoute (AI plane) · NPM Edge · Authentik · Infisical · Magnate (billing) · Cerulean (DNS + certs).
 - **Does not own:** identity, secrets, certificates/DNS, storage, or the
+- **Integrates with:** Atlas (CodeOps) — Distro builds apps live in the browser;
+  Atlas ships them via Gitea + Chef/Convex. Distro exports to Atlas git remaps;
+  Atlas scaffolds Convex backends for Distro-built apps. Both share OmniRoute,
+  Magnate, Authentik, Infisical, Cerulean, and NPM Edge.
   LLM gateway itself (OmniRoute is a shared platform service / extension).
 
 #### Capstone — AgentOps
