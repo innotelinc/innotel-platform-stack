@@ -1,5 +1,9 @@
 <div align="center">
 
+[![CI](https://github.com/innotelinc/innotel-platform-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/innotelinc/innotel-platform-stack/actions/workflows/ci.yml)
+[![Release](https://github.com/innotelinc/innotel-platform-stack/actions/workflows/release.yml/badge.svg)](https://github.com/innotelinc/innotel-platform-stack/actions/workflows/release.yml)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0-or-later-brightgreen.svg)](LICENSE)
+
 # 🏛️ Innotel Platform Stack
 
 **INNOTEL V1 Enterprise Architecture Bundle — the canonical single-responsibility platform ecosystem.**
@@ -8,6 +12,21 @@ One stack. Every platform owns exactly one job. Identity, secrets, trust, storag
 and edge are platform services; everything else is a business function that consumes them.
 
 </div>
+
+---
+
+## Why
+
+| Problem | Innotel Platform Stack answer |
+| --- | --- |
+| Fragmented self-hosted platforms with no canonical integration | One stack, one owns/consumes map, every platform documents its role in `docs/stack.md` |
+| Identity/session sprawl across platforms | Cerulean Authentik is the single identity source; disable a user and they lose every platform |
+| Secret drift across `.env` files | Infisical is the only secrets store; `.env` is derived and gitignored |
+| TLS/PKI managed per-platform | Cerulean issues certs and DNS; NPM Edge fronts public hosts only |
+| Revenue fragmentation | Magnate is the single billing plane; paid seats flow everywhere |
+| No release discipline | Every product repo has a `release.yml` that tags, builds GHCR images, and cuts a GitHub Release with artifacts |
+| Attribution sprawl | The attribution guard runs locally + in CI; only Darnel Hunter <dhunter@innotel.us> is credited |
+| Docs/standard drift across repos | A single conformity standard (`docs/standard.md`) + `scripts/conform-project.sh` audit every product repo |
 
 > **About this repo** — the source of truth for the Innotel Platform Stack: who owns what,
 > who consumes whom, how the platforms integrate, the order they deploy in, and the
@@ -539,5 +558,12 @@ Rules that hold in both:
 | `./stack.sh logs <group>` | Tail logs for a group |
 
 ---
+
+
+---
+
+## License
+
+Innotel Platform Stack is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See [LICENSE](LICENSE) for the full text.
 
 *Innotel Platform Stack — INNOTEL V1 Enterprise Architecture. One job per platform, platform services consumed by business functions.*

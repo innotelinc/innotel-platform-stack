@@ -1,0 +1,105 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# release.yml — Innotel Platform Stack release pipeline.
+#
+# Fires on every `v*` tag push (and on demand via workflow_dispatch):
+#   1. build-and-publish — the stack repo is a definition/orchestration layer,
+#      so the only artifact is the stack bundle + docs snapshot.
+#   2. release — cuts the GitHub Release with the stack bundle + checksums and
+#      generated release notes.
+#
+# The stack repo itself does not publish Docker images to GHCR; images come from
+# the platform repos that own them. This workflow publishes the canonical stack
+# bundle so operators can rebuild/verify a release from source.
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: Innotel Platform Stack release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version tag to build (default: use the pushed tag)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: innotel-platform-stack-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Cut the stack release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            if [[ ! "$VERSION" =~ ^v ]]; then
+              VERSION="v$VERSION"
+            fi
+          else
+            VERSION="${GITHUB_REF_NAME}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "release: $VERSION"
+
+      - name: Build the stack bundle
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.tag.outputs.version }}"
+          ARCHIVE="innotel-platform-stack-${VERSION#v}.tar.gz"
+          mkdir -p dist
+          # Bundle the canonical stack repo source + docs + scripts (exclude .git).
+          tar \
+            --exclude='./.git' \
+            --exclude='./.github' \
+            --exclude='./.gitignore' \
+            -czf "dist/$ARCHIVE" \
+            README.md LICENSE docs web scripts stack.sh .env.example
+          (cd dist && sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256")
+          ls -lh dist/
+          echo "bundle=$ARCHIVE" >> "$GITHUB_OUTPUT"
+
+      - name: Cut the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          VERSION="${VERSION}"
+          NOTES<<'NOTESEOF'
+          Innotel Platform Stack **$VERSION** — the canonical single-responsibility architecture definition for the whole Innotel ecosystem.
+
+          This release bundles the canonical stack definition, the `stack.sh` orchestrator,
+          the conformity standard, the shared scripts, and the docs snapshot used by every
+          product repository.
+
+          **Artifact**
+          - `innotel-platform-stack-${VERSION#v}.tar.gz` + `sha256`
+
+          **See also**
+          - [docs/stack.md](https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/stack.md) — the owns/consumes map
+          - [docs/standard.md](https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/standard.md) — the repo conformity standard
+          - [scripts/conform-project.sh](https://github.com/innotelinc/innotel-platform-stack/blob/main/scripts/conform-project.sh) — the scaffold/audit tool
+          NOTESEOF
+          gh release create "$VERSION" \
+            "dist/innotel-platform-stack-${VERSION#v}.tar.gz" \
+            "dist/innotel-platform-stack-${VERSION#v}.tar.gz.sha256" \
+            --title "Innotel Platform Stack $VERSION" \
+            --notes "$NOTES" || \
+          gh release upload "$VERSION" \
+            "dist/innotel-platform-stack-${VERSION#v}.tar.gz" \
+            "dist/innotel-platform-stack-${VERSION#v}.tar.gz.sha256" --clobber
+          echo "::notice::released $VERSION"
