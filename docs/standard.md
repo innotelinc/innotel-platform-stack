@@ -113,6 +113,9 @@ GitHub Actions; the `pages.yml` workflow then republishes on every push to `main
 touches `web/landing/**`).
 
 **Conformity rules for the landing page:**
+- The landing must actually be **published**: Pages enabled on the repo and the site reachable
+  at `https://innotelinc.github.io/<repo>/` (the conformity audit fails a repo whose Pages are
+  disabled — the `pages.yml` workflow cannot self-enable with an Actions token).
 - File: `web/landing/index.html` — a single self-contained static HTML file (no build step).
 - `<meta charset>`, `<meta name="viewport">`, a meaningful `<title>`, and `og:title` /
   `og:description` / `og:type=website`.

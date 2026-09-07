@@ -1426,6 +1426,37 @@ audit() {
   [ "$_gi_matches" -gt 0 ] && check ".gitignore covers .env" true || check ".gitignore covers .env" false
   _ok=$([ -f "$dir/web/landing/index.html" ] && echo ok || true)
   [ "$_ok" = ok ] && check "web/landing/index.html exists" true || check "web/landing/index.html exists" false
+  # A repo with a landing page must have it published to GitHub Pages — a
+  # Pages-disabled repo shows a broken/blank site. Checked when we can reach
+  # the GitHub API (CI, or a local gh with a github.com origin); otherwise
+  # reported as an informational note.
+  _ok_pages=skip
+  if [ -f "$dir/web/landing/index.html" ] && command -v gh >/dev/null 2>&1; then
+    _slug="${GITHUB_REPOSITORY:-}"
+    if [ -z "$_slug" ]; then
+      _origin=$(git -C "$dir" remote get-url origin 2>/dev/null || true)
+      case "$_origin" in
+        *github.com*)
+          _slug=$(printf '%s' "$_origin" | sed -E 's#.*github\.com[:/]([^/]+/[^/]+)(\.git)?$#\1#' | sed 's/\.git$//')
+          ;;
+      esac
+    fi
+    if [ -n "$_slug" ]; then
+      _out=$(gh api "repos/$_slug/pages" --jq '.html_url' 2>&1) || true
+      if printf '%s' "$_out" | grep -q '^https'; then
+        _ok_pages=ok
+      elif printf '%s' "$_out" | grep -q 'HTTP 404'; then
+        _ok_pages=no
+      fi
+    fi
+  fi
+  if [ "$_ok_pages" = ok ]; then
+    check "landing is published on GitHub Pages" true
+  elif [ "$_ok_pages" = no ]; then
+    check "landing is published on GitHub Pages" false
+  else
+    echo "  (no live Pages check — needs gh + a GitHub origin remote)"
+  fi
   _ok=$([ -f "$dir/docs/stack.md" ] && echo ok || true)
   [ "$_ok" = ok ] && check "docs/stack.md exists" true || check "docs/stack.md exists" false
   _ok=$([ -f "$dir/.github/workflows/attribution-guard.yml" ] && echo ok || true)
