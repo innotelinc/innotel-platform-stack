@@ -37,7 +37,7 @@ pages_url() {
 license_badge() {
   case "${1:-MIT}" in
     MIT)         printf '[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)' ;;
-    AGPL-3.0-or-later) printf '[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0-or-later-brightgreen.svg)](LICENSE)' ;;
+    AGPL-3.0-or-later) printf '[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-brightgreen.svg)](LICENSE)' ;;
     *)           printf '[![License: %s](https://img.shields.io/badge/license-%s-brightgreen.svg)](LICENSE)' "$1" "$1" ;;
   esac
 }
@@ -1493,6 +1493,21 @@ audit() {
     [ "$_c" -gt 0 ] && check "README has CI badge" true || check "README has CI badge" false
     _c=$(grep -ci 'badge.*license' "$dir/README.md" || true)
     [ "$_c" -gt 0 ] && check "README has license badge" true || check "README has license badge" false
+    # license badge URL must be shields-encoded (all dashes doubled in the message
+    # segment) so the badge actually renders — catches the 'or-later' 404 class
+    if [ "$_c" -gt 0 ]; then
+      _ok=1
+      while IFS= read -r b; do
+        [ -z "$b" ] && continue
+        case "$b" in
+          *license-MIT-blue.svg|*license-AGPL--3.0--or--later-brightgreen.svg) : ;;
+          *) _ok=0 ;;
+        esac
+      done < <(grep -oE 'img\.shields\.io/badge/license-[^ )"`]+\.svg' "$dir/README.md" || true)
+      [ "$_ok" -eq 1 ] && check "license badge URL is shields-encoded" true || check "license badge URL is shields-encoded" false
+    else
+      check "license badge URL is shields-encoded" true
+    fi
     _c=$(grep -ci '^| Problem ' "$dir/README.md" || true)
     [ "$_c" -gt 0 ] && check "README has Why table" true || check "README has Why table" false
     _c=$(grep -c 'docs/stack.md' "$dir/README.md" || true)
