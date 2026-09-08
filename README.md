@@ -73,6 +73,37 @@ The remaining platforms are **business functions** built on top:
 - [**Capstone ↔ Zeus convergence**](docs/convergence-capstone-zeus.md) — the
   deep look at AgentOps/VoiceOps: Capstone standalone, Zeus as the VoIP
   platform, Capstone as a Zeus add-on.
+- [**Service & package audit**](docs/service-audit.md) — the duplication
+  audit across every stack: which services/packages appear in more than one
+  repo, which duplicates are required by that stack's shape, and the memory
+  posture.
+
+## Central shared library — `scripts/stack-lib.sh`
+
+Common operator tasks live **once**, here: env resolution, LAN-IP / NPM
+forward-host detection, NPM API helpers, and output helpers. Every platform
+repo carries a verbatim mirror at `scripts/stack-lib.sh` (synced by
+`scripts/sync-stack-lib.sh` — the copy in this repo is the source of truth)
+and sources it from its own scripts:
+
+```bash
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/stack-lib.sh"
+upstream="$(stack_lib_forward_host)"        # explicit env → LAN IP → fallback
+token="$(stack_lib_npm_login "$NPM_API_URL" "$email" "$password")"
+```
+
+Conventions encoded in the library (enforced portfolio-wide):
+
+- **LAN IPs only for NPM upstreams** — `stack_lib_forward_host` prefers an
+  explicit `NPM_FORWARD_HOST`/`NPM_UPSTREAM_HOST`, then auto-detects the
+  host's primary LAN IPv4 (default-route source address); docker bridge
+  (172.x) and loopback addresses are never used because a remote NPM edge
+  cannot resolve them. `host.docker.internal` is a last-resort fallback for
+  single-box installs.
+- **One wildcard cert per platform zone** — `*.<platform>.innotel.us` via
+  DNS-01 against the shared BIND, attached to every proxy host in the zone.
+- **Idempotent provisioning** — every script GETs before it writes and only
+  updates when state differs.
 
 ## Architecture principles
 

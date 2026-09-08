@@ -1,6 +1,6 @@
 # Capstone ↔ Zeus Convergence
 
-**Status: in progress** · updated September 6, 2026
+**Status: in progress** · updated September 7, 2026
 
 > **Living tracker:** the Capstone repo's `docs/zeus-integration.md` is the
 > authoritative, current status for the shared-PBX integration (gaps G1–G4
@@ -162,7 +162,8 @@ to Capstone's structural bar so the two projects feel like one platform.
       `scripts/infisical-env.mjs`, docs/stack.md)
 
 > Ansible (`zeus-ari.yml`) and the offline/live-USB ISO are the remaining
-> bare-metal parity gaps — both optional per §6 Q4.
+> bare-metal parity gaps — **both deferred** per the §6.4 Q4 resolution
+> (compose-only for now).
 
 **Phase 2 — Capstone consumes Zeus (the add-on)**
 
@@ -175,10 +176,16 @@ to Capstone's structural bar so the two projects feel like one platform.
 > "register agent on Zeus" flow, and the ARI pointer change
 > (`CAPSTONE_PBX=standalone|zeus`) onto the shared PBX.
 
-- [ ] Capstone `ZEUS_*` config: `ZEUS_API_URL` / `ZEUS_API_TOKEN` / ARI creds
-- [ ] ARI wiring targets Zeus's Asterisk; Capstone's bundled PBX becomes
-      optional (`CAPSTONE_PBX=standalone|zeus`)
+- [x] Capstone `ZEUS_*` config: `ZEUS_API_URL` / `ZEUS_API_TOKEN` / ARI creds
+      (`.env.example` §Zeus + `DOGRAH_ARI_HOST`/`DOGRAH_ARI_PORT`)
+- [x] ARI wiring targets Zeus's Asterisk; Capstone's bundled PBX becomes
+      optional (`CAPSTONE_PBX=standalone|zeus` — compose profiles: the
+      `freepbx`/`coturn` services carry the `standalone` profile, so the
+      default `docker compose up` is the add-on shape and
+      `--profile standalone` restores the bundled PBX)
 - [ ] Agent-side SMS/fax/voicemail actions via Zeus portal API
+      (`scripts/zeus_client.py` shipped + unit-tested; dograh tool wiring
+      remaining)
 - [ ] One-click "register agent on Zeus" flow in Workflow Studio
 
 **Phase 3 — ops convergence**
@@ -200,6 +207,23 @@ to Capstone's structural bar so the two projects feel like one platform.
 - **Trust/certs** stay Cerulean (both consume).
 
 ## 6. Open questions for the owner
+
+**Resolved September 7, 2026 — recommendations adopted:**
+
+1. Capstone standalone mode — **kept** (recommendation adopted): it remains
+   the default dev/offline shape; the bundled PBX is a compose profile, not
+   a fork of the codebase.
+2. Personal-assistant surface — **Capstone UI** (recommendation adopted):
+   SSO'd through Authentik, linked from the Zeus portal; Zeus never hosts
+   agents.
+3. Control Center — **Capstone dashboard** (recommendation adopted): it
+   already owns the ops UI; Zeus keeps its portal `/dashboard/health` view
+   and the shared dashboard points at both stacks.
+4. Zeus ISO/offline path — **compose-only for now** (owner decision): the
+   ISO/offline parity work is deferred; no `zeus-ari.yml` Ansible port and
+   no live-USB build until the shared-PBX run is verified in production.
+
+Original questions (with the recommendations that were adopted):
 
 1. Should Capstone's standalone mode eventually be *removed* (PBX always
    from Zeus), or kept forever for air-gapped installs? (Recommended: keep.)
