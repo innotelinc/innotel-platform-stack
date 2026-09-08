@@ -67,6 +67,7 @@ The remaining platforms are **business functions** built on top:
 | AthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge |
 | Atlas | CodeOps | Authentik · Infisical · Cerulean · Magnate · NPM Edge |
 | Distro | BuilderOps | OmniRoute · NPM Edge · Infisical · Authentik · Magnate · Cerulean |
+| PLUTUS | VideoOps | OmniRoute · NPM Edge · Infisical · Authentik · Cerulean |
 
 ## Documents
 
