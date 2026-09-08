@@ -10,6 +10,16 @@ stack doc, same license posture, same env template, same CI posture. Use
 > Cerulean, Signara). Where it conflicts with a platform's unique needs (monolith vs
 > Compose, AGPL vs MIT), the platform's own docs win — but the *shared layers* still
 > conform.
+>
+> **Trust layer (Cerulean) is the only path for DNS, TLS, and NPM host lifecycle.**
+> Every platform repo provisions its public hosts through Cerulean: Cerulean issues the
+> wildcard certificate (one `*.<base>.innotel.us` per stack), writes the BIND zone records,
+> and creates/updates the NPM proxy host through `POST /npm/hosts` and `PUT /npm/hosts/:id`.
+> The NPM admin UI and raw REST API are operator-recovery tooling only — no stack script,
+> setup helper, or automation calls `192.168.1.71:81` (or any NPM API endpoint) directly.
+> When a new service appears, add its DNS `A` record and its NPM proxy host via Cerulean,
+> attach the stack's existing wildcard cert, and force SSL. Cert material is never stored in
+> a repo `.env` or mounted into a business container.
 
 **Golden rules (short version):**
 1. One job per platform; consume the platform services, never re-implement them.
@@ -18,6 +28,16 @@ stack doc, same license posture, same env template, same CI posture. Use
 3. Shared layers are identical across repos: README shape, landing outline, attribution guard
    (CI + hooks + guard-lib), `docs/stack.md`, `.env.example` posture, license posture.
 4. No secrets, no real IPs/hostnames, no AI attribution in any repo file or commit.
+5. DNS, TLS, and proxy-host lifecycle flow through Cerulean only. Cerulean is the only
+   component that talks to the NPM API (to create/update proxy hosts and attach certs).
+   Stack repos never call the NPM API directly — they consume Cerulean's DNS and TLS, and
+   rely on the NPM Edge to serve the resulting hosts. The NPM admin UI / raw REST API are
+   operator-recovery tooling, not a programmatic dependency.
+5. DNS, TLS, and proxy-host lifecycle flow through Cerulean only. Cerulean is the only
+   component that talks to the NPM API (to create/update proxy hosts and attach certs).
+   Stack repos never call the NPM API directly — they consume Cerulean's DNS and TLS, and
+   rely on the NPM Edge to serve the resulting hosts. The NPM admin UI / raw REST API are
+   operator-recovery tooling, not a programmatic dependency.
 
 ---
 
@@ -279,3 +299,8 @@ Makefile shape, `docs/stack.md` — come from this standard.
 3. Shared layers are identical across repos: README shape, landing outline, attribution guard
    (CI + hooks + guard-lib), `docs/stack.md`, `.env.example` posture, license posture.
 4. No secrets, no real IPs/hostnames, no AI attribution in any repo file or commit.
+5. DNS, TLS, and proxy-host lifecycle flow through Cerulean only. Cerulean is the only
+   component that talks to the NPM API (to create/update proxy hosts and attach certs).
+   Stack repos never call the NPM API directly — they consume Cerulean's DNS and TLS, and
+   rely on the NPM Edge to serve the resulting hosts. The NPM admin UI / raw REST API are
+   operator-recovery tooling, not a programmatic dependency.
