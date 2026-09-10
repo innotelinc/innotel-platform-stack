@@ -67,6 +67,7 @@ The remaining platforms are **business functions** built on top:
 | AthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge |
 | Atlas | CodeOps | Authentik · Infisical · Cerulean · Magnate · NPM Edge |
 | Distro | BuilderOps | OmniRoute · NPM Edge · Infisical · Authentik · Magnate · Cerulean |
+| Olympus | FactoryOps | OmniRoute · Authentik · Infisical · Cerulean · Magnate · NPM Edge |
 | PLUTUS | VideoOps | OmniRoute · NPM Edge · Infisical · Authentik · Cerulean |
 
 ## Documents
@@ -190,6 +191,10 @@ Conventions encoded in the library (enforced portfolio-wide):
               Atlas (CodeOps) holds every repo + the AI app builder; it rides
               Authentik · Infisical · Cerulean · Magnate and never stores
               application data for other platforms
+              Olympus (FactoryOps) turns GitHub issues into validated PRs inside the
+              repo it lives in; it rides OmniRoute · Authentik · Infisical ·
+              Cerulean · Magnate · NPM Edge and never touches governance or
+              secrets as ordinary work
 ```
 
 ## Multi-Server Deployment
@@ -387,6 +392,30 @@ this pattern so re-running them never re-issues or detaches certs.
   Magnate, Authentik, Infisical, Cerulean, and NPM Edge.
   LLM gateway itself (OmniRoute is a shared platform service / extension).
 
+#### Olympus — FactoryOps
+- **Owns:** repository automation (issue → watched Archon workflow → open PR), validation
+  and safety (protected paths, required markers, non-zero evidence counts, ratchet floors,
+  stop controls, bounded changes), and operational visibility (doctor, trigger status,
+  held work); the five factory workflows (prime, implement, validate, regress, triage)
+  and the harness as the contract for "working"; the Telegram surface (Hermes 3) and the
+  coding brain (Qwen) behind the OmniRoute gateway.
+- **Provides:** a one-command agent-ready clone (`bash scripts/bootstrap.sh` — installs
+  OmniRoute/Codex/Claude/Archon CLIs, mints a gateway key, wires both agents) and a
+  deterministic issue → validated PR fast lane (~35 min) with independent validation and
+  holdout/mutation gates for auto-merge quality.
+- **Consumes:** OmniRoute (AI plane) · Authentik · Infisical · Cerulean · NPM Edge ·
+  Magnate (optional billing where the factory runs as a service).
+- **Does not own:** application business logic, identity, secrets, trust/DNS/PKI, storage,
+  or revenue — and never governance of itself as ordinary issue work (`MISSION.md`,
+  `FACTORY_RULES.md`, `factory/**`, `harness/**`, `.factory/locks/**`,
+  `.factory/holdout/**`, CI config, or secret-shaped files are protected).
+
+#### PLUTUS — VideoOps
+- **Owns:** video ingestion, transcoding, catalog, streaming, live, and VideoOps delivery.
+- **Consumes:** OmniRoute · NPM Edge · Infisical · Authentik · Cerulean.
+- **Does not own:** identity, secrets, DNS/TLS, storage, or billing — and never the
+  canonical source operated by Atlas.
+
 #### Capstone — AgentOps
 - **Owns:** voice AI agents, call screening, AI receptionists, speech processing, voice
   workflows, telephony automation.
@@ -426,7 +455,9 @@ Identity (Authentik) ────────► Secrets (Infisical)
               Capstone
         (Rizz Aura ──► Authentik, Magnate)
         (AthenIQ ──► Authentik · Infisical · Cerulean · ONYX · Magnate · Signara)
-        (Atlas ──► Authentik · Infisical · Cerulean · Magnate)
+        (Atlas ──► Authentik · Infisical · Cerulean · Magnate · NPM Edge)
+        (Olympus ──► OmniRoute · Authentik · Infisical · Cerulean · Magnate · NPM Edge)
+        (PLUTUS ──► OmniRoute · NPM Edge · Infisical · Authentik · Cerulean)
 ```
 
 Deployment order:
@@ -492,6 +523,8 @@ Rules that hold in both:
 | Ephemeral P2P transfer / relay | TransferOps | zapit |
 | Learning / courses / AI classrooms | LearningOps | AthenIQ |
 | Source control / CI / AI app building | CodeOps | Atlas |
+| Issue → PR automation | FactoryOps | Olympus |
+| Video delivery / streaming | VideoOps | PLUTUS |
 
 ## Integration flows
 
@@ -573,6 +606,8 @@ Rules that hold in both:
 | AthenIQ (LearningOps) | [innotelinc/atheniq](https://github.com/innotelinc/atheniq) | [docs/stack.md](https://github.com/innotelinc/atheniq/blob/main/docs/stack.md) |
 | Atlas (CodeOps) | [innotelinc/atlas](https://github.com/innotelinc/atlas) | [docs/stack.md](https://github.com/innotelinc/atlas/blob/main/docs/stack.md) |
 | Distro (BuilderOps) | [innotelinc/distro](https://github.com/innotelinc/distro) | [docs/stack.md](https://github.com/innotelinc/distro/blob/main/docs/stack.md) |
+| Olympus (FactoryOps) | [innotelinc/olympus](https://github.com/innotelinc/olympus) | [docs/stack.md](https://github.com/innotelinc/olympus/blob/main/docs/stack.md) |
+| PLUTUS (VideoOps) | [innotelinc/plutus](https://github.com/innotelinc/plutus) | [docs/stack.md](https://github.com/innotelinc/plutus/blob/main/docs/stack.md) |
 
 ## `stack.sh` Commands
 
