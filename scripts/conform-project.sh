@@ -450,7 +450,7 @@ write_makefile() {
 SHELL := /bin/bash
 
 .PHONY: help setup up down logs ps \\
-        check:commits check:compose
+        check-commits check-compose
 
 help: ## Show this help message
 \t@echo "${name} — operator workflow"
@@ -478,10 +478,10 @@ ps: ## List service status
 
 ## ---- Conformity -----------------------------------------------------------
 
-check:commits: ## Run the attribution guard over recent commit messages
+check-commits: ## Run the attribution guard over recent commit messages
 \tbash .githooks/commit-msg .git/COMMIT_EDITMSG 2>/dev/null || true
 
-check:compose: ## Validate the root compose file against .env.example
+check-compose: ## Validate the root compose file against .env.example
 \tcp .env.example .env
 \tdocker compose config --quiet
 \trm -f .env
