@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Subscribe to Magnate — Innotel</title>
+  <meta name="description" content="The billing platform for the whole stack. Subscribe to Magnate — billed by Magnate, one account for every Innotel service.">
+  <meta property="og:title" content="Subscribe to Magnate">
+  <meta property="og:description" content="The billing platform for the whole stack. One account, every service.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='#10b981'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: dark;
+      --accent: #10b981;
+      --accent-tint: color-mix(in srgb, #10b981 12%, transparent);
+      --bg: #0b0d10;
+      --surface: #16191f;
+      --border: #262c35;
+      --text: #f4f7fb;
+      --muted: #a8b2bf;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      line-height: 1.6; -webkit-font-smoothing: antialiased;
+      background-image: radial-gradient(900px 480px at 50% -10%, var(--accent-tint), transparent 70%);
+      background-repeat: no-repeat;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+    header { border-bottom: 1px solid var(--border); }
+    .bar { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; }
+    .mark { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); }
+    .signin { color: var(--muted); font-size: 14px; }
+    .signin:hover { color: var(--text); }
+    .hero { text-align: center; padding: 72px 0 48px; }
+    .kicker {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--accent);
+      border: 1px solid color-mix(in srgb, #10b981 35%, transparent);
+      background: var(--accent-tint);
+      border-radius: 999px; padding: 6px 14px;
+    }
+    h1 { font-size: clamp(32px, 6vw, 52px); line-height: 1.05; margin: 20px 0 12px; letter-spacing: -0.02em; }
+    h1 .accent { color: var(--accent); }
+    .lede { color: var(--muted); max-width: 560px; margin: 0 auto; font-size: 17px; }
+    .plans { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); padding: 24px 0 12px; }
+    .plan {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 24px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .plan.popular { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); position: relative; }
+    .plan .tag {
+      position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+      background: var(--accent); color: #0b0d10; font-size: 11px; font-weight: 700;
+      padding: 2px 12px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .plan h2 { margin: 0; font-size: 18px; }
+    .price { font-size: 34px; font-weight: 700; }
+    .price small { font-size: 14px; color: var(--muted); font-weight: 400; }
+    .plan ul { list-style: none; margin: 0 0 4px; padding: 0; flex: 1; }
+    .plan li { font-size: 14px; color: var(--muted); padding: 3px 0; }
+    .plan li::before { content: "\2713\00a0\00a0"; color: var(--accent); }
+    .cta {
+      display: block; text-align: center; border-radius: 10px; padding: 10px 16px;
+      background: var(--accent); color: #0b0d10; font-weight: 600; font-size: 14px;
+    }
+    .cta:hover { filter: brightness(1.1); color: #0b0d10; }
+    .empty {
+      text-align: center; color: var(--muted); background: var(--surface);
+      border: 1px dashed var(--border); border-radius: 16px; padding: 36px 24px; margin: 24px 0;
+    }
+    .fineprint {
+      display: flex; gap: 12px; align-items: flex-start; max-width: 720px; margin: 28px auto 0;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px 20px;
+      font-size: 13px; color: var(--muted);
+    }
+    .fineprint b { color: var(--text); }
+    /* Service directory tiles (apex page only — a service page has none). */
+    .tile {
+      display: block; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 20px; transition: border-color .2s, transform .2s;
+    }
+    .tile:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .tile .mark { display: block; width: 28px; height: 4px; border-radius: 999px; background: var(--accent); margin-bottom: 14px; }
+    .tile b { display: block; font-size: 17px; color: var(--text); }
+    .tile small { display: block; color: var(--muted); font-size: 13px; margin-top: 4px; }
+    .tile .from { display: inline-block; margin-top: 12px; font-style: normal; font-weight: 600; font-size: 13px; color: var(--accent); }
+    footer { border-top: 1px solid var(--border); margin-top: 56px; }
+    .foot { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 24px 0; font-size: 13px; color: var(--muted); }
+    .foot a { color: var(--muted); }
+    .foot a:hover { color: var(--text); }
+    .all-services { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap bar">
+      <span class="brand"><span class="mark"></span>Magnate</span>
+      <a class="signin" href="https://subscribe.innotel.us">All Innotel plans</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <span class="kicker">Powered by Innotel</span>
+      <h1>Subscribe to Magnate<span class="accent">.</span></h1>
+      <p class="lede">The billing platform for the whole stack. One account, one bill — every Innotel service is billed through Magnate.</p>
+    </section>
+
+    <section>
+      <div class="plans" id="plans" hidden></div>
+      <div class="empty" id="empty" hidden>
+        <b>Magnate</b> is not sold separately yet.<br>
+        It is included with the platform membership — <a href="https://subscribe.innotel.us">see all plans</a>.
+      </div>
+
+      <div class="fineprint">
+        <span aria-hidden="true">&#128179;</span>
+        <span>
+          <b>One bill for everything.</b> Subscriptions are billed by Magnate, the platform's
+          billing service — never by Magnate itself. Prices are read live from the master
+          dashboard; manage or cancel any plan from your Magnate account.
+        </span>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot">
+      <span>Magnate — Powered by Innotel</span>
+      <span class="all-services"><a href="https://subscribe.innotel.us">subscribe.innotel.us</a> · every service, one account</span>
+    </div>
+  </footer>
+
+  <script>
+    // Prices are never baked in: read them live from Magnate, the billing
+    // platform, so the master dashboard is the only place a price is set.
+    (function () {
+      var SERVICE = "magnate";
+      var PORTAL_SIGNUP = "https://subscribe.innotel.us/signup";
+      var plansEl = document.getElementById("plans");
+      var emptyEl = document.getElementById("empty");
+      function money(cents) {
+        var v = cents / 100;
+        return v % 1 === 0 ? String(v) : v.toFixed(2);
+      }
+      function card(p) {
+        var el = document.createElement("div");
+        el.className = "plan" + (p.highlighted ? " popular" : "");
+        var feats = (p.features || []).map(function (f) {
+          return "<li>" + f.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</li>";
+        }).join("");
+        el.innerHTML =
+          (p.highlighted ? '<span class="tag">Most popular</span>' : "") +
+          "<h2>" + p.name.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</h2>" +
+          '<div class="price">$' + money(p.priceMonthlyCents) + "<small>/month</small></div>" +
+          (p.priceYearlyCents ? '<div style="font-size:12px;color:var(--muted)">or $' + money(p.priceYearlyCents) + "/year</div>" : "") +
+          "<ul>" + feats + "</ul>" +
+          '<a class="cta" href="' + PORTAL_SIGNUP + "?plan=" + encodeURIComponent(p.slug) + '">Subscribe</a>';
+        return el;
+      }
+      fetch("https://app.magnate.innotel.us/api/plans?service=" + encodeURIComponent(SERVICE))
+        .then(function (r) { return r.ok ? r.json() : { plans: [] }; })
+        .then(function (d) {
+          var plans = (d && d.plans) || [];
+          if (!plans.length) { emptyEl.hidden = false; return; }
+          plans.forEach(function (p) { plansEl.appendChild(card(p)); });
+          plansEl.hidden = false;
+        })
+        .catch(function () {
+          emptyEl.hidden = false;
+          emptyEl.innerHTML = 'Prices are temporarily unavailable — <a href="https://subscribe.innotel.us">open the billing portal</a>.';
+        });
+    })();
+  </script>
+</body>
+</html>

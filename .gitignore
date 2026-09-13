@@ -1,5 +1,6 @@
 .env
 *.local
+__pycache__/
 extensions/.extensions.*
 groups/*/.extensions.*
 mesh/wg/data/
