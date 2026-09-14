@@ -23,11 +23,10 @@ say() { printf 'sync-stack-lib: %s\n' "$*"; }
 
 targets=()
 if [ "${1:-}" = "--all" ]; then
-  for d in "$HERE"/../../; do
-    [ -d "$d" ] || continue
-    for sub in "$d"*/; do
-      [ -d "$sub/.git" ] && targets+=("${sub%/}")
-    done
+  # Every sibling of the directory that holds this repo.
+  parent="$(cd "$HERE/../.." && pwd)"
+  for sub in "$parent"/*/; do
+    [ -d "$sub/.git" ] && targets+=("${sub%/}")
   done
 else
   targets=("$@")

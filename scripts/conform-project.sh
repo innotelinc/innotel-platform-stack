@@ -11,8 +11,6 @@
 set -euo pipefail
 
 OWNER="innotelinc"
-ACTOR="Darnel Hunter"
-EMAIL="dhunter@innotel.us"
 YEAR="$(date +%Y)"
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -439,8 +437,8 @@ PAGES_EOF
 }
 
 write_makefile() {
-  local name="$1" classification="$2"
-  cat > "$1/Makefile" <<MAKEFILE_EOF
+  local dir="$1" name="$2"
+  cat > "${dir}/Makefile" <<MAKEFILE_EOF
 # ==========================================================================
 # ${name} — operator workflow
 # Usage: make <target>   (see \`make help\`)
@@ -453,55 +451,55 @@ SHELL := /bin/bash
         check-commits check-compose
 
 help: ## Show this help message
-\t@echo "${name} — operator workflow"
-\t@echo "Usage: make <target>"
-\t@grep -E '^[a-zA-Z_:-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \\033[36m%-16s\\033[0m %s\\n", $$1, $$2}'
+	@echo "${name} — operator workflow"
+	@echo "Usage: make <target>"
+	@grep -E '^[a-zA-Z_:-]+:.*?## .*\$\$' \$(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \\033[36m%-16s\\033[0m %s\\n", \$\$1, \$\$2}'
 
 ## ---- Bootstrap ------------------------------------------------------------
 
 setup: ## Preflight, install guard hooks, generate .env secrets
-\tbash scripts/setup.sh
+	bash scripts/setup.sh
 
 ## ---- Compose (this repo's services) -------------------------------------
 
 up: ## Start all ${name}-managed services
-\tdocker compose up -d
+	docker compose up -d
 
 down: ## Stop ${name}-managed services (keeps volumes)
-\tdocker compose down
+	docker compose down
 
 logs: ## Tail logs from ${name}-managed services
-\tdocker compose logs -f
+	docker compose logs -f
 
 ps: ## List service status
-\tdocker compose ps
+	docker compose ps
 
 ## ---- Conformity -----------------------------------------------------------
 
 check-commits: ## Run the attribution guard over recent commit messages
-\tbash .githooks/commit-msg .git/COMMIT_EDITMSG 2>/dev/null || true
+	bash .githooks/commit-msg .git/COMMIT_EDITMSG 2>/dev/null || true
 
 check-compose: ## Validate the root compose file against .env.example
-\tcp .env.example .env
-\tdocker compose config --quiet
-\trm -f .env
+	cp .env.example .env
+	docker compose config --quiet
+	rm -f .env
 MAKEFILE_EOF
 }
 
 write_env_example() {
-  local classification="$1"
-  cat > "$1/.env.example" <<ENV_EOF
+  local dir="$1" name="$2" domain="$3"
+  cat > "${dir}/.env.example" <<ENV_EOF
 [TEMPLATE]
 # ==========================================================================
-# ${2} — environment configuration template
+# ${name} — environment configuration template
 # Copy to \`.env\` (or run ./scripts/setup.sh) and fill in real values.
 # Never commit \`.env\`. Production secrets come from Infisical (SecretOps).
 # ==========================================================================
 
 # --- General ----------------------------------------------------------------
-APP_NAME=${2}
+APP_NAME=${name}
 # Public hosts (DNS + TLS provisioned by Cerulean / NPM Edge)
-BASE_DOMAIN=${3}
+BASE_DOMAIN=${domain}
 
 # --- OmniRoute (model gateway — OpenAI-compatible, single provider pool) ----
 OMNIROUTE_BASE_URL=http://127.0.0.1:20128/v1
@@ -509,10 +507,10 @@ OMNIROUTE_API_KEY=change-me-omniroute-api-key
 OMNIROUTE_MODEL=auto
 
 # --- Authentik (OIDC identity provider — Cerulean's Authentik) --------------
-OIDC_ISSUER_URL=https://auth.cerulean.innotel.us/application/o/${4}/
-OIDC_CLIENT_ID=${4}
+OIDC_ISSUER_URL=https://auth.cerulean.innotel.us/application/o/${name}/
+OIDC_CLIENT_ID=${name}
 OIDC_CLIENT_SECRET=change-me-oidc-client-secret
-OIDC_REDIRECT_URI=https://${3}/api/auth/callback
+OIDC_REDIRECT_URI=https://${domain}/api/auth/callback
 
 # --- Cerulean (TrustOps — DNS / NPM hosts / TLS) ----------------------------
 CERULEAN_DNS_API_URL=http://127.0.0.1:3003
@@ -534,9 +532,11 @@ ENV_EOF
 }
 
 write_license() {
-  local license="$1"
+  local dir="$1" license="${2:-MIT}"
   if [ "$license" = "MIT" ]; then
-    cat > "$1/LICENSE" <<'MIT_EOF'
+    # Unquoted heredoc: the MIT text has no $ or backticks, and the copyright
+    # line must expand ${YEAR}.
+    cat > "${dir}/LICENSE" <<MIT_EOF
 MIT License
 
 Copyright (c) ${YEAR} Innotel Inc.
@@ -562,7 +562,7 @@ MIT_EOF
   else
     # Full canonical AGPL-3.0 text — GitHub license detection returns
     # NOASSERTION for short notices, which breaks repo license badges.
-    cat > "$1/LICENSE" <<'AGPL_EOF'
+    cat > "${dir}/LICENSE" <<'AGPL_EOF'
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 
@@ -1229,11 +1229,14 @@ AGPL_EOF
 }
 
 write_stack_doc() {
-  local name="$1" classification="$2" owns="$3" consumes="$4" not_owns="$5" integrate="${6:-}"
-  cat > "$1/docs/stack.md" <<STACK_EOF
+  # dir, name, classification, owns, consumes, not-owns, integrate, role prose,
+  # provides
+  local dir="$1" name="$2" classification="$3" owns="$4" consumes="$5" not_owns="$6" integrate="${7:-}"
+  local role_prose="${8:-}"
+  cat > "${dir}/docs/stack.md" <<STACK_EOF
 # ${name} in the Innotel Platform Stack
 
-**Role: ${classification}** — ${8}
+**Role: ${classification}**${role_prose:+ — ${role_prose}}
 
 This page declares ${name}'s role in the
 [**Innotel Platform Stack**](https://github.com/innotelinc/innotel-platform-stack) —
@@ -1281,20 +1284,23 @@ STACK_EOF
 }
 
 write_readme() {
-  local name="$1" tagline="$2" classification="$3" license="$4" upstream="${5:-}" consumes="${6:-}" landing="$7"
-  local badge="$license_badge $license"
-  local prologue="# ${name}\n\n**${tagline}**\n\n${name} is the Innotel ecosystem's **${classification}** home"
+  # dir, name, tagline, classification, license, upstream, landing, about,
+  # license paragraph, tail
+  local dir="$1" name="$2" tagline="$3" classification="$4" license="$5" upstream="${6:-}" landing="$7"
+  local badge
+  badge="$(license_badge "$license")"
   local about="> **About ${name}** — ${8} **Landing page:** [${landing}](${landing})"
 
-  cat > "$1/README.md" <<README_EOF
+  cat > "${dir}/README.md" <<README_EOF
 <div align="center">
 
 # ${name} — ${tagline}
 
 **${tagline}**
 
-${upstream_blockupstream "$upstream"}
+$(upstream_block "$upstream")
 
+[![CI](https://github.com/${OWNER}/${name}/actions/workflows/ci.yml/badge.svg)](https://github.com/${OWNER}/${name}/actions/workflows/ci.yml)
 ${badge}
 
 </div>
@@ -1316,7 +1322,7 @@ ${about}
 ## Quick start
 
 \`\`\`bash
-git clone ${github_url "$name"}.git
+git clone $(github_url "$name").git
 cd ${name}
 ./scripts/setup.sh
 \`\`\`
@@ -1364,7 +1370,7 @@ README_EOF
 
 # ── upstream prose for the README prologue ─────────────────────────────────────
 
-upstream_blockupstream() {
+upstream_block() {
   local u="$1"
   if [ -z "$u" ]; then
     echo "**${name} — ${tagline}.**"
@@ -1386,6 +1392,16 @@ check() {
   fi
 }
 
+# Audit row helpers — a row either passes or fails, so a tested value can never
+# print both results.
+check_eq() { # <value> <expected> <label>
+  if [ "$1" = "$2" ]; then check "$3" true; else check "$3" false; fi
+}
+
+check_gt0() { # <value> <label>
+  if [ "$1" -gt 0 ]; then check "$2" true; else check "$2" false; fi
+}
+
 audit() {
   local dir="$1"
   local name
@@ -1396,13 +1412,13 @@ audit() {
   heading "Auditing ${dir} (${name})"
 
   _ok=$([ -f "$dir/README.md" ] && echo ok || true)
-  [ "$_ok" = ok ] && check "README.md exists" true || check "README.md exists" false
+  check_eq "$_ok" ok "README.md exists"
   _ok=$([ -f "$dir/LICENSE" ] && echo ok || true)
-  [ "$_ok" = ok ] && check "LICENSE exists" true || check "LICENSE exists" false
+  check_eq "$_ok" ok "LICENSE exists"
   # LICENSE must be COMMITTED (a fresh clone only has tracked files) — a
   # file that merely exists locally but is gitignored fails CI audits.
   _ok=$(git -C "$dir" check-ignore -q LICENSE 2>/dev/null && echo ignored || echo ok)
-  [ "$_ok" = ok ] && check "LICENSE is tracked (not gitignored)" true || check "LICENSE is tracked (not gitignored)" false
+  check_eq "$_ok" ok "LICENSE is tracked (not gitignored)"
   # LICENSE must be the full canonical text — GitHub license detection returns
   # NOASSERTION for stub notices, which breaks the repo-page license badge.
   _lc=$(wc -l < "$dir/LICENSE" 2>/dev/null || echo 0)
@@ -1413,19 +1429,19 @@ audit() {
   else
     _ok=
   fi
-  [ "$_ok" = ok ] && check "LICENSE is canonical full text (GitHub-detectable)" true || check "LICENSE is canonical full text (GitHub-detectable)" false
+  check_eq "$_ok" ok "LICENSE is canonical full text (GitHub-detectable)"
   _ok=$([ -f "$dir/.env.example" ] && echo ok || true)
-  [ "$_ok" = ok ] && check ".env.example exists" true || check ".env.example exists" false
+  check_eq "$_ok" ok ".env.example exists"
   # .env.example must be COMMITTED — a fresh clone only has tracked files.
   _ok=$(git -C "$dir" check-ignore -q .env.example 2>/dev/null && echo ignored || echo ok)
-  [ "$_ok" = ok ] && check ".env.example is tracked (not gitignored)" true || check ".env.example is tracked (not gitignored)" false
+  check_eq "$_ok" ok ".env.example is tracked (not gitignored)"
   _ok=$([ -f "$dir/.gitignore" ] && echo ok || true)
-  [ "$_ok" = ok ] && check ".gitignore exists" true || check ".gitignore exists" false
+  check_eq "$_ok" ok ".gitignore exists"
 
   _gi_matches=$(grep -c '^\.env' "$dir/.gitignore" 2>/dev/null || true)
-  [ "$_gi_matches" -gt 0 ] && check ".gitignore covers .env" true || check ".gitignore covers .env" false
+  check_gt0 "$_gi_matches" ".gitignore covers .env"
   _ok=$([ -f "$dir/web/landing/index.html" ] && echo ok || true)
-  [ "$_ok" = ok ] && check "web/landing/index.html exists" true || check "web/landing/index.html exists" false
+  check_eq "$_ok" ok "web/landing/index.html exists"
   # A repo with a landing page must have it published to GitHub Pages — a
   # Pages-disabled repo shows a broken/blank site. Checked when we can reach
   # the GitHub API (CI, or a local gh with a github.com origin); otherwise
@@ -1458,11 +1474,11 @@ audit() {
     echo "  (no live Pages check — needs gh + a GitHub origin remote)"
   fi
   _ok=$([ -f "$dir/docs/stack.md" ] && echo ok || true)
-  [ "$_ok" = ok ] && check "docs/stack.md exists" true || check "docs/stack.md exists" false
+  check_eq "$_ok" ok "docs/stack.md exists"
   _ok=$([ -f "$dir/.github/workflows/attribution-guard.yml" ] && echo ok || true)
-  [ "$_ok" = ok ] && check ".github/workflows/attribution-guard.yml" true || check ".github/workflows/attribution-guard.yml" false
+  check_eq "$_ok" ok ".github/workflows/attribution-guard.yml"
   _ok=$([ -f "$dir/.githooks/guard-lib" ] && echo ok || true)
-  [ "$_ok" = ok ] && check ".githooks/guard-lib exists" true || check ".githooks/guard-lib exists" false
+  check_eq "$_ok" ok ".githooks/guard-lib exists"
   if [ -f "$dir/Makefile" ]; then
     check "Makefile exists (or intentionally absent)" true
   else
@@ -1473,11 +1489,11 @@ audit() {
   # landing sanity
   if [ -f "$dir/web/landing/index.html" ]; then
     _c=$(grep -ci '<title>' "$dir/web/landing/index.html" || true)
-    [ "$_c" -gt 0 ] && check "landing has <title>" true || check "landing has <title>" false
+    check_gt0 "$_c" "landing has <title>"
     _c=$(grep -ci 'og:title' "$dir/web/landing/index.html" || true)
-    [ "$_c" -gt 0 ] && check "landing has og:title" true || check "landing has og:title" false
+    check_gt0 "$_c" "landing has og:title"
     _c=$(grep -ci 'data:image/svg+xml' "$dir/web/landing/index.html" || true)
-    [ "$_c" -gt 0 ] && check "landing is self-contained SVG favicon" true || check "landing is self-contained SVG favicon" false
+    check_gt0 "$_c" "landing is self-contained SVG favicon"
 
     if grep -Eiq 'generated with|generated by|co-authored-by' "$dir/web/landing/index.html"; then
       echo "  WARNING: landing may contain attribution text"
@@ -1490,9 +1506,9 @@ audit() {
   # README shape
   if [ -f "$dir/README.md" ]; then
     _c=$(grep -c 'actions/workflows/ci.yml/badge.svg' "$dir/README.md" || true)
-    [ "$_c" -gt 0 ] && check "README has CI badge" true || check "README has CI badge" false
+    check_gt0 "$_c" "README has CI badge"
     _c=$(grep -ci 'badge.*license' "$dir/README.md" || true)
-    [ "$_c" -gt 0 ] && check "README has license badge" true || check "README has license badge" false
+    check_gt0 "$_c" "README has license badge"
     # license badge URL must be shields-encoded (all dashes doubled in the message
     # segment) so the badge actually renders — catches the 'or-later' 404 class
     if [ "$_c" -gt 0 ]; then
@@ -1504,24 +1520,24 @@ audit() {
           *) _ok=0 ;;
         esac
       done < <(grep -oE 'img\.shields\.io/badge/license-[^ )"`]+\.svg' "$dir/README.md" || true)
-      [ "$_ok" -eq 1 ] && check "license badge URL is shields-encoded" true || check "license badge URL is shields-encoded" false
+      check_eq "$_ok" 1 "license badge URL is shields-encoded"
     else
       check "license badge URL is shields-encoded" true
     fi
     _c=$(grep -ci '^| Problem ' "$dir/README.md" || true)
-    [ "$_c" -gt 0 ] && check "README has Why table" true || check "README has Why table" false
+    check_gt0 "$_c" "README has Why table"
     _c=$(grep -c 'docs/stack.md' "$dir/README.md" || true)
-    [ "$_c" -gt 0 ] && check "README links to docs/stack.md" true || check "README links to docs/stack.md" false
+    check_gt0 "$_c" "README links to docs/stack.md"
     _c=$(grep -c 'innotelinc/innotel-platform-stack' "$dir/README.md" || true)
-    [ "$_c" -gt 0 ] && check "README links to Innotel Platform Stack" true || check "README links to Innotel Platform Stack" false
+    check_gt0 "$_c" "README links to Innotel Platform Stack"
     _c=$(grep -ci '^## License' "$dir/README.md" || true)
-    [ "$_c" -gt 0 ] && check "README has License section" true || check "README has License section" false
+    check_gt0 "$_c" "README has License section"
   fi
 
   # attribution guard content
   if [ -f "$dir/.githooks/guard-lib" ]; then
     _c=$(grep -c 'TOOL_TOKEN=' "$dir/.githooks/guard-lib" || true)
-    [ "$_c" -gt 0 ] && check "guard-lib is the shared policy (contains TOOL_TOKEN)" true || check "guard-lib is the shared policy (contains TOOL_TOKEN)" false
+    check_gt0 "$_c" "guard-lib is the shared policy (contains TOOL_TOKEN)"
   fi
 
   # .env.example posture
@@ -1532,7 +1548,7 @@ audit() {
       echo "  (no explicit .env-ignore note — recommended)"
     fi
     _c=$(grep -ci 'cerulean' "$dir/.env.example" || true)
-    [ "$_c" -gt 0 ] && check ".env.example references Cerulean" true || check ".env.example references Cerulean" false
+    check_gt0 "$_c" ".env.example references Cerulean"
     check ".env.example references Magnate (if billing)" true
     if grep -qi 'infisical' "$dir/.env.example"; then
       check ".env.example references Infisical" true
@@ -1560,7 +1576,8 @@ audit() {
 
 scaffold() {
   local name="$1" classification="$2"
-  local dir="$(pwd)/${name}"
+  local dir
+  dir="$(pwd)/${name}"
 
   if [ -e "$dir" ]; then
     die "directory already exists: ${dir}"
@@ -1577,7 +1594,7 @@ scaffold() {
   write_attribution_guard_ci "$dir"
   write_ci_yml               "$dir"
   write_pages_yml            "$dir"
-  write_makefile             "$dir" "$name" "$classification"
+  write_makefile             "$dir" "$name"
 
   # Landing placeholder — conformant outline, platform-specific bits unfilled.
   write_landing              "$dir" "$name" "$classification"
@@ -1586,14 +1603,13 @@ scaffold() {
     "${classification} platform" "$classification" \
     "MIT" \
     "" \
-    "" \
     "$(pages_url "$name")" \
     "TODO: one-paragraph about." \
     "TODO: license paragraph (state the repo's license and how upstreams are retained)." \
     "" \
     ""
 
-  write_env_example          "$dir" "$classification" "${name}.innotel.us" "${name}"
+  write_env_example          "$dir" "$name" "${name}.innotel.us"
   write_license              "$dir" "MIT"
   write_stack_doc            "$dir" "$name" "$classification" \
     "- (fill in what ${name} owns)" \
@@ -1672,7 +1688,7 @@ write_landing() {
   <meta property="og:title" content="${name} — ${classification} Platform">
   <meta property="og:description" content="TODO: one-sentence description for social.">
   <meta property="og:type" content="website">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0d10'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle'%3E${icon_char "${name}" '%2322d3ee'}%3C/text%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0d10'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle'%3E$(icon_char "${name}" '%2322d3ee')%3C/text%3E%3C/svg%3E">
   <style>
     :root {
       color-scheme: dark;
@@ -1758,7 +1774,7 @@ write_landing() {
     <div class="wrap">
       <div class="topbar-inner">
         <a class="brand" href="/">
-          <span class="mark">${icon_char "${name}" 'var(--p-accent)'}</span>
+          <span class="mark">$(icon_char "${name}" 'var(--p-accent)')</span>
           <span>${name}</span>
         </a>
         <nav>
@@ -1818,7 +1834,7 @@ write_landing() {
 
     <footer>
       <div class="wrap" style="max-width:1080px; margin:0 auto; padding:0 24px; margin-top:60px; border-top:1px solid var(--p-border); padding-top:18px; color:var(--p-text-muted); font-size:13px;">
-        <div>© ${YEAR} ${name} — ${classification}. © ${YEAR}</div>
+        <div>© ${YEAR} ${name} — ${classification}.</div>
         <div style="margin-top:6px;"><a href="https://github.com/innotelinc/${name}">GitHub</a> · <a href="https://github.com/innotelinc/innotel-platform-stack">Innotel Platform Stack</a></div>
       </div>
     </footer>
