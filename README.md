@@ -79,6 +79,9 @@ The remaining platforms are **business functions** built on top:
   audit across every stack: which services/packages appear in more than one
   repo, which duplicates are required by that stack's shape, and the memory
   posture.
+- [**Ambient environment precedence**](docs/env-precedence.md) — why a variable
+  exported for one stack can retarget another, which scripts are guarded
+  against it, and the guard to copy when adding a new one.
 
 ## Central shared library — `scripts/stack-lib.sh`
 
