@@ -1,9 +1,10 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Group 3 — MEDIA
 # Monarch — Jellyfin streaming, *arr automation, NPM edge (80/443)
+# PLUTUS (VideoOps — AI shopping channel: Convex + ffmpeg + static web)
 # + joins the shared WireGuard mesh
 # ══════════════════════════════════════════════════════════════════════════════
-# RAM: ~8 GiB | Ports: 80, 443, 81, 8096, 9696, 8989, 7878, 51820
+# RAM: ~10 GiB | Ports: 80, 443, 81, 8096, 9696, 8989, 7878, 3000, 3210, 3211, 6791, 51820
 # ══════════════════════════════════════════════════════════════════════════════
 
 name: innotel-group3
@@ -237,6 +238,95 @@ services:
     networks:
       - default
 
+  # ═══ PLUTUS (VideoOps — self-hosted AI shopping channel) ══════════════════
+  # Mirrors PLUTUS's own docker-compose.yml: a self-hosted Convex backend
+  # (custom image carrying ffmpeg) on 3210 with its HTTP-actions proxy on 3211,
+  # the Convex dashboard on 6791, and the Next.js static export served by
+  # nginx on 3000. Product hosts (plutus.innotel.us) are provisioned by
+  # Cerulean + NPM Edge — not here.
+  #
+  # Prerequisites in the sibling ../../../plutus checkout
+  # (`./stack.sh download plutus` clones it):
+  #   * out/   the static export, built once in the checkout with `bun run build`
+  #   * the Convex admin key: `docker compose exec plutus-backend ./generate_admin_key.sh`
+  # Further Convex env (S3, INSTANCE_SECRET, Authentik SSO, PUBLIC_URL) is set
+  # in the checkout with `npx convex env set …`, per PLUTUS's .env.example —
+  # including OMNIROUTE_BASE_URL, which points the video pipeline at the shared
+  # OmniRoute gateway on the mesh.
+
+  plutus-backend:
+    <<: *common
+    build:
+      context: ../../../plutus
+      dockerfile: deploy/backend.Dockerfile
+    image: plutus-backend:local
+    container_name: g3-plutus-backend
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    ports:
+      - "${PLUTUS_CONVEX_PORT:-3210}:3210"        # Convex API
+      - "${PLUTUS_SITE_PROXY_PORT:-3211}:3211"    # HTTP actions / file serving
+    volumes:
+      - plutus-data:/convex/data
+      - plutus-fallback-clips:/fallback-clips
+    environment:
+      CONVEX_CLOUD_ORIGIN: ${PLUTUS_CONVEX_CLOUD_ORIGIN:-http://127.0.0.1:${PLUTUS_CONVEX_PORT:-3210}}
+      CONVEX_SITE_ORIGIN: ${PLUTUS_CONVEX_SITE_ORIGIN:-http://127.0.0.1:${PLUTUS_SITE_PROXY_PORT:-3211}}
+      ADMIN_SECRET: ${PLUTUS_ADMIN_SECRET:-plutus-admin-secret-change-in-production}
+      DO_NOT_REQUIRE_SSL: "true"
+      DISABLE_BEACON: "true"
+      DISABLE_METRICS_ENDPOINT: "true"
+      RUST_LOG: ${PLUTUS_RUST_LOG:-info}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3210/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks:
+      - default
+      - innotel-mesh-net
+
+  plutus-dashboard:
+    <<: *common
+    image: ghcr.io/get-convex/convex-dashboard:latest
+    container_name: g3-plutus-dashboard
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    ports:
+      - "${PLUTUS_DASHBOARD_PORT:-6791}:6791"
+    environment:
+      NEXT_PUBLIC_DEPLOYMENT_URL: ${PLUTUS_CONVEX_CLOUD_ORIGIN:-http://127.0.0.1:${PLUTUS_CONVEX_PORT:-3210}}
+    depends_on:
+      plutus-backend:
+        condition: service_healthy
+    networks:
+      - default
+      - innotel-mesh-net
+
+  plutus-web:
+    <<: *common
+    image: nginx:1.27-alpine
+    container_name: g3-plutus-web
+    ports:
+      - "${PLUTUS_WEB_PORT:-3000}:80"
+    volumes:
+      - ../../../plutus/out:/usr/share/nginx/html:ro
+      - ../../../plutus/deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - plutus-fallback-clips:/fallback-clips:ro
+    depends_on:
+      plutus-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - default
+      - innotel-mesh-net
+
   # ── Consul registration ────────────────────────────────────────────────────
   consul-reg-g3:
     image: curlimages/curl:latest
@@ -253,7 +343,9 @@ services:
           "prowlarr|${MESH_SERVER_IP:-10.10.3.1}|9696|media,indexers" \
           "qbittorrent|${MESH_SERVER_IP:-10.10.3.1}|8080|media,downloads" \
           "npm|${MESH_SERVER_IP:-10.10.3.1}|81|edge,proxy,tls" \
-          "monarch-api|${MESH_SERVER_IP:-10.10.3.1}|3100|media,intelligence"; do
+          "monarch-api|${MESH_SERVER_IP:-10.10.3.1}|3100|media,intelligence" \
+          "plutus-backend|${MESH_SERVER_IP:-10.10.3.1}|3210|video,ai,plutus" \
+          "plutus-web|${MESH_SERVER_IP:-10.10.3.1}|3000|video,web,plutus"; do
           NAME=$(echo "$$svc" | cut -d'|' -f1)
           ADDR=$(echo "$$svc" | cut -d'|' -f2)
           PORT=$(echo "$$svc" | cut -d'|' -f3)
@@ -282,6 +374,8 @@ volumes:
   sabnzbd-config:
   nextpvr-config:
   tvheadend-config:
+  plutus-data:
+  plutus-fallback-clips:
 
 networks:
   default:

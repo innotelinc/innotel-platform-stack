@@ -11,6 +11,10 @@ here, and this repo is the one place where the owns/consumes map is defined.
   platform service table + the integration flows + security boundaries).
 - `stack.sh` — the multi-group orchestrator that bootstraps all platform groups, the
   WireGuard mesh, Consul service discovery, and extension enable/disable.
+- The component registry and downloader (`stack.sh download`, backed by
+  `STACK_COMPONENTS`) — it clones/updates each platform repository as a sibling
+  checkout, the directory the group compose files build from, for all components or
+  a subset.
 - The five-group deployment topology (Primary / Voice / Media / Social / Dev) used across
   the ecosystem.
 - The shared dev/cosmetic toolkit under `scripts/` (branding, healthchecks, bootstrap,
@@ -48,6 +52,7 @@ here, and this repo is the one place where the owns/consumes map is defined.
 | WireGuard mesh | wg overlay | Encrypt + connect the 5 groups across servers |
 | Consul | service registry | Service discovery across groups |
 | Extension system | compose fragments | Attach optional capabilities to any group |
+| Component downloader | `stack.sh download` · `stack.sh verify` | Clone/update the platform repos the groups build from (all or a subset), optionally starting their groups; verify checks they exist, point at the right repo, and sit on their registry branch |
 | Conformity standard | `docs/standard.md` + `scripts/conform-project.sh` | Keep every repo conformant |
 
 ## In the ecosystem

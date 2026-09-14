@@ -364,7 +364,7 @@
           <a class="btn btn-secondary" href="https://github.com/innotelinc/innotel-platform-stack">Docs</a>
         </div>
         <div class="quickstart">
-          <code><span class="c">$</span> git clone https://github.com/innotelinc/innotel-platform-stack.git && cd innotel-platform-stack</code>
+          <code><span class="c">$</span> git clone https://github.com/innotelinc/innotel-platform-stack.git && cd innotel-platform-stack && ./stack.sh download all</code>
           <button class="copy" id="copy-btn" type="button" aria-label="Copy quick start command">copy</button>
         </div>
         <div class="stats">
@@ -448,7 +448,7 @@ $ <span class="p">cat</span> README.md
   <script>
     // Copy-to-clipboard for the quick-start one-liner (progressive enhancement).
     document.getElementById('copy-btn').addEventListener('click', function () {
-      var cmd = 'git clone https://github.com/innotelinc/innotel-platform-stack.git && cd innotel-platform-stack';
+      var cmd = 'git clone https://github.com/innotelinc/innotel-platform-stack.git && cd innotel-platform-stack && ./stack.sh download all';
       var self = this;
       function done() {
         self.textContent = 'copied';
