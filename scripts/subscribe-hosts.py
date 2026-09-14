@@ -246,8 +246,16 @@ def main() -> int:
     api_url = args.api_url or os.environ.get("NPM_API_URL") or DEFAULT_API_URL
     portal_host = os.environ.get("SUBSCRIBE_PORTAL_HOST") or DEFAULT_PORTAL_HOST
     portal_port = int(os.environ.get("SUBSCRIBE_PORTAL_PORT") or DEFAULT_PORTAL_PORT)
-    email = os.environ.get("NPM_ADMIN_EMAIL", "")
-    password = os.environ.get("NPM_ADMIN_PASSWORD", "")
+    # The repos in this ecosystem split on the credential names: capstone and
+    # cerulean export NPM_EMAIL/NPM_PASSWORD, zeus/rizzaura/monarch export
+    # NPM_ADMIN_EMAIL/NPM_ADMIN_PASSWORD — both are the same NPM admin account.
+    # Accept either so this script works from any stack's shell.
+    email = (os.environ.get("NPM_ADMIN_EMAIL")
+             or os.environ.get("NPM_EMAIL")
+             or "")
+    password = (os.environ.get("NPM_ADMIN_PASSWORD")
+                or os.environ.get("NPM_PASSWORD")
+                or "")
 
     services = sorted(p.stem for p in PAGES.glob("*.html") if p.stem != "index")
     if not services:
@@ -265,7 +273,8 @@ def main() -> int:
     try:
         if not npm.token:
             if not (email and password):
-                print("FAIL set NPM_ADMIN_EMAIL / NPM_ADMIN_PASSWORD (or NPM_API_TOKEN)",
+                print("FAIL set NPM_ADMIN_EMAIL / NPM_ADMIN_PASSWORD "
+                      "(or NPM_EMAIL / NPM_PASSWORD, or NPM_API_TOKEN)",
                       file=sys.stderr)
                 return 1
             npm.login(email, password)
