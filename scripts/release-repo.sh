@@ -100,6 +100,9 @@ for _ in $(seq 1 60); do
 done
 [ -n "$RUN_ID" ] || { echo "error: no release workflow run found after the tag push" >&2; exit 1; }
 
-gh run watch "$RUN_ID" -R "$SLUG" --exit-status --interval 20 2>/dev/null \
-  && echo "release $TAG: workflow succeeded" \
-  || { echo "release $TAG: workflow FAILED (run $RUN_ID)" >&2; exit 1; }
+if gh run watch "$RUN_ID" -R "$SLUG" --exit-status --interval 20 2>/dev/null; then
+  echo "release $TAG: workflow succeeded"
+else
+  echo "release $TAG: workflow FAILED (run $RUN_ID)" >&2
+  exit 1
+fi
