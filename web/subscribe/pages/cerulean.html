@@ -1,23 +1,19 @@
-
-  <!-- apex page: directory of every service's subscribe page. Each tile shows
-       that service's own price, fetched live from Magnate — the master
-       dashboard is the only place a price is set. -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Subscribe to Innotel — Innotel</title>
-  <meta name="description" content="Every service, one account. Subscribe to Innotel — billed by Magnate, one account for every Innotel service.">
-  <meta property="og:title" content="Subscribe to Innotel">
-  <meta property="og:description" content="Every service, one account. One account, every service.">
+  <title>Subscribe to Cerulean — Innotel</title>
+  <meta name="description" content="One login for the whole platform. Subscribe to Cerulean — billed by Magnate, one account for every Innotel service.">
+  <meta property="og:title" content="Subscribe to Cerulean">
+  <meta property="og:description" content="One login for the whole platform. One account, every service.">
   <meta property="og:type" content="website">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='#38bdf8'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='#3aa0ff'/%3E%3C/svg%3E">
   <style>
     :root {
       color-scheme: dark;
-      --accent: #38bdf8;
-      --accent-tint: color-mix(in srgb, #38bdf8 12%, transparent);
+      --accent: #3aa0ff;
+      --accent-tint: color-mix(in srgb, #3aa0ff 12%, transparent);
       --bg: #0b0d10;
       --surface: #16191f;
       --border: #262c35;
@@ -45,7 +41,7 @@
       display: inline-flex; align-items: center; gap: 8px;
       font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
       color: var(--accent);
-      border: 1px solid color-mix(in srgb, #38bdf8 35%, transparent);
+      border: 1px solid color-mix(in srgb, #3aa0ff 35%, transparent);
       background: var(--accent-tint);
       border-radius: 999px; padding: 6px 14px;
     }
@@ -104,7 +100,7 @@
 <body>
   <header>
     <div class="wrap bar">
-      <span class="brand"><span class="mark"></span>Innotel</span>
+      <span class="brand"><span class="mark"></span>Cerulean</span>
       <a class="signin" href="https://subscribe.innotel.us">All Innotel plans</a>
     </div>
   </header>
@@ -112,33 +108,22 @@
   <main class="wrap">
     <section class="hero">
       <span class="kicker">Powered by Innotel</span>
-      <h1>Subscribe to Innotel<span class="accent">.</span></h1>
-      <p class="lede">Every service, one account. One account, one bill — every Innotel service is billed through Magnate.</p>
+      <h1>Subscribe to Cerulean<span class="accent">.</span></h1>
+      <p class="lede">One login for the whole platform. One account, one bill — every Innotel service is billed through Magnate.</p>
     </section>
 
     <section>
-      <div class="plans">
-    <a class="tile" data-service="monarch" style="--accent: #e50914" href="https://subscribe.monarch.innotel.us"><span class="mark"></span><b>Monarch</b><small>Your personal streaming empire</small></a>
-    <a class="tile" data-service="zeus" style="--accent: #fbbf24" href="https://subscribe.zeus.innotel.us"><span class="mark"></span><b>Zeus</b><small>VoIP made simple</small></a>
-    <a class="tile" data-service="capstone" style="--accent: #a78bfa" href="https://subscribe.capstone.innotel.us"><span class="mark"></span><b>Capstone</b><small>Voice AI that answers for you</small></a>
-    <a class="tile" data-service="oasis" style="--accent: #fbbf24" href="https://subscribe.oasis.innotel.us"><span class="mark"></span><b>Oasis</b><small>Mail and collaboration, self-hosted</small></a>
-    <a class="tile" data-service="onyx" style="--accent: #38bdf8" href="https://subscribe.onyx.innotel.us"><span class="mark"></span><b>Onyx</b><small>Object storage you own</small></a>
-    <a class="tile" data-service="signara" style="--accent: #38bdf8" href="https://subscribe.signara.innotel.us"><span class="mark"></span><b>Signara</b><small>Trust and signing infrastructure</small></a>
-    <a class="tile" data-service="atlas" style="--accent: #22d3ee" href="https://subscribe.atlas.innotel.us"><span class="mark"></span><b>Atlas</b><small>The DevOps platform</small></a>
-    <a class="tile" data-service="atheniq" style="--accent: #a78bfa" href="https://subscribe.atheniq.innotel.us"><span class="mark"></span><b>AthenIQ</b><small>Learning, on your terms</small></a>
-    <a class="tile" data-service="olympus" style="--accent: #f472b6" href="https://subscribe.olympus.innotel.us"><span class="mark"></span><b>Olympus</b><small>The AI studio</small></a>
-    <a class="tile" data-service="plutus" style="--accent: #f5b544" href="https://subscribe.plutus.innotel.us"><span class="mark"></span><b>PLUTUS</b><small>The AI shopping channel</small></a>
-    <a class="tile" data-service="distro" style="--accent: #22d3ee" href="https://subscribe.distro.innotel.us"><span class="mark"></span><b>Distro</b><small>Build and ship, your way</small></a>
-    <a class="tile" data-service="rizzaura" style="--accent: #f472b6" href="https://subscribe.rizzaura.innotel.us"><span class="mark"></span><b>Rizz Aura</b><small>Your community, your rules</small></a>
-    <a class="tile" data-service="zapit" style="--accent: #38bdf8" href="https://subscribe.zapit.innotel.us"><span class="mark"></span><b>ZapIt</b><small>Short links, fast</small></a>
-    <a class="tile" data-service="cerulean" style="--accent: #3aa0ff" href="https://subscribe.cerulean.innotel.us"><span class="mark"></span><b>Cerulean</b><small>One login for the whole platform</small></a>
-  </div>
+      <div class="plans" id="plans" hidden></div>
+      <div class="empty" id="empty" hidden>
+        <b>Cerulean</b> is not sold separately yet.<br>
+        It is included with the platform membership — <a href="https://subscribe.innotel.us">see all plans</a>.
+      </div>
 
       <div class="fineprint">
         <span aria-hidden="true">&#128179;</span>
         <span>
           <b>One bill for everything.</b> Subscriptions are billed by Magnate, the platform's
-          billing service — never by Innotel itself. Prices are read live from the master
+          billing service — never by Cerulean itself. Prices are read live from the master
           dashboard; manage or cancel any plan from your Magnate account.
         </span>
       </div>
@@ -147,43 +132,50 @@
 
   <footer>
     <div class="wrap foot">
-      <span>Innotel — Powered by Innotel</span>
+      <span>Cerulean — Powered by Innotel</span>
       <span class="all-services"><a href="https://subscribe.innotel.us">subscribe.innotel.us</a> · every service, one account</span>
     </div>
   </footer>
 
   <script>
-    // Prices are never baked in: each tile asks Magnate for that one service's
-    // plan list. A service with no plan yet keeps its tagline only.
+    // Prices are never baked in: read them live from Magnate, the billing
+    // platform, so the master dashboard is the only place a price is set.
     (function () {
-      var MAGNATE = "https://app.magnate.innotel.us";
-      var tiles = Array.prototype.slice.call(
-        document.querySelectorAll(".tile[data-service]")
-      );
+      var SERVICE = "cerulean";
+      var PORTAL_SIGNUP = "https://subscribe.innotel.us/signup";
+      var plansEl = document.getElementById("plans");
+      var emptyEl = document.getElementById("empty");
       function money(cents) {
         var v = cents / 100;
         return v % 1 === 0 ? String(v) : v.toFixed(2);
       }
-      tiles.forEach(function (tile) {
-        var svc = tile.getAttribute("data-service");
-        fetch(MAGNATE + "/api/plans?service=" + encodeURIComponent(svc))
-          .then(function (r) { return r.ok ? r.json() : { plans: [] }; })
-          .then(function (d) {
-            var plans = (d && d.plans) || [];
-            if (!plans.length) return;
-            var cheapest = plans.reduce(function (min, p) {
-              return min === null || p.priceMonthlyCents < min
-                ? p.priceMonthlyCents
-                : min;
-            }, null);
-            if (cheapest === null) return;
-            var price = document.createElement("em");
-            price.className = "from";
-            price.textContent = "from $" + money(cheapest) + "/mo";
-            tile.appendChild(price);
-          })
-          .catch(function () {});
-      });
+      function card(p) {
+        var el = document.createElement("div");
+        el.className = "plan" + (p.highlighted ? " popular" : "");
+        var feats = (p.features || []).map(function (f) {
+          return "<li>" + f.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</li>";
+        }).join("");
+        el.innerHTML =
+          (p.highlighted ? '<span class="tag">Most popular</span>' : "") +
+          "<h2>" + p.name.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</h2>" +
+          '<div class="price">$' + money(p.priceMonthlyCents) + "<small>/month</small></div>" +
+          (p.priceYearlyCents ? '<div style="font-size:12px;color:var(--muted)">or $' + money(p.priceYearlyCents) + "/year</div>" : "") +
+          "<ul>" + feats + "</ul>" +
+          '<a class="cta" href="' + PORTAL_SIGNUP + "?plan=" + encodeURIComponent(p.slug) + '">Subscribe</a>';
+        return el;
+      }
+      fetch("https://app.magnate.innotel.us/api/plans?service=" + encodeURIComponent(SERVICE))
+        .then(function (r) { return r.ok ? r.json() : { plans: [] }; })
+        .then(function (d) {
+          var plans = (d && d.plans) || [];
+          if (!plans.length) { emptyEl.hidden = false; return; }
+          plans.forEach(function (p) { plansEl.appendChild(card(p)); });
+          plansEl.hidden = false;
+        })
+        .catch(function () {
+          emptyEl.hidden = false;
+          emptyEl.innerHTML = 'Prices are temporarily unavailable — <a href="https://subscribe.innotel.us">open the billing portal</a>.';
+        });
     })();
   </script>
 </body>

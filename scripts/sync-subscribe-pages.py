@@ -42,6 +42,7 @@ TEMPLATE = STACK / "web" / "subscribe" / "template.html"
 SERVICES = [
     "magnate", "monarch", "zeus", "capstone", "oasis", "onyx", "signara",
     "atlas", "atheniq", "olympus", "plutus", "distro", "rizzaura", "zapit",
+    "cerulean",
 ]
 
 # repo dir name per service slug (only where they differ from the slug)
@@ -54,6 +55,7 @@ REPO_OF = {
     "oasis": "oasis-mail-platform",
     "signara": "signara-trust-platform",
     "rizzaura": "rizzaura-platform",
+    "cerulean": "cerulean-dns-platform",
     "atheniq": "atheniq",
     "olympus": "olympus",
     "plutus": "plutus",
@@ -79,6 +81,7 @@ DEFAULTS = {
     "distro": {"name": "Distro", "tagline": "Build and ship, your way", "accent": "#22d3ee"},
     "rizzaura": {"name": "Rizz Aura", "tagline": "Your community, your rules", "accent": "#f472b6"},
     "zapit": {"name": "ZapIt", "tagline": "Short links, fast", "accent": "#38bdf8"},
+    "cerulean": {"name": "Cerulean", "tagline": "One login for the whole platform", "accent": "#3aa0ff"},
 }
 
 # Accent tints used for the gradient wash, derived per page from --accent.
