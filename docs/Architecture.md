@@ -12,7 +12,7 @@ container) and connects via a WireGuard mesh overlay network.
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │
 │  │ Server 1 │ │ Server 2 │ │ Server 3 │ │ Server 4 │ │ Server 5 │        │
 │  │ .10.1.1  │ │ .10.2.1  │ │ .10.3.1  │ │ .10.4.1  │ │ .10.5.1  │        │
-│  │          │ │          │ │          │ │          │ │          │        │
+│  │          │ │          │ │ PLUTUS   │ │          │ │ Olympus  │        │
 │  │ Cerulean │ │ Capstone │ │ Monarch  │ │ Rizzaura │ │  Atlas   │        │
 │  │ AthenIQ  │ │   Zeus   │ │ Jellyfin │ │  ONYX    │ │  Oasis   │        │
 │  │ Magnate  │ │OmniRoute │ │   *arr   │ │          │ │  Gitea   │        │
@@ -27,11 +27,40 @@ container) and connects via a WireGuard mesh overlay network.
 
 | # | Name      | Role                      | Services                          | RAM    |
 |---|-----------|---------------------------|-----------------------------------|--------|
-| 1 | Primary   | Auth backbone + LMS + billing | Cerulean, AthenIQ, Magnate, Consul | ~8 GiB |
+| 1 | Primary   | Auth backbone + LMS + billing | Cerulean, AthenIQ, Magnate, Signara, Consul | ~10 GiB |
 | 2 | Voice     | PBX + VoIP + LLM gateway  | Capstone, Zeus, OmniRoute, coturn | ~6 GiB |
-| 3 | Media     | Streaming + automation    | Jellyfin, *arr, NPM edge          | ~8 GiB |
+| 3 | Media     | Streaming + video delivery | Jellyfin, *arr, NPM edge, PLUTUS   | ~10 GiB |
 | 4 | Social    | Leaderboard + storage     | Rizzaura, ONYX                    | ~6 GiB |
-| 5 | Dev       | Code + mail               | Atlas (Gitea+Chef), Oasis         | ~4 GiB |
+| 5 | Dev       | Code + mail + factory     | Atlas (Gitea+Chef), Oasis, Distro, Olympus | ~8 GiB |
+
+## Components (`./stack.sh download`)
+
+The groups build from the platform repositories, checked out as **siblings of
+this repo** (`groups/<n>-<name>/docker-compose.yml` references
+`../../../<component-dir>`). `stack.sh download` puts them there:
+
+```bash
+./stack.sh download --list              # components, repos, groups
+./stack.sh download all                 # clone/update every component
+./stack.sh download plutus olympus      # just some of them
+./stack.sh download all --start         # download, then start the groups
+./stack.sh download all --dir /srv/platform      # or STACK_COMPONENT_BASE in .env
+./stack.sh download cerulean --ref v0.3.0        # pin a branch, tag, or commit
+```
+
+The registry lives in `stack.sh` (`STACK_COMPONENTS`): component → repo,
+checkout directory, hosting group, and default branch. Existing checkouts are
+fetched and fast-forwarded; a checkout with local changes is left untouched, and
+a directory that is not a git checkout is skipped rather than clobbered.
+
+Group arguments everywhere also accept a component or a group alias, so
+`./stack.sh up plutus` starts Group 3 and `./stack.sh logs olympus` tails Group 5.
+
+`./stack.sh verify [component…|all]` reports each checkout as healthy, on a
+different branch, or missing/mismatched, and exits non-zero on the latter. `up`
+runs the same check for the group it is about to start and refuses to start when
+a component is missing or points at the wrong repository; `STACK_SKIP_VERIFY=1`
+bypasses that gate.
 
 ## Cross-Network Connectivity
 
@@ -119,10 +148,13 @@ gets its own Docker network to avoid collisions.
 ## Multi-Server Mode
 
 1. Clone the repo on each server
-2. Fill in `.env` with that server's IP and keys
-3. On Server 1: `./stack.sh up 1` (starts Consul server + mesh)
-4. On Servers 2-5: `./stack.sh up <group>` (joins mesh, registers with Consul)
-5. Any server: `./stack.sh discover <service>` (finds it anywhere)
+2. `./stack.sh download <components…>` — fetch the components that server hosts
+   (e.g. `./stack.sh download plutus` on Server 3, `./stack.sh download olympus`
+   on Server 5), as siblings of the checkout
+3. Fill in `.env` with that server's IP and keys
+4. On Server 1: `./stack.sh up 1` (starts Consul server + mesh)
+5. On Servers 2-5: `./stack.sh up <group|component>` (joins mesh, registers with Consul)
+6. Any server: `./stack.sh discover <service>` (finds it anywhere)
 
 ## Flexible Grouping (any combination, any host)
 
@@ -169,6 +201,10 @@ mesh's Consul agent lives. Services on the same host reach Consul directly as
 | 3     | NPM              | 80/443    | 10.10.3.1:80            |
 | 3     | Jellyfin         | 8096      | 10.10.3.1:8096          |
 | 3     | Prowlarr         | 9696      | 10.10.3.1:9696          |
+| 3     | PLUTUS web       | 3000      | 10.10.3.1:3000          |
+| 3     | PLUTUS Convex    | 3210      | 10.10.3.1:3210          |
+| 3     | PLUTUS site proxy| 3211      | 10.10.3.1:3211          |
+| 3     | PLUTUS dashboard | 6791      | 10.10.3.1:6791          |
 | 4     | Rizz API         | 8000      | 10.10.4.1:8000          |
 | 4     | Rizz App         | 3010      | 10.10.4.1:3010          |
 | 4     | ONYX API         | 8080      | 10.10.4.1:8080          |
@@ -176,6 +212,8 @@ mesh's Consul agent lives. Services on the same host reach Consul directly as
 | 5     | Gitea            | 3000      | 10.10.5.1:3000          |
 | 5     | Convex           | 3210      | 10.10.5.1:3210          |
 | 5     | Oasis Mail       | 587       | 10.10.5.1:587           |
+| 5     | Distro web       | 5173      | 10.10.5.1:5173          |
+| 5     | Olympus Studio   | 3001      | 10.10.5.1:3001          |
 
 ## Security Model
 

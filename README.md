@@ -209,18 +209,41 @@ Each group runs on its own server and discovers others via Consul.
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐
 │  │  Server 1  │  │  Server 2  │  │  Server 3  │  │  Server 4  │  │  Server 5  │
 │  │  10.10.1.1 │  │  10.10.2.1 │  │  10.10.3.1 │  │  10.10.4.1 │  │  10.10.5.1 │
-│  │            │  │            │  │            │  │            │  │            │
+│  │            │  │            │  │  PLUTUS    │  │            │  │  Olympus   │
 │  │  Cerulean  │  │  Capstone  │  │  Monarch   │  │  Rizzaura  │  │   Atlas    │
 │  │  AthenIQ   │  │   Zeus     │  │  Jellyfin  │  │   ONYX     │  │   Oasis    │
 │  │  Magnate   │  │ OmniRoute  │  │    *arr    │  │            │  │   Gitea    │
 │  │  Signara   │  │            │  │    NPM     │  │            │  │   Chef     │
 │  │            │  │            │  │            │  │            │  │  Distro    │
-│  │  ~10 GiB   │  │  ~6 GiB    │  │  ~8 GiB    │  │  ~6 GiB    │  │  ~8 GiB    │
+│  │  ~10 GiB   │  │  ~6 GiB    │  │  ~10 GiB   │  │  ~6 GiB    │  │  ~8 GiB    │
 │  └────────────┘  └────────────┘  └────────────┘  └────────────┘  └────────────┘
 │                                                                          │
 │  Consul Registry (10.10.1.1:8500) — every group registers here          │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Components per server
+
+Each server only needs the components its own group builds from. `stack.sh download`
+clones them as siblings of the checkout — see
+[docs/Architecture.md](docs/Architecture.md#components-stacksh-download):
+
+| Server | Group | Download |
+|---|---|---|
+| 1 | primary | `./stack.sh download cerulean atheniq magnate signara` |
+| 2 | voice | `./stack.sh download capstone zeus` |
+| 3 | media | `./stack.sh download monarch plutus npm` |
+| 4 | social | `./stack.sh download rizzaura onyx` |
+| 5 | dev | `./stack.sh download atlas oasis distro olympus` |
+
+A single-box deployment (`./stack.sh up all`) needs every component:
+`./stack.sh download all`. `zapit` (TransferOps) belongs to no group — download
+it on its own when you want to run it.
+
+Add `--start` to any download to bring that group up right after it lands, and
+run `./stack.sh verify` (or just `./stack.sh up <group>`, which checks first) to
+confirm every component is present, points at its repository, and sits on its
+registry branch.
 
 ### Quick Start
 
@@ -229,6 +252,13 @@ Each group runs on its own server and discovers others via Consul.
 git clone https://github.com/innotelinc/innotel-platform-stack.git
 cd innotel-platform-stack
 cp .env.example .env   # fill in server IPs, WG keys, etc.
+
+# Fetch the platform components as siblings of this checkout — the locations
+# the group compose files build from. Pick all of them or just some:
+./stack.sh download all                  # every component
+./stack.sh download plutus olympus       # only the new additions
+./stack.sh download olympus --start      # download, then start its group
+./stack.sh download --list               # what's available
 
 # Server 1 — starts mesh + Consul + Group 1
 ./stack.sh up 1
@@ -471,7 +501,9 @@ Deployment order:
    Rizz Aura can ride anywhere after Authentik + Magnate, AthenIQ after
    Authentik + Infisical + Magnate — it also consumes Signara for signed course
    certificates, and Atlas after Authentik + Infisical + Magnate to host this
-   ecosystem's code and CI).
+   ecosystem's code and CI). PLUTUS lands in Group 3 with Monarch (it needs
+   Cerulean · NPM Edge · OmniRoute); Olympus lands in Group 5 with Atlas and
+   Distro, since the factory and Studio build the repos that live there.
 
 ### One stack vs split deployment
 
@@ -615,6 +647,10 @@ Rules that hold in both:
 |---|---|
 | `./stack.sh up all` | Start everything (single-server mode) |
 | `./stack.sh up <1-5>` | Start a specific group |
+| `./stack.sh up <component\|alias>` | Start the group hosting a component (`plutus`, `olympus`, …) or a group alias (`media`, `dev`, …) |
+| `./stack.sh download <component...\|all> [--start]` | Clone/update the component repos next to this checkout (and optionally start their groups) |
+| `./stack.sh download --list` | List the components, their repos, and their groups |
+| `./stack.sh verify [component\|all]` | Check that component checkouts exist, match their repos, and are on the right branch (`up` runs this first; `STACK_SKIP_VERIFY=1` skips it) |
 | `./stack.sh down all` | Stop everything |
 | `./stack.sh status` | Show all groups and services |
 | `./stack.sh list` | List groups, extensions, and discovered services |
