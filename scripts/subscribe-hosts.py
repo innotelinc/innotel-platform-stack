@@ -22,7 +22,7 @@ stay reachable:
     A gate found here is reported as drift and removed on the next run.
 
 subscribe.zeus.innotel.us is deliberately NOT managed here: Zeus serves its own
-subscription page from its own app, and zeus-pbx-platform already maps that host
+subscription page from its own app, and the zeus repo already maps that host
 to :3001. Its page in web/subscribe/pages/zeus.html stays as the portal-side
 fallback.
 
@@ -31,7 +31,7 @@ Usage
     python3 scripts/subscribe-hosts.py            # create/update
 
 Environment (real env wins; defaults suit the .46 portal host)
-    NPM_API_URL             edge NPM                (http://192.168.1.71:81)
+    NPM_API_URL             edge NPM                (http://192.168.1.46:81)
     NPM_ADMIN_EMAIL         edge NPM login email
     NPM_ADMIN_PASSWORD      edge NPM login password
     NPM_API_TOKEN           persistent NPM token    (skips the login)
@@ -52,14 +52,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PAGES = ROOT / "web" / "subscribe" / "pages"
 
-DEFAULT_API_URL = "http://192.168.1.71:81"
+DEFAULT_API_URL = "http://192.168.1.46:81"
 DEFAULT_PORTAL_HOST = "192.168.1.46"
 DEFAULT_PORTAL_PORT = 3040
 
 # The apex directory plus every service page, minus the services that serve
 # their own subscription page elsewhere.
 NOT_MANAGED = {
-    "zeus": "zeus-pbx-platform maps subscribe.zeus.innotel.us to its own app (:3001)",
+    "zeus": "the zeus repo maps subscribe.zeus.innotel.us to its own app (:3001)",
 }
 
 # What this script owns on an existing host. Everything else a host carries

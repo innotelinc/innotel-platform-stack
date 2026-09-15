@@ -31,6 +31,17 @@ set -euo pipefail
 STACK_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="${STACK_DIR}/.env"
 
+# ── Mesh layout ───────────────────────────────────────────────────────────────
+# The group dirs live BESIDE this repo, not inside it:
+#
+#   <root>/
+#     1-primary/  2-voice/  3-media/  4-social/  5-dev/   ips/
+#
+# Each group dir holds its own docker-compose.yml plus the repos that run on
+# that server (1-primary/cerulean, 2-voice/capstone, …). This repo orchestrates
+# them and no longer owns a groups/ dir of its own.
+ROOT_DIR="$(cd "${STACK_DIR}/.." && pwd)"
+
 # ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -83,7 +94,7 @@ err()   { echo -e "${RED}[error]${NC} $*" >&2; }
 
 get_group_dir() {
   local num="$1"
-  echo "${STACK_DIR}/groups/${num}-$(echo "${STACK_GROUPS[$num]}" | cut -d'|' -f1)"
+  echo "${ROOT_DIR}/${num}-$(echo "${STACK_GROUPS[$num]}" | cut -d'|' -f1)"
 }
 
 # Resolve one CLI target to a group number: accepts 1-5, "all", "mesh", a group

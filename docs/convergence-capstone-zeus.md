@@ -90,7 +90,7 @@ Rules that keep it single-responsibility:
   SMS, fax. Capstone never re-implements them.
 - **Capstone owns agent behavior** — prompts, workflows, grading, dashboards,
   personal assistants. Zeus never hosts agents.
-- **Both consume** Authentik (identity), Infisical (secrets), Magnate
+- **Both consume** Authentik (identity), Cerulean Vault (secrets), Magnate
   (revenue) and Cerulean (trust) — never own them.
 - **Nothing is duplicated**: one PBX (Zeus's), one agent engine (Capstone's).
 

@@ -24,7 +24,7 @@ here, and this repo is the one place where the owns/consumes map is defined.
 
 ## Provides
 
-- The canonical definition of who owns what: Authentik = Identity, Infisical = Secrets,
+- The canonical definition of who owns what: Authentik = Identity, Cerulean Vault = Secrets,
   Cerulean = Trust, ONYX = Storage, Magnate = Revenue, NPM Edge = Edge; everything else is
   a business function that consumes those.
 - The cross-platform integration flows (identity, secrets, trust, revenue, edge).
@@ -34,7 +34,7 @@ here, and this repo is the one place where the owns/consumes map is defined.
 ## Consumes
 
 - Nothing platform-level. This repo is the definition layer, not a runtime service. It
-  assembles upstream platforms (Authentik, Infisical, Gitea, Chef, Convex, NPM, Jellyfin,
+  assembles upstream platforms (Authentik, Vault, Gitea, Chef, Convex, NPM, Jellyfin,
   *arr, Asterisk/FreePBX, Zimbra, etc.) and documents their roles.
 
 ## Explicitly does NOT own
