@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 
 STACK = Path(__file__).resolve().parent.parent
-REPOS = STACK.parent                      # sibling product repos
+ROOT = STACK.parent                       # the mesh workspace
 OUT_DIR = STACK / "web" / "subscribe" / "pages"
 TEMPLATE = STACK / "web" / "subscribe" / "template.html"
 
@@ -45,24 +45,33 @@ SERVICES = [
     "cerulean",
 ]
 
-# repo dir name per service slug (only where they differ from the slug)
-REPO_OF = {
-    "monarch": "monarch-media-platform",
-    "zeus": "zeus-pbx-platform",
-    "capstone": "capstone-voice-aiagent-platform",
-    "magnate": "magnate-subscription-platform",
-    "onyx": "onyx-oss-platform",
-    "oasis": "oasis-mail-platform",
-    "signara": "signara-trust-platform",
-    "rizzaura": "rizzaura-platform",
-    "cerulean": "cerulean-dns-platform",
-    "atheniq": "atheniq",
-    "olympus": "olympus",
-    "plutus": "plutus",
-    "distro": "distro",
-    "zapit": "zapit",
-    "atlas": "atlas",
+# Which mesh group dir a service's repo is checked out under. Every repo dir
+# name is the slug itself:  <root>/<N>-<group>/<slug>
+GROUP_OF = {
+    "cerulean": "1-primary", "atheniq": "1-primary", "magnate": "1-primary",
+    "signara": "1-primary", "sign": "1-primary", "verifier": "1-primary",
+    "capstone": "2-voice", "zeus": "2-voice",
+    "monarch": "3-media", "plutus": "3-media",
+    # NPM Edge moved to Group 1: the edge sits with the trust layer that issues
+    # the certificates it terminates, not with the media stacks it routes.
+    "npm": "1-primary",
+    "onyx": "4-social", "rizzaura": "4-social", "zapit": "4-social",
+    "atlas": "5-dev", "distro": "5-dev", "oasis": "5-dev", "olympus": "5-dev",
 }
+
+
+def repo_dir(slug: str) -> Path:
+    """The checkout of `slug`, wherever the mesh put it.
+
+    Group layout first, then a flat sibling checkout, then the path it would
+    have if the repo simply isn't cloned yet.
+    """
+    group = GROUP_OF.get(slug)
+    if group and (ROOT / group / slug).is_dir():
+        return ROOT / group / slug
+    if (ROOT / slug).is_dir():
+        return ROOT / slug
+    return ROOT / (group or slug) / slug
 
 # Fallback brand specs for services whose repo has no subscribe.json yet.
 # Anything the spec provides wins over these.
@@ -315,7 +324,7 @@ APEX_SCRIPT = """  <script>
 
 
 def load_spec(service: str) -> dict:
-    repo = REPOS / REPO_OF.get(service, service)
+    repo = repo_dir(service)
     spec_file = repo / "web" / "landing" / "subscribe.json"
     spec = dict(DEFAULTS.get(service, {"name": service.title(), "tagline": "", "accent": "#38bdf8"}))
     if spec_file.is_file():
