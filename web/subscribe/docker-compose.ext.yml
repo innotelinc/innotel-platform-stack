@@ -10,7 +10,7 @@
 # Regenerate the pages after changing any service's brand spec:
 #   python3 ../scripts/sync-subscribe-pages.py   (from the stack repo root)
 # or from anywhere:
-#   python3 /usr/src/projects/complete/innotel-platform-stack/scripts/sync-subscribe-pages.py
+#   python3 /usr/src/projects/complete/ips/scripts/sync-subscribe-pages.py
 
 services:
   subscribe-portal:

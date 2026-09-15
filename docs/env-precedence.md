@@ -48,21 +48,21 @@ still possible — it just has to be said out loud.
 
 | Script | Watches | Writes / deletes |
 | --- | --- | --- |
-| `capstone-voice-aiagent-platform/scripts/npm-proxy-hosts.py` | `NPM_BASE_DOMAIN` | creates + prunes NPM hosts |
-| `capstone-voice-aiagent-platform/scripts/authentik_bootstrap.py` | `NPM_BASE_DOMAIN` | writes the external host + cookie domain into Authentik |
-| `rizzaura-platform/scripts/npm-proxy-hosts.py` | `NPM_BASE_DOMAIN` | creates + prunes NPM hosts |
-| `zeus-pbx-platform/scripts/npm-proxy-hosts.py` | `NPM_BASE_DOMAIN` | creates + prunes NPM hosts |
-| `cerulean-dns-platform/scripts/npm-proxy-hosts.py` | `NPM_BASE_DOMAIN` | creates NPM hosts |
+| `2-voice/capstone/scripts/npm-proxy-hosts.py` | `NPM_BASE_DOMAIN` | creates + prunes NPM hosts |
+| `2-voice/capstone/scripts/authentik_bootstrap.py` | `NPM_BASE_DOMAIN` | writes the external host + cookie domain into Authentik |
+| `4-social/rizzaura/scripts/npm-proxy-hosts.py` | `NPM_BASE_DOMAIN` | creates + prunes NPM hosts |
+| `2-voice/zeus/scripts/npm-proxy-hosts.py` | `NPM_BASE_DOMAIN` | creates + prunes NPM hosts |
+| `1-primary/cerulean/scripts/npm-proxy-hosts.py` | `NPM_BASE_DOMAIN` | creates NPM hosts |
 
 **Reviewed — no guard needed**
 
 | Script | Why |
 | --- | --- |
-| `capstone-voice-aiagent-platform/dashboard-backend/app/main.py` | reads `NPM_BASE_DOMAIN` to build its own links; runs inside the Capstone container, whose environment is the Capstone stack's |
-| `signara-trust-platform/infra/nginx/npm-proxy-hosts.py` | reads `BASE_DOMAIN`, not `NPM_BASE_DOMAIN`, and defaults to its own domain — the shared `NPM_*` exports cannot retarget it |
-| `signara-trust-platform/scripts/provision-edge.sh`, `infra/cerulean/provision.py` | distinct variable names (`BASE_DOMAIN`, `CERULEAN_BASE_DOMAIN`) with their own defaults |
-| `monarch-media-platform/scripts/npm-proxy-hosts.py` | derives its zone from its own `.env` keys, never from `NPM_BASE_DOMAIN` |
-| `innotel-platform-stack/scripts/{subscribe-hosts,sync-subscribe-pages}.py` | the host list comes from the portal's own pages, not from the environment |
+| `2-voice/capstone/dashboard-backend/app/main.py` | reads `NPM_BASE_DOMAIN` to build its own links; runs inside the Capstone container, whose environment is the Capstone stack's |
+| `1-primary/signara/infra/nginx/npm-proxy-hosts.py` | reads `BASE_DOMAIN`, not `NPM_BASE_DOMAIN`, and defaults to its own domain — the shared `NPM_*` exports cannot retarget it |
+| `1-primary/signara/scripts/provision-edge.sh`, `infra/cerulean/provision.py` | distinct variable names (`BASE_DOMAIN`, `CERULEAN_BASE_DOMAIN`) with their own defaults |
+| `3-media/monarch/scripts/npm-proxy-hosts.py` | derives its zone from its own `.env` keys, never from `NPM_BASE_DOMAIN` |
+| `ips/scripts/{subscribe-hosts,sync-subscribe-pages}.py` | the host list comes from the portal's own pages, not from the environment |
 | `*/scripts/stack-lib.sh` → `stack_lib_env` | env-first *by convention*; the guard belongs at the call site, not in the helper |
 
 **Credentials**
@@ -70,7 +70,7 @@ still possible — it just has to be said out loud.
 | Item | Status |
 | --- | --- |
 | Zeus AMI secret (`FREEPBX_AMI_SECRET` / `ASTERISK_AMI_SECRET`) | fixed: the portal adopts the password from the mounted `manager_custom.conf` on boot, and the PBX entrypoint rewrites its `[<user>]` secret every start — the credential now has one owner regardless of what the shell exports |
-| `zeus-pbx-platform/scripts/{setup-portal,smoke-test}.sh` | read `FREEPBX_AMI_SECRET` from the ambient environment; they write/verify local config rather than sync remote state, so a stale value fails loudly instead of deleting anything |
+| `2-voice/zeus/scripts/{setup-portal,smoke-test}.sh` | read `FREEPBX_AMI_SECRET` from the ambient environment; they write/verify local config rather than sync remote state, so a stale value fails loudly instead of deleting anything |
 
 ## When adding a script
 

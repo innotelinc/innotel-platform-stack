@@ -5,7 +5,10 @@
 # keep working offline and in CI without a second checkout:
 #
 #   ./scripts/sync-stack-lib.sh <repo-dir> [repo-dir ...]
-#   ./scripts/sync-stack-lib.sh --all           # every sibling repo dir
+#   ./scripts/sync-stack-lib.sh --all           # every member repo
+#
+# Member repos live under the group dirs beside the platform stack:
+#   <root>/<N>-<group>/<repo>/scripts/stack-lib.sh
 #
 # Idempotent: writes scripts/stack-lib.sh (or the target path) in each repo.
 # Repos that already carry the file get it refreshed verbatim from here, so
@@ -20,6 +23,8 @@ die() { printf 'sync-stack-lib: error: %s\n' "$*" >&2; exit 1; }
 say() { printf 'sync-stack-lib: %s\n' "$*"; }
 
 [ -f "$LIB_SRC" ] || die "canonical library not found at $LIB_SRC"
+
+root="$(cd "${HERE}/../.." && pwd)"
 
 targets=()
 if [ "${1:-}" = "--all" ]; then

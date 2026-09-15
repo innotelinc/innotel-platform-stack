@@ -22,7 +22,7 @@ and edge are platform services; everything else is a business function that cons
 | --- | --- |
 | Fragmented self-hosted platforms with no canonical integration | One stack, one owns/consumes map, every platform documents its role in `docs/stack.md` |
 | Identity/session sprawl across platforms | Cerulean Authentik is the single identity source; disable a user and they lose every platform |
-| Secret drift across `.env` files | Infisical is the only secrets store; `.env` is derived and gitignored |
+| Secret drift across `.env` files | Cerulean Vault is the only secrets store; `.env` is derived and gitignored |
 | TLS/PKI managed per-platform | Cerulean issues certs and DNS; NPM Edge fronts public hosts only |
 | Revenue fragmentation | Magnate is the single billing plane; paid seats flow everywhere |
 | No release discipline | Every product repo has a `release.yml` that tags, builds GHCR images, and cuts a GitHub Release with artifacts |
@@ -47,7 +47,7 @@ services** — horizontal capabilities everything else consumes:
 | Golden rule | Platform | Classification |
 |---|---|---|
 | Authentik = Identity | Authentik | IdentityOps |
-| Infisical = Secrets | Infisical | SecretOps |
+| Cerulean Vault = Secrets | Cerulean Vault | SecretOps |
 | Cerulean = Trust | Cerulean | TrustOps |
 | ONYX = Storage | ONYX | StorageOps |
 | Magnate = Billing Platform | Magnate | RevenueOps |
@@ -57,24 +57,28 @@ The remaining platforms are **business functions** built on top:
 
 | Platform | Classification | Consumes |
 |---|---|---|
-| Monarch | MediaOps | Authentik · Infisical · ONYX · Magnate · Cerulean · NPM Edge |
-| Zeus | VoiceOps | Authentik · Infisical · Magnate · Cerulean · NPM Edge |
-| Oasis | MailOps | Authentik · Infisical · Cerulean · Magnate · NPM Edge |
-| Signara | DocumentOps | Authentik · Cerulean · Infisical · ONYX · Magnate · NPM Edge |
-| Capstone | AgentOps | Zeus · Authentik · Infisical · Magnate · NPM Edge |
+| Monarch | MediaOps | Authentik · Cerulean Vault · ONYX · Magnate · Cerulean · NPM Edge |
+| Zeus | VoiceOps | Authentik · Cerulean Vault · Magnate · Cerulean · NPM Edge |
+| Oasis | MailOps | Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge |
+| Signara | DocumentOps | Authentik · Cerulean · Cerulean Vault · ONYX · Magnate · NPM Edge |
+| Capstone | AgentOps | Zeus · Authentik · Cerulean Vault · Magnate · NPM Edge |
 | Rizz Aura | CommunityOps | Authentik · Magnate · NPM Edge |
 | zapit | TransferOps | Authentik (optional) |
-| AthenIQ | LearningOps | Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge |
-| Atlas | CodeOps | Authentik · Infisical · Cerulean · Magnate · NPM Edge |
-| Distro | BuilderOps | OmniRoute · NPM Edge · Infisical · Authentik · Magnate · Cerulean |
-| Olympus | FactoryOps | OmniRoute · Authentik · Infisical · Cerulean · Magnate · NPM Edge |
-| PLUTUS | VideoOps | OmniRoute · NPM Edge · Infisical · Authentik · Cerulean |
+| AthenIQ | LearningOps | Authentik · Cerulean Vault · Cerulean · ONYX · Magnate · Signara · NPM Edge |
+| Atlas | CodeOps | Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge |
+| Distro | BuilderOps | OmniRoute · NPM Edge · Cerulean Vault · Authentik · Magnate · Cerulean |
+| Olympus | FactoryOps | OmniRoute · Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge |
+| PLUTUS | VideoOps | OmniRoute · NPM Edge · Cerulean Vault · Authentik · Cerulean |
 
 ## Documents
 
 - [**Capstone ↔ Zeus convergence**](docs/convergence-capstone-zeus.md) — the
   deep look at AgentOps/VoiceOps: Capstone standalone, Zeus as the VoIP
   platform, Capstone as a Zeus add-on.
+- [**ONYX · Olympus · Distro · Atlas — build-plane convergence**](docs/convergence-onyx-olympus-distro-atlas.md)
+  — the four platforms around building software (StorageOps/CodeOps/BuilderOps/
+  FactoryOps), and the target: one web UI, one terminal UI, one full-stack app
+  builder, one OmniRoute.
 - [**Service & package audit**](docs/service-audit.md) — the duplication
   audit across every stack: which services/packages appear in more than one
   repo, which duplicates are required by that stack's shape, and the memory
@@ -119,7 +123,7 @@ Conventions encoded in the library (enforced portfolio-wide):
 3. **Self-hosted first.** Every platform runs on your own hardware (bare metal, VPS, or
    homelab) with no cloud dependency for the core function.
 4. **Single tenant of record.** Users, groups, roles, and permissions live in Authentik;
-   subscriptions and entitlements live in Magnate; credentials live in Infisical.
+   subscriptions and entitlements live in Magnate; credentials live in Cerulean Vault.
 5. **Opt-in integration.** Platform services are provisioned additively — a stack runs
    without them, and integration scripts are idempotent.
 6. **No third-party attribution.** All repositories enforce the attribution guard: only
@@ -140,7 +144,7 @@ Conventions encoded in the library (enforced portfolio-wide):
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                        INFISICAL                            │
+│                        CERULEAN VAULT                       │
 │                        SecretOps                            │
 ├─────────────────────────────────────────────────────────────┤
 │ Secrets • Keys • API Tokens • Credentials • PKI Keys      │
@@ -188,14 +192,14 @@ Conventions encoded in the library (enforced portfolio-wide):
               Rizz Aura (CommunityOps) rides on Authentik + Magnate
               zapit (TransferOps) rides on Authentik (optional) — files
               never touch storage: transfer is ephemeral, ONYX stays StorageOps
-              AthenIQ (LearningOps) rides on Authentik · Infisical · Cerulean ·
+              AthenIQ (LearningOps) rides on Authentik · Cerulean Vault · Cerulean ·
               ONYX · Magnate and sends completion evidence to Signara for
               signed course certificates
               Atlas (CodeOps) holds every repo + the AI app builder; it rides
-              Authentik · Infisical · Cerulean · Magnate and never stores
+              Authentik · Cerulean Vault · Cerulean · Magnate and never stores
               application data for other platforms
               Olympus (FactoryOps) turns GitHub issues into validated PRs inside the
-              repo it lives in; it rides OmniRoute · Authentik · Infisical ·
+              repo it lives in; it rides OmniRoute · Authentik · Cerulean Vault ·
               Cerulean · Magnate · NPM Edge and never touches governance or
               secrets as ordinary work
 ```
@@ -311,7 +315,13 @@ and [extensions/README.md](extensions/README.md) for the extension authoring gui
   Capstone · Rizz Aura.
 - **Does not own:** billing, secrets, certificates, storage, media.
 
-#### Infisical — SecretOps
+#### Cerulean Vault — SecretOps
+
+**Cerulean Vault is the secrets store**: HashiCorp Vault with the KV v2 engine,
+hosted by Cerulean, consumed by every platform that needs a credential at rest.
+`.env` stays derived — it carries `vault://<mount>/<path>#<key>` references, not
+values, resolved at startup.
+
 - **Owns:** secrets, API keys, DNS credentials, TLS private keys, CA keys, service
   credentials, SMTP secrets, OAuth secrets, webhook tokens, secret rotation, secret
   auditing.
@@ -319,22 +329,30 @@ and [extensions/README.md](extensions/README.md) for the extension authoring gui
   Signara · Capstone.
 - **Does not own:** identity, billing, DNS records, certificates (lifecycle), storage.
 
+> **Infisical is the legacy store.** It was the SecretOps platform through V1; the
+> per-repo `compose.infisical.yml` profiles and `infisical://` resolvers remain
+> supported and profile-gated (see [docs/service-audit.md](docs/service-audit.md) §1)
+> until each repo's `vault://` path lands. Olympus has migrated; ONYX, Atlas and
+> Distro are in flight — see
+> [**build-plane convergence**](docs/convergence-onyx-olympus-distro-atlas.md) §6.
+
 #### Cerulean — Auth & Trust stack
 - **Owns:** certificate lifecycle, ACME automation, PKI, DNS automation, certificate
   discovery, certificate deployment, trust monitoring, DNS health, compliance reporting,
   trust scoring.
 - **Hosts the shared identity and secrets plane.** Cerulean runs the stack's Authentik
-  and Infisical instances — it is the **single login point for every platform**. All
-  sign-in, signup, and password flows go through its Authentik at
-  `https://auth.cerulean.innotel.us`; secrets live in its Infisical at
-  `https://secrets.cerulean.innotel.us`.
+  and Cerulean Vault (HashiCorp Vault, KV v2) instances — it is the **single login point
+  for every platform**. All sign-in, signup, and password flows go through its Authentik
+  at `https://auth.cerulean.innotel.us`; secrets live in its Vault, and the legacy
+  Infisical instance remains at `https://secrets.cerulean.innotel.us` until the
+  migration completes.
 - **Per-platform auth aliases.** Every platform's documented login endpoint
   (`auth.<platform>.innotel.us` — e.g. `auth.magnate.innotel.us`, `auth.zeus.innotel.us`,
   `auth.capstone.innotel.us`) is an edge alias that fronts the same Cerulean Authentik,
   so each platform keeps a stable, branded login URL while identity stays centralized.
   The legacy `auth.innotel.us` host was consolidated into Cerulean and serves the same
   instance.
-- **Consumes:** Authentik (identity), Infisical (secrets).
+- **Consumes:** Authentik (identity), Cerulean Vault (secrets).
 - **Does not own:** users, passwords, payment processing.
 
 #### ONYX — StorageOps
@@ -347,7 +365,7 @@ and [extensions/README.md](extensions/README.md) for the extension authoring gui
 #### NPM Edge — EdgeOps
 - **Owns:** public HTTP/S routing, TLS termination at the edge, proxy hosts, access lists,
   generated Nginx configuration, and recoverable NPM state.
-- **Consumes:** Cerulean (DNS and certificate lifecycle), Infisical (secrets), and
+- **Consumes:** Cerulean (DNS and certificate lifecycle), Cerulean Vault (secrets), and
   Authentik/application platforms indirectly through proxied services.
 - **Does not own:** authoritative DNS, identity, billing, application data, or long-term storage.
 
@@ -369,22 +387,22 @@ this pattern so re-running them never re-issues or detaches certs.
 #### Monarch — MediaOps
 - **Owns:** streaming, media libraries, user profiles, watch history, recommendations,
   collections, live TV, playback, media discovery.
-- **Consumes:** Authentik · Infisical · ONYX · Magnate · Cerulean · NPM Edge.
+- **Consumes:** Authentik · Cerulean Vault · ONYX · Magnate · Cerulean · NPM Edge.
 - **Does not own:** storage, billing, identity.
 
 #### Zeus — VoiceOps
 - **Owns:** VoIP, SIP, SMS, PBX, phone numbers, call routing, mobile PWA, communications.
-- **Consumes:** Authentik · Infisical · Magnate · Cerulean · NPM Edge.
+- **Consumes:** Authentik · Cerulean Vault · Magnate · Cerulean · NPM Edge.
 
 #### Oasis — MailOps
 - **Owns:** email, calendars, contacts, collaboration, mail security, mail routing, team
   communications.
-- **Consumes:** Authentik · Infisical · Cerulean · Magnate · NPM Edge.
+- **Consumes:** Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge.
 
 #### Signara — DocumentOps
 - **Owns:** document signing, agreements, templates, audit trails, signature workflows,
   compliance evidence, identity verification.
-- **Consumes:** Authentik · Cerulean · Infisical · ONYX · Magnate · NPM Edge.
+- **Consumes:** Authentik · Cerulean · Cerulean Vault · ONYX · Magnate · NPM Edge.
 
 #### AthenIQ — LearningOps
 - **Owns:** course catalog and enrollment, courseware delivery, assessments, learner
@@ -392,7 +410,7 @@ this pattern so re-running them never re-issues or detaches certs.
   course completions and completion evidence.
 - **Provides:** learning delivery and completion records that feed Signara's signed
   course certificate workflows.
-- **Consumes:** Authentik · Infisical · Cerulean · ONYX · Magnate · Signara · NPM Edge.
+- **Consumes:** Authentik · Cerulean Vault · Cerulean · ONYX · Magnate · Signara · NPM Edge.
 - **Does not own:** identity, secrets, certificates/DNS, storage, billing, or signing.
   AthenIQ emits completion evidence only — Signara remains the sole signer.
 
@@ -402,28 +420,28 @@ this pattern so re-running them never re-issues or detaches certs.
   (Chef on a self-hosted Convex backend, models via one OmniRoute gateway).
 - **Provides:** the canonical git remote and CI for the other platforms' code, and
   the AI app builder that scaffolds new platform applications.
-- **Consumes:** Authentik · Infisical · Cerulean · Magnate · NPM Edge.
+- **Consumes:** Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge.
 - **Does not own:** identity, secrets, certificates/DNS, storage, or the
-- **Integrates with:** Atlas (CodeOps) — Distro builds apps live in the browser;
-  Atlas ships them via Gitea + Chef/Convex. Distro exports to Atlas git remaps;
-  Atlas scaffolds Convex backends for Distro-built apps. Both share OmniRoute,
-  Magnate, Authentik, Infisical, Cerulean, and NPM Edge.
-  production runtime of the platforms it helps build — Atlas holds the source.
+- **Integrates with:** Atlas (CodeOps) — the build plane (Studio + Distro's
+tenancy) builds apps; Atlas ships them via Gitea + Convex. Studio exports to
+Atlas git remotes; packaging can target Atlas's self-hosted Convex. Both share
+OmniRoute, Magnate, Authentik, Cerulean Vault, Cerulean, and NPM Edge.
+production runtime of the platforms it helps build — Atlas holds the source.
 
 #### Distro — BuilderOps
-- **Owns:** the in-browser AI app builder (fork of bolt.diy): chat-to-code agent UI,
-  WebContainer sandbox, live preview, file tree, terminal; multi-tenant builder
-  accounts (Distro control plane) with per-user OmniRoute gateway keys, quota/usage
-  enforcement, and an admin console.
-- **Provides:** the interactive AI app-building front door — browser → Distro →
-  OmniRoute → upstream models.
-- **Consumes:** OmniRoute (AI plane) · NPM Edge · Authentik · Infisical · Magnate (billing) · Cerulean (DNS + certs).
+- **Owns:** multi-tenant builder tenancy (Distro control plane): accounts with
+  per-user OmniRoute gateway keys, quota/usage enforcement, spend tracking,
+  an admin console, and the token-gated service API the builder surface calls.
+- **Provides:** tenancy for the ecosystem's builder surface — identity →
+  account + per-user gateway key, quota gating before each model turn,
+  usage/audit after it. (The bolt.diy web front door retired in the build-plane
+  convergence §5.2; Studio is the one web UI.)
+- **Consumes:** OmniRoute (AI plane) · NPM Edge · Authentik · Cerulean Vault · Magnate (billing) · Cerulean (DNS + certs).
 - **Does not own:** identity, secrets, certificates/DNS, storage, or the
-- **Integrates with:** Atlas (CodeOps) — Distro builds apps live in the browser;
-  Atlas ships them via Gitea + Chef/Convex. Distro exports to Atlas git remaps;
-  Atlas scaffolds Convex backends for Distro-built apps. Both share OmniRoute,
-  Magnate, Authentik, Infisical, Cerulean, and NPM Edge.
   LLM gateway itself (OmniRoute is a shared platform service / extension).
+- **Integrates with:** Atlas (CodeOps) — a packaged project is pushed to an
+  Atlas/Gitea remote and Atlas hosts its Convex backend. Both share OmniRoute,
+  Magnate, Authentik, Cerulean Vault, Cerulean, and NPM Edge.
 
 #### Olympus — FactoryOps
 - **Owns:** repository automation (issue → watched Archon workflow → open PR), validation
@@ -436,7 +454,7 @@ this pattern so re-running them never re-issues or detaches certs.
   OmniRoute/Codex/Claude/Archon CLIs, mints a gateway key, wires both agents) and a
   deterministic issue → validated PR fast lane (~35 min) with independent validation and
   holdout/mutation gates for auto-merge quality.
-- **Consumes:** OmniRoute (AI plane) · Authentik · Infisical · Cerulean · NPM Edge ·
+- **Consumes:** OmniRoute (AI plane) · Authentik · Cerulean Vault · Cerulean · NPM Edge ·
   Magnate (optional billing where the factory runs as a service).
 - **Does not own:** application business logic, identity, secrets, trust/DNS/PKI, storage,
   or revenue — and never governance of itself as ordinary issue work (`MISSION.md`,
@@ -445,14 +463,14 @@ this pattern so re-running them never re-issues or detaches certs.
 
 #### PLUTUS — VideoOps
 - **Owns:** video ingestion, transcoding, catalog, streaming, live, and VideoOps delivery.
-- **Consumes:** OmniRoute · NPM Edge · Infisical · Authentik · Cerulean.
+- **Consumes:** OmniRoute · NPM Edge · Cerulean Vault · Authentik · Cerulean.
 - **Does not own:** identity, secrets, DNS/TLS, storage, or billing — and never the
   canonical source operated by Atlas.
 
 #### Capstone — AgentOps
 - **Owns:** voice AI agents, call screening, AI receptionists, speech processing, voice
   workflows, telephony automation.
-- **Consumes:** Zeus · Authentik · Infisical · Magnate · NPM Edge.
+- **Consumes:** Zeus · Authentik · Cerulean Vault · Magnate · NPM Edge.
 
 #### Rizz Aura — CommunityOps
 - **Owns:** leaderboards, reputation, rankings, achievements, communities, competition
@@ -468,10 +486,10 @@ this pattern so re-running them never re-issues or detaches certs.
 ## Dependency graph
 
 ```
-Identity (Authentik) ────────► Secrets (Infisical)
-        │                           │
-        ▼                           ▼
-   Trust (Cerulean)          Storage (ONYX)
+Identity (Authentik) ────────► Secrets (Cerulean Vault)
+        │                                │
+        ▼                                ▼
+   Trust (Cerulean)               Storage (ONYX)
         │                           │
         └──────────┬────────────────┘
                    ▼
@@ -487,23 +505,23 @@ Identity (Authentik) ────────► Secrets (Infisical)
                    ▼
               Capstone
         (Rizz Aura ──► Authentik, Magnate)
-        (AthenIQ ──► Authentik · Infisical · Cerulean · ONYX · Magnate · Signara)
-        (Atlas ──► Authentik · Infisical · Cerulean · Magnate · NPM Edge)
-        (Olympus ──► OmniRoute · Authentik · Infisical · Cerulean · Magnate · NPM Edge)
-        (PLUTUS ──► OmniRoute · NPM Edge · Infisical · Authentik · Cerulean)
+        (AthenIQ ──► Authentik · Cerulean Vault · Cerulean · ONYX · Magnate · Signara)
+        (Atlas ──► Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge)
+        (Olympus ──► OmniRoute · Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge)
+        (PLUTUS ──► OmniRoute · NPM Edge · Cerulean Vault · Authentik · Cerulean)
 ```
 
 Deployment order:
 
 1. **Authentik** (identity must exist first — everyone consumes it).
-2. **Infisical** (secrets next — Cerulean, ONYX, Magnate, NPM Edge and every business platform read
-   credentials from it).
+2. **Cerulean Vault** (secrets next — Cerulean, ONYX, Magnate, NPM Edge and every business platform
+   read credentials from it).
 3. **Cerulean · ONYX · Magnate · NPM Edge** (trust, storage, revenue, and edge in parallel — nothing above
    them works without at least one).
 4. **Business platforms** (Monarch, Zeus, Oasis, Signara — then Capstone on top of Zeus;
    Rizz Aura can ride anywhere after Authentik + Magnate, AthenIQ after
-   Authentik + Infisical + Magnate — it also consumes Signara for signed course
-   certificates, and Atlas after Authentik + Infisical + Magnate to host this
+   Authentik + Cerulean Vault + Magnate — it also consumes Signara for signed course
+   certificates, and Atlas after Authentik + Cerulean Vault + Magnate to host this
    ecosystem's code and CI). PLUTUS lands in Group 3 with Monarch (it needs
    Cerulean · NPM Edge · OmniRoute); Olympus lands in Group 5 with Atlas and
    Distro, since the factory and Studio build the repos that live there.
@@ -536,7 +554,7 @@ Rules that hold in both:
 - DNS records and TLS are provisioned by the platform's own idempotent script, so a host
   can move between topologies by re-running `setup.sh`/`npm-proxy-hosts.py` after changing
   `.env` — nothing is hand-edited in NPM or BIND.
-- Certificates (Cerulean), secrets (Infisical) and identity (Authentik) stay centralized
+- Certificates (Cerulean), secrets (Cerulean Vault) and identity (Authentik) stay centralized
   in both models; only the app + its data move.
 
 ## Service ownership matrix
@@ -544,7 +562,7 @@ Rules that hold in both:
 | Capability | Owner | Platform |
 |---|---|---|
 | Identity / SSO / MFA | IdentityOps | Authentik |
-| Secrets / keys / tokens | SecretOps | Infisical |
+| Secrets / keys / tokens | SecretOps | Cerulean Vault |
 | Certificates / PKI / DNS | TrustOps | Cerulean |
 | Public routing / TLS / proxy recovery | EdgeOps | NPM Edge |
 | Storage / backups / snapshots | StorageOps | ONYX |
@@ -590,15 +608,16 @@ Rules that hold in both:
   Monarch additionally consumes Cerulean via the **`jellyfin-ldap` LDAP outpost** (Jellyfin
   logins resolve against Cerulean users — `paid_users` gates access, `jellyfin_admins` get
   admin), so disabling a user in Cerulean blocks their media login too.
-- **Secret flow:** credentials live in Cerulean's Infisical (`secrets.cerulean.innotel.us`)
-  and are pulled into each platform's `.env` at setup; service credentials, API keys, and
-  TLS private keys are written to Infisical, never committed.
-- **Secret flow:** setup pulls credentials from Infisical (project-scoped, per-environment)
-  into the stack; service credentials, API keys, and TLS private keys are written to
-  Infisical, never committed. `infisical://` references resolve at runtime where supported.
+- **Secret flow:** credentials live in Cerulean Vault (`cerulean-vault`, KV v2) and are
+  pulled into each platform's `.env` at setup as `vault://` references; service
+  credentials, API keys, and TLS private keys are written to Vault, never committed.
+- **Secret flow:** setup resolves each platform's path-scoped Vault reference into the
+  stack at startup; service credentials, API keys, and TLS private keys are written to
+  Vault, never committed. `vault://` references resolve at runtime; the legacy
+  `infisical://` form stays supported by the profile-gated Infisical instances.
 - **Trust flow:** Cerulean issues ACME certificates and DNS records into your own BIND,
-  provisions nginx proxy manager hosts, and (with Infisical) stores the private keys in
-  SecretOps.
+  provisions nginx proxy manager hosts, and (with Cerulean Vault) stores the private keys
+  in SecretOps.
 - **Revenue flow:** Magnate Checkout → webhook → Authentik group membership
   (`paid_users`) → access granted in the consuming platform; cancellation deactivates the
   user and access dies.
@@ -610,12 +629,12 @@ Rules that hold in both:
 
 1. **Identity boundary** — Authentik is the only place users, groups, roles, and
    permissions exist. Business platforms store no passwords (LDAP/OIDC bind only).
-2. **Secret boundary** — Infisical is the only place credentials live at rest; `.env`
-   files are derived (generated/synced from Infisical), gitignored, and never committed.
+2. **Secret boundary** — Cerulean Vault is the only place credentials live at rest; `.env`
+   files are derived (generated/synced from Vault), gitignored, and never committed.
 3. **Trust boundary** — Cerulean is the only issuer of certificates and PKI material;
    TLS terminates at nginx proxy manager, provisioned automatically.
 4. **Tenant isolation** — multi-tenant platforms scope data by Authentik groups /
-   organization; secrets in Infisical are project-scoped.
+   organization; secrets in Cerulean Vault are scope-limited to each product's path.
 5. **Network boundary** — internal APIs (recommendations, health, secrets) stay
    unpublished; only canonical subdomains are proxied.
 6. **Commit boundary** — the attribution guard runs locally and in CI on every
@@ -626,23 +645,56 @@ Rules that hold in both:
 | Platform | Repository | Stack doc |
 |---|---|---|
 | Authentik | upstream [goauthentik](https://github.com/goauthentik/authentik) | provisioned per stack |
-| Infisical | upstream [Infisical](https://github.com/Infisical/infisical) | provisioned per stack |
+| Cerulean Vault | HashiCorp Vault (KV v2), hosted by Cerulean | provisioned per stack |
 | Cerulean (TrustOps) | [innotelinc/cerulean](https://github.com/innotelinc/cerulean) | [docs/stack.md](https://github.com/innotelinc/cerulean/blob/main/docs/stack.md) |
-| ONYX (StorageOps) | [innotelinc/onyx-oss-platform](https://github.com/innotelinc/onyx-oss-platform) | [docs/stack.md](https://github.com/innotelinc/onyx-oss-platform/blob/main/docs/stack.md) |
-| Magnate (RevenueOps) | [innotelinc/jellyfin-subscription-platform](https://github.com/innotelinc/jellyfin-subscription-platform) | [docs/stack.md](https://github.com/innotelinc/jellyfin-subscription-platform/blob/main/docs/stack.md) |
+| ONYX (StorageOps) | [innotelinc/onyx](https://github.com/innotelinc/onyx) | [docs/stack.md](https://github.com/innotelinc/onyx/blob/main/docs/stack.md) |
+| Magnate (RevenueOps) | [innotelinc/magnate](https://github.com/innotelinc/magnate) | [docs/stack.md](https://github.com/innotelinc/magnate/blob/main/docs/stack.md) |
 | Monarch (MediaOps) | [innotelinc/monarch](https://github.com/innotelinc/monarch) | [docs/stack.md](https://github.com/innotelinc/monarch/blob/main/docs/stack.md) |
 | Zeus (VoiceOps) | [innotelinc/zeus](https://github.com/innotelinc/zeus) | [docs/stack.md](https://github.com/innotelinc/zeus/blob/main/docs/stack.md) |
 | Oasis (MailOps) | [innotelinc/oasis](https://github.com/innotelinc/oasis) | [docs/stack.md](https://github.com/innotelinc/oasis/blob/main/docs/stack.md) |
 | Signara (DocumentOps) | [innotelinc/signara](https://github.com/innotelinc/signara) | [docs/stack.md](https://github.com/innotelinc/signara/blob/main/docs/stack.md) |
 | Capstone (AgentOps) | [innotelinc/capstone](https://github.com/innotelinc/capstone) | [docs/stack.md](https://github.com/innotelinc/capstone/blob/main/docs/stack.md) |
 | NPM Edge (EdgeOps) | [innotelinc/npm](https://github.com/innotelinc/npm) | [ABOUT.md](https://github.com/innotelinc/npm/blob/develop/ABOUT.md) |
-| Rizz Aura (CommunityOps) | [innotelinc/rizzaura-platform](https://github.com/innotelinc/rizzaura-platform) | [docs/stack.md](https://github.com/innotelinc/rizzaura-platform/blob/main/docs/stack.md) |
+| Rizz Aura (CommunityOps) | [innotelinc/rizzaura](https://github.com/innotelinc/rizzaura) | [docs/stack.md](https://github.com/innotelinc/rizzaura/blob/main/docs/stack.md) |
 | zapit (TransferOps) | [innotelinc/zapit](https://github.com/innotelinc/zapit) | [docs/stack.md](https://github.com/innotelinc/zapit/blob/main/docs/stack.md) |
 | AthenIQ (LearningOps) | [innotelinc/atheniq](https://github.com/innotelinc/atheniq) | [docs/stack.md](https://github.com/innotelinc/atheniq/blob/main/docs/stack.md) |
 | Atlas (CodeOps) | [innotelinc/atlas](https://github.com/innotelinc/atlas) | [docs/stack.md](https://github.com/innotelinc/atlas/blob/main/docs/stack.md) |
 | Distro (BuilderOps) | [innotelinc/distro](https://github.com/innotelinc/distro) | [docs/stack.md](https://github.com/innotelinc/distro/blob/main/docs/stack.md) |
 | Olympus (FactoryOps) | [innotelinc/olympus](https://github.com/innotelinc/olympus) | [docs/stack.md](https://github.com/innotelinc/olympus/blob/main/docs/stack.md) |
 | PLUTUS (VideoOps) | [innotelinc/plutus](https://github.com/innotelinc/plutus) | [docs/stack.md](https://github.com/innotelinc/plutus/blob/main/docs/stack.md) |
+
+## Mesh layout
+
+The Mesh is a workspace, not a repo: every member repo is checked out inside
+the group dir for the server that runs it, and this repo sits beside them.
+
+```
+<root>/
+  1-primary/   cerulean atheniq magnate signara sign verifier npm
+  2-voice/     capstone zeus            (OmniRoute gateway)
+  3-media/     monarch plutus
+  4-social/    rizzaura onyx zapit
+  5-dev/       atlas distro oasis olympus
+  ips/         this repo — stack.sh, mesh/, extensions/, docs/
+```
+
+`scripts/mesh.sh` is the control plane for that layout. It is mirrored
+**verbatim** into every member repo (`ips/scripts/mesh.sh` is canonical;
+`scripts/sync-mesh.sh --all` refreshes the copies, `--check` fails on drift),
+so the copy an operator runs on a server is always the same implementation.
+
+| Command | Description |
+|---|---|
+| `scripts/mesh.sh install [--server N] [--join] [--up]` | Lay out the group dirs, download this server's repos, then join/start |
+| `scripts/mesh.sh join [--server N] [--hub-pubkey K]` | Enroll this host: `.env` mesh section, WireGuard keypair, tunnel + Consul |
+| `scripts/mesh.sh leave [--purge]` | Drain this host (deregister its services; `--purge` drops WG + Consul state) |
+| `scripts/mesh.sh download [repo…] [--group N] [--all] [--pull]` | Clone/refresh member repos into their group dirs |
+| `scripts/mesh.sh status` | What this host is, which repos it runs, whether the mesh is up |
+| `scripts/mesh.sh discover <service>` | Find a registered service's mesh address |
+
+Every repo's compose pins a top-level `name:`, so container and volume names
+never depend on where the repo is checked out — moving a repo between group
+dirs cannot orphan a volume.
 
 ## `stack.sh` Commands
 

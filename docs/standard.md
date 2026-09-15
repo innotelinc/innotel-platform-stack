@@ -16,7 +16,7 @@ stack doc, same license posture, same env template, same CI posture. Use
 > wildcard certificate (one `*.<base>.innotel.us` per stack), writes the BIND zone records,
 > and creates/updates the NPM proxy host through `POST /npm/hosts` and `PUT /npm/hosts/:id`.
 > The NPM admin UI and raw REST API are operator-recovery tooling only — no stack script,
-> setup helper, or automation calls `192.168.1.71:81` (or any NPM API endpoint) directly.
+> setup helper, or automation calls `192.168.1.46:81` (or any NPM API endpoint) directly.
 > When a new service appears, add its DNS `A` record and its NPM proxy host via Cerulean,
 > attach the stack's existing wildcard cert, and force SSL. Cert material is never stored in
 > a repo `.env` or mounted into a business container.
@@ -24,7 +24,7 @@ stack doc, same license posture, same env template, same CI posture. Use
 **Golden rules (short version):**
 1. One job per platform; consume the platform services, never re-implement them.
 2. Cerulean = auth/trust (Authentik SSO + DNS + TLS + PKI). Magnate = billing. Zeus = telephony.
-   ONYX = storage. Infisical = secrets. NPM Edge = edge.
+   ONYX = storage. Cerulean Vault = secrets. NPM Edge = edge.
 3. Shared layers are identical across repos: README shape, landing outline, attribution guard
    (CI + hooks + guard-lib), `docs/stack.md`, `.env.example` posture, license posture.
 4. No secrets, no real IPs/hostnames, no AI attribution in any repo file or commit.
@@ -51,7 +51,7 @@ services are owned **once** and consumed by everyone else:
 | Capability | Owner | Classification | Consumed by |
 |---|---|---|---|
 | Identity / SSO / MFA | Authentik (hosted inside Cerulean) | IdentityOps | every platform |
-| Secrets / keys / tokens | Infisical (hosted inside Cerulean) | SecretOps | every platform |
+| Secrets / keys / tokens | Cerulean Vault (HashiCorp Vault KV v2, hosted inside Cerulean) | SecretOps | every platform |
 | Certificates / PKI / DNS | Cerulean | TrustOps | every platform |
 | Storage / backups / snapshots | ONYX | StorageOps | platforms that need storage |
 | Billing / subscriptions / entitlements | Magnate | RevenueOps | platforms with paid seats |
@@ -231,8 +231,11 @@ Every conformant repo that reads runtime env has a `.env.example` that is:
 - Documents the *shared platform services* the repo consumes, with the canonical example values
   where they exist (e.g. `OIDC_ISSUER_URL=https://auth.cerulean.innotel.us/application/o/<app>/`,
   `MAGNATE_URL=https://magnate.innotel.us`, `CERULEAN_DNS_API_URL=http://127.0.0.1:3003`).
-- States the Infisical posture: production secrets come from Infisical (SecretOps); `.env` is
-  derived / local-only; `.env` is gitignored.
+- States the secrets posture: production secrets come from **Cerulean Vault** (SecretOps,
+  KV v2); `.env` is derived / local-only, carries `vault://` references rather than
+  values, and is gitignored. Where a repo has not migrated yet, it states the Infisical
+  posture instead and links the migration (
+  [build-plane convergence](convergence-onyx-olympus-distro-atlas.md) §6).
 - For repos that consume Magnate billing, documents `MAGNATE_URL` / `ENTITLEMENTS_API_TOKEN`
   (and that the token must equal Magnate's `ENTITLEMENTS_API_TOKEN`).
 - For repos that consume Cerulean Authentik SSO, documents the OIDC vars and the redirect URI
@@ -295,7 +298,7 @@ Makefile shape, `docs/stack.md` — come from this standard.
 **Golden rules (short version):**
 1. One job per platform; consume the platform services, never re-implement them.
 2. Cerulean = auth/trust (Authentik SSO + DNS + TLS + PKI). Magnate = billing. Zeus = telephony.
-   ONYX = storage. Infisical = secrets. NPM Edge = edge.
+   ONYX = storage. Cerulean Vault = secrets. NPM Edge = edge.
 3. Shared layers are identical across repos: README shape, landing outline, attribution guard
    (CI + hooks + guard-lib), `docs/stack.md`, `.env.example` posture, license posture.
 4. No secrets, no real IPs/hostnames, no AI attribution in any repo file or commit.

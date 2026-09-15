@@ -6,7 +6,7 @@
 #   ./scripts/conform-project.sh <repo-dir>                 # audit
 #   ./scripts/conform-project.sh --new <name> <classification>   # scaffold
 #
-# The standard lives in innotel-platform-stack/docs/standard.md.
+# The standard lives in ips/docs/standard.md.
 
 set -euo pipefail
 
@@ -451,9 +451,9 @@ SHELL := /bin/bash
         check-commits check-compose
 
 help: ## Show this help message
-	@echo "${name} — operator workflow"
-	@echo "Usage: make <target>"
-	@grep -E '^[a-zA-Z_:-]+:.*?## .*\$\$' \$(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \\033[36m%-16s\\033[0m %s\\n", \$\$1, \$\$2}'
+\t@echo "${name} — operator workflow"
+\t@echo "Usage: make <target>"
+\t@grep -E '^[a-zA-Z_:-]+:.*?## .*$$' \$(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \\033[36m%-16s\\033[0m %s\\n", $$1, $$2}'
 
 ## ---- Bootstrap ------------------------------------------------------------
 
@@ -493,7 +493,7 @@ write_env_example() {
 # ==========================================================================
 # ${name} — environment configuration template
 # Copy to \`.env\` (or run ./scripts/setup.sh) and fill in real values.
-# Never commit \`.env\`. Production secrets come from Infisical (SecretOps).
+# Never commit \`.env\`. Production secrets come from Cerulean Vault (SecretOps).
 # ==========================================================================
 
 # --- General ----------------------------------------------------------------
@@ -502,7 +502,14 @@ APP_NAME=${name}
 BASE_DOMAIN=${domain}
 
 # --- OmniRoute (model gateway — OpenAI-compatible, single provider pool) ----
-OMNIROUTE_BASE_URL=http://127.0.0.1:20128/v1
+# The platform runs ONE OmniRoute, in Group 2 (\`2-voice\`, mesh \`10.10.2.1\`).
+# Reach it over the mesh on :20128 — OmniRoute serves its OpenAI-compatible API
+# and its dashboard from that single port. Never 127.0.0.1: inside a container
+# that is the container itself, which is how this default used to fail silently.
+# (Olympus fronts its own gateway with an Authentik SSO proxy on :20129 for the
+# loopback-published deployment; over the mesh the direct address is this one.)
+MESH_GATEWAY_HOST=10.10.2.1
+OMNIROUTE_BASE_URL=http://10.10.2.1:20128/v1
 OMNIROUTE_API_KEY=change-me-omniroute-api-key
 OMNIROUTE_MODEL=auto
 
@@ -517,11 +524,21 @@ CERULEAN_DNS_API_URL=http://127.0.0.1:3003
 CERULEAN_ADMIN_PASSWORD=change-me-cerulean-admin
 CERULEAN_ZONE=innotel.us
 
-# --- Infisical (SecretOps) --------------------------------------------------
-INFISICAL_ENCRYPTION_KEY=
-INFISICAL_AUTH_SECRET=
-INFISICAL_DB_PASSWORD=
-INFISICAL_ORG=Innotel
+# --- Cerulean Vault (SecretOps — HashiCorp Vault, KV v2) --------------------
+# The platform runs it as \`cerulean-vault\`; this repo gets a path-scoped
+# \`${4}\` policy. Values in this file may be \`vault://<mount>/<path>#<key>\`
+# references resolved at startup, e.g.
+#   OMNIROUTE_API_KEY=vault://cerulean/${4}#OMNIROUTE_API_KEY
+VAULT_ADDR=
+VAULT_TOKEN=
+# Preferred over VAULT_TOKEN: a file both the Vault CLI and this stack read.
+VAULT_TOKEN_FILE=./data/vault/token/${4}.token
+VAULT_PREFIX=cerulean
+VAULT_PATH=${4}
+VAULT_NAMESPACE=
+# "1" accepts a self-signed certificate; VAULT_CACERT pins a CA instead.
+VAULT_SKIP_VERIFY=
+VAULT_CACERT=
 
 # --- Magnate billing (RevenueOps — optional paid seats) ---------------------
 MAGNATE_URL=https://magnate.innotel.us
@@ -1271,7 +1288,7 @@ ${not_owns}
 | Flow | Path |
 |---|---|
 | Identity | Cerulean's Authentik → OIDC → ${name} sessions |
-| Secrets | Infisical (SecretOps) → \`.env\` derived; never committed |
+| Secrets | Cerulean Vault (SecretOps, KV v2) → \`vault://\` refs in \`.env\`; never committed |
 | Trust | Cerulean issues DNS + per-zone wildcard TLS; NPM Edge fronts public hosts |
 | Revenue | Magnate plans/entitlements gate paid seats (optional) |
 | Source of truth | This repository's \`docs/stack.md\` points back to the Innotel Platform Stack |
@@ -1359,7 +1376,7 @@ ${9}
 ${name} is the ecosystem's **${classification}** platform in the
 [**Innotel Platform Stack**](https://github.com/innotelinc/innotel-platform-stack) —
 the canonical single-responsibility architecture where Authentik owns identity,
-Infisical owns secrets, Cerulean owns trust, ONYX owns storage, Magnate owns
+Cerulean Vault owns secrets, Cerulean owns trust, ONYX owns storage, Magnate owns
 revenue, NPM Edge owns the edge, and every other platform is a business function
 that consumes them. See [docs/stack.md](docs/stack.md) for this platform's
 owns/consumes boundaries.
@@ -1550,10 +1567,12 @@ audit() {
     _c=$(grep -ci 'cerulean' "$dir/.env.example" || true)
     check_gt0 "$_c" ".env.example references Cerulean"
     check ".env.example references Magnate (if billing)" true
-    if grep -qi 'infisical' "$dir/.env.example"; then
-      check ".env.example references Infisical" true
+    # Either posture passes: Cerulean Vault (the target) or Infisical (legacy,
+    # profile-gated — see docs/convergence-onyx-olympus-distro-atlas.md §6).
+    if grep -qiE 'vault|infisical' "$dir/.env.example"; then
+      check ".env.example states the secrets posture" true
     else
-      echo "  (no Infisical note — recommended)"
+      echo "  (no secrets posture note — recommended)"
     fi
   fi
 
@@ -1613,8 +1632,8 @@ scaffold() {
   write_license              "$dir" "MIT"
   write_stack_doc            "$dir" "$name" "$classification" \
     "- (fill in what ${name} owns)" \
-    "- Cerulean (Authentik SSO, DNS, TLS)\n- Infisical (secrets)\n- Magnate (billing, optional)\n- NPM Edge (public hosts)" \
-    "- Identity (Authentik)\n- Secrets (Infisical)\n- DNS/TLS (Cerulean)\n- Billing (Magnate)" \
+    "- Cerulean (Authentik SSO, DNS, TLS)\n- Cerulean Vault (secrets)\n- Magnate (billing, optional)\n- NPM Edge (public hosts)" \
+    "- Identity (Authentik)\n- Secrets (Cerulean Vault)\n- DNS/TLS (Cerulean)\n- Billing (Magnate)" \
     "" \
     "" \
     "- (fill in what ${name} provides to the ecosystem)" \
