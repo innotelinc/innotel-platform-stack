@@ -209,34 +209,77 @@ Vault (secrets.cerulean…)       non-member PASS  refused at Authentik before a
 ```
 
 `npm-proxy-hosts.py --check` in each zone remains the drift check for the host
-map, and `1-primary/magnate/scripts/verify-sso.py` (magnate's own) is the
-committed end-to-end regression test for that app.
+map. The end-to-end regression tests are committed per zone, so this posture is
+a test result rather than a claim:
+
+| Test | Covers |
+|---|---|
+| `1-primary/cerulean/scripts/verify-sso.py` | the four edge admin names, Vault's redirect + `auth_url`, the console bind, the session-store bind, the app's password endpoint |
+| `2-voice/capstone/scripts/verify-sso.py` | n8n, Grist, SigNoz, Workflow Studio, FreePBX, Technitium, plus the loopback-only ports and the session store |
+| `3-media/monarch/scripts/verify-sso.py` | the nine media apps on both Jellyseerr names, plus the loopback-only ports |
+| `1-primary/magnate/scripts/verify-sso.py` | Magnate's own OIDC-only admin sign-in |
+
+Each creates a throwaway Authentik identity (and a second one outside the
+required group), drives that zone's real authorization-code flow per target,
+asserts the sealed session opens the app, asserts the non-member is refused, and
+deletes the identities on the way out. Exit codes are 0 pass / 1 fail / 2 cannot
+run, so they can be wired into a check job as-is.
 
 ---
 
-## 5. Open items
+## 5. Closed since the first pass
 
-1. **The apps' own ports are still reachable on the LAN.** Closing this is done
-   for the **media** apps — their host ports are bound to `127.0.0.1`, so the
-   gateway is the only door and the LAN address answers nothing. The **app**
-   gateways (n8n `:5678`, Grist `:8484`, SigNoz `:3301`, Workflow Studio `:8090`,
-   FreePBX `:8083`) still publish on the LAN, because their integrations are
-   documented as reaching them there (`FREEPBX_URL` in Zeus's compose,
-   `dashboard-backend`'s SigNoz links, `generate_ui.py`). Binding them to
-   loopback is a per-service change that has to move those references to the
-   container name or the gateway first. Technitium is the hard case: it runs
-   with host networking, so it binds the host's interfaces directly and compose
-   cannot restrict it.
-2. **Vault's UI offers two methods.** OIDC is the door; the token tab is
-   break-glass and cannot be removed. Landing the UI directly on OIDC would need
-   an edge redirect on `secrets.cerulean.innotel.us`, which means teaching
-   `1-primary/cerulean/scripts/npm-proxy-hosts.py` to render a per-host
-   `advanced_config` — it currently writes an empty one for every host, so a
-   manual edit there would be wiped by the next run.
-3. **`cerulean-technitium` and the media downloader ports** (qBittorrent's
-   `8080` is loopback now, but its torrenting port `6881` stays open by design)
-   are the remaining deliberate LAN listeners.
-4. **`omniroute.capstone.innotel.us` does not resolve** — OmniRoute is declared
+Every item the earlier pass left open is now shut, and each closure has a
+committed test behind it (the table in §4).
+
+1. **The apps' own ports are loopback-only.** n8n `:5678`, Grist `:8484`,
+   SigNoz `:3301`, Workflow Studio `:8090` and FreePBX `:8083` now publish on
+   `127.0.0.1`, so their gateway is the only door — which is what makes their
+   own login forms being switched off safe. Every reference that used to reach
+   them across the LAN was moved first: n8n writes to Grist as
+   `http://grist:8484` on `interview-net`, Zeus's portal dials the PBX by
+   container name (`http://zeus-freepbx`, it shares `pbx-net`), that same name
+   is the PBX gateway's upstream, and host-side scripts keep dialling
+   `127.0.0.1`.
+2. **Technitium's console is off the LAN.** It is host-networked, so compose
+   cannot restrict it — but Technitium can: `webServiceLocalAddresses` is now
+   `127.0.0.1,172.17.0.1`. Containers dial `http://172.17.0.1:5380` (the
+   docker0 gateway, reachable from every bridge), the LAN address is refused,
+   and the public door stays `dns.internal.innotel.us` behind its gateway.
+   `scripts/setup.sh` enforces the setting on an existing config directory,
+   since the environment variable is only read on first start.
+3. **The shared SSO session store is off the LAN.** `cerulean-sso-sessions`
+   was published on the LAN address; it now publishes on loopback + docker0,
+   and each zone's gateways set `SSO_SESSION_REDIS_HOST=172.17.0.1`.
+4. **Vault's UI lands on OIDC.** Vault's `sys/config/ui` is Enterprise-only, so
+   there is no server-side default method, and its ember router moves to
+   `/ui/vault/auth` client-side — a redirect on that path would never fire. The
+   redirect therefore catches the document entry points: `npm-proxy-hosts.py`
+   now renders a per-host `advanced_config`, and the `secrets` host uses it to
+   send `/` and `/ui/` to `/ui/vault/auth?with=oidc`. The role is named in
+   `/auth/oidc/config` as `default_role`, so the form's Role field can stay
+   empty.
+5. **Zeus's portal had a dead PBX integration.** The running compose file
+   (`docker-compose.yml`, not the full variant) never set `FREEPBX_URL`, so
+   `/api/health` reported `freepbx_api` and `avantfax` **down**. Both now point
+   at the container name and the endpoint is green.
+
+## 6. Deliberately still open
+
+1. **OmniRoute (`:20128`) and the Asterisk plane** (`5060/5061`, `8088/8089`,
+   `5038`, `10000`, RTP) stay reachable on the LAN. OmniRoute is dialled by the
+   browser; the telephony ports are how the PBX works. The AMI (`5038`) and ARI
+   (`8088`) bind the LAN address only — never `0.0.0.0` — because their ACLs
+   admit the LAN subnet and nothing else.
+2. **qBittorrent's `:6881`** is the BitTorrent peer port. Its Web UI (`:8080`)
+   is loopback; the peer port has to be reachable or downloading stops.
+3. **NPM's admin port `:81`** still answers on the LAN, but it is not a
+   bypass: the fork believes identity headers only from a loopback peer and its
+   password form is switched off, so a client on the LAN is told to open the
+   edge hostname and can go no further.
+4. **Vault's token tab** cannot be removed (break-glass); the UI now merely
+   avoids it by default.
+5. **`omniroute.capstone.innotel.us` does not resolve** — OmniRoute is declared
    `optional: true` in the Capstone host map and its dashboard has no NPM host,
    so there is no edge to gate. The provider is ready if it is published.
 
