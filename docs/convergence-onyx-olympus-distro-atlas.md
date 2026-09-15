@@ -1,6 +1,6 @@
 # ONYX · Olympus · Distro · Atlas — Build-Plane Convergence
 
-**Status: proposed** · updated September 14, 2026
+**Status: proposed** · updated September 15, 2026
 
 > **What this is.** The deep look at the four platforms that surround *building
 > software* in this ecosystem — **ONYX** (StorageOps), **Atlas** (CodeOps),
@@ -74,8 +74,11 @@ scaffolds `INFISICAL_*` keys — while the platform Vault
 
 > Also the state the plan started from. §6 is the change list: the canonical
 > definition now reads **Cerulean Vault = Secrets** (§6.2), ONYX and Distro
-> resolve `vault://` in their own services (§6.1), and Infisical is the labelled
-> legacy path rather than a peer.
+> resolve `vault://` in their own services (§6.1), and Infisical — which §6
+> first kept as a labelled legacy path — has since been **retired outright**:
+> every `compose.infisical.yml`, `INFISICAL_*` block, `infisical-setup.{sh,py}`
+> and `services/infisical/` package is deleted, and `scripts/vault-migrate.py`
+> is the one surviving reader of the old instance, as a *source*.
 
 ---
 
@@ -439,7 +442,7 @@ scripts/vault-renew.sh              # periodic token renewal, --check for monito
 
 | Repo | Work |
 |---|---|
-| **ONYX** | **Done.** `VAULT_*` in `.env.example` and in both Go services' compose env; `services/vault/` is the Vault sibling of `services/infisical/` (KV v2 client, `vault://<mount>/<path>#<key>` grammar, TLS options, `vault_test.go`); one `ResolveEnv` call resolves `vault://` through Vault and `infisical://` through the legacy store, so `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `CERULEAN_API_TOKEN` move by editing `.env`; `compose.infisical.yml` stays the profile-gated legacy path and `compose.vault.yml` is the dev-mode Vault (Olympus's template); `GET /api/v1/status` reports `vault: ok | not-configured | error` and only reports `infisical:` where the legacy store is still configured |
+| **ONYX** | **Done — legacy path retired.** `VAULT_*` in `.env.example` and in both Go services' compose env; `services/vault/` is the KV v2 client (`vault://<mount>/<path>#<key>` grammar, TLS options, `vault_test.go`) and `ResolveEnv` resolves every `vault://` reference, so `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `CERULEAN_API_TOKEN` move by editing `.env`; `compose.vault.yml` is the dev-mode Vault (Olympus's template); `GET /api/v1/status` reports `vault: ok \| not-configured \| error`. The `infisical://` half did not survive the migration: `compose.infisical.yml`, `scripts/infisical-setup.{sh,py}` and `services/infisical/` are deleted and `ResolveEnv` no longer reads the old form |
 | **Atlas** | **Done.** `VAULT_*` landed; the `INFISICAL_*` block is replaced by a legacy note (Atlas ships no Infisical service — no profile, no `services/infisical/`); `GITEA_DB_PASSWORD`, `CONVEX_INSTANCE_SECRET` and `CHEF_SESSION_SECRET` are live `vault://` references seeded by a new `scripts/vault-bootstrap.py` (mirrors Olympus's, but unions the three keys instead of replacing one, and **never invents** an Authentik-issued secret); `OIDC_CLIENT_SECRET` / `CHEF_OIDC_CLIENT_SECRET` ship as a commented reference and are stored with `vault-migrate.py`; `scripts/vault-resolve.py` + a `setup.sh` step resolve every reference at setup (`make vault-sync` / `vault-check`), because Atlas is compose-and-images only, and an unresolvable reference fails setup rather than becoming an empty credential |
 | **Distro** | **Done.** No Infisical to remove — this was greenfield. `VAULT_*` landed in `.env.example` and the shared migrator is mirrored in `scripts/`; any `vault://` value in `.env` is now resolved before a credential is read — the control plane at import (`apps/control-plane/src/vault.js` + `secrets.js`, which covers `OIDC_CLIENT_SECRET`, `MAGNATE_ENTITLEMENTS_TOKEN`, `INITIAL_PASSWORD` → `GATEWAY_ADMIN_PASSWORD`) and the web container while building its wrangler bindings (`apps/web/bindings.sh` → `apps/web/scripts/vault-resolve.mjs`, which covers `OPENAI_LIKE_API_KEY`); `compose.vault.yml` is the dev-mode Vault |
 | **Olympus** | Done — nothing to change; it is the source of the pattern |
@@ -483,9 +486,14 @@ real Vault is reachable.
 platform's own Vault is what Olympus runs. The canonical definition is now:
 
 > **Cerulean Vault = Secrets** — HashiCorp Vault, KV v2, hosted by Cerulean.
-> Infisical is the **legacy** store: the per-repo `compose.infisical.yml`
-> profiles and `infisical://` resolvers stay supported (profile-gated,
-> `docs/service-audit.md` §1) until each repo's `vault://` path lands.
+> Infisical is **retired**: the per-repo `compose.infisical.yml` profiles and
+> `infisical://` resolvers are gone (`docs/service-audit.md` §1), and a leftover
+> `infisical://` value is a deployment error, never a fallback.
+
+(The first draft of this rule kept the profiles "profile-gated until each
+repo's `vault://` path lands". Once every repo had landed its path they were
+deleted rather than left dormant — a second secret store on disk is a second
+credential store, whether or not it is running.)
 
 Applied — every statement that *defines* SecretOps or describes the secret
 flow/boundary:
@@ -518,23 +526,26 @@ flow/boundary:
 - [x] the golden-rule line in `atheniq`, `oasis`, `rizzaura`, `onyx`,
       `capstone`, `monarch`, `magnate`, `signara` and `zeus` `docs/stack.md`
 - [x] `onyx` and `atlas` `docs/stack.md`: the secrets *description* now names
-      Cerulean Vault, with the Infisical profile kept and labelled legacy — the
-      repos whose `.env.example` gained `VAULT_*` in §6.1
+      Cerulean Vault — the repos whose `.env.example` gained `VAULT_*` in §6.1.
+      The legacy note in both was superseded by retirement: `onyx` deleted its
+      profile, setup scripts and Go package, and `atlas` never shipped one
 - [x] the remaining *rule* statements outside `docs/stack.md` — the `atheniq`,
       `atlas`, `magnate`, `onyx` and `npm` README "Secrets" rows and stack
       prose, their `docs/Architecture.md` / `docs/Integrations.md` /
       `docs/Deployment.md` / `docs/chef-auth-fork.md` lines, and the `atlas` +
-      `atheniq` landing pages — now name Cerulean Vault, while each repo keeps
-      its `compose.infisical.yml`, `INFISICAL_*` block and `services/infisical/`
-      labelled legacy, exactly as the rule above requires
-- [x] `convergence-capstone-zeus.md` §5 now reads **Cerulean Vault = Secrets**
-      for both repos, matching the rule statements in `capstone` and `zeus`
-      themselves; their runtime still resolves the legacy `infisical://` form,
-      which their own docs carry as the legacy profile
+      `atheniq` landing pages — now name Cerulean Vault, and no repo carries a
+      `compose.infisical.yml`, an `INFISICAL_*` block or a `services/infisical/`
+      any more (the labels this list originally called "legacy" are gone)
+- [x] `convergence-capstone-zeus.md` now reads **Cerulean Vault = Secrets**
+      throughout (its §2 diagram, §3 parity row, Phase 1 item and §5), matching
+      the rule statements in `capstone` and `zeus` themselves; Zeus's resolver
+      is `scripts/vault-env.mjs` and it **refuses** the retired `infisical://`
+      form rather than reading it
 
-The rule names the platform's SecretOps — Cerulean Vault. A repo that still runs
-the `infisical://` resolver is an implementation detail the repo's own docs carry,
-which is why the legacy note stays in the canonical docs.
+The rule names the platform's SecretOps — Cerulean Vault. The legacy note that
+used to justify keeping an `infisical://` resolver "as an implementation detail"
+is gone with the resolver: the canonical docs name one store, and the migration
+source is a script (`vault-migrate.py`), not a supported runtime path.
 
 ---
 
@@ -550,7 +561,7 @@ mechanical audit does not fail on:
 | `distro` | closed by this change: `VAULT_*` + the migrator landed (§6.1), the `local-gateway` documentation is gone (§4.1), and the README's Quickstart now states that `.env` is gitignored and must never be committed or pasted into an issue |
 | `atlas` | **closed.** `.env.example`, `docs/stack.md` (+ a new Secrets section), `docs/Architecture.md`, `docs/Deployment.md`, `docs/Integrations.md` and `docs/chef-auth-fork.md` name Cerulean Vault, the duplicated §Boundaries paragraph is gone, and the `vault://` machinery landed: `scripts/vault-bootstrap.py`, `scripts/vault-resolve.py`, the `setup.sh` step that runs them (`make vault-bootstrap` / `vault-sync` / `vault-check`), and the dead `INFISICAL_*` block is replaced by a legacy note — Atlas ships no Infisical service to configure. Deviation worth knowing: only the three keys Atlas *generates* are live `vault://` references; the two issued by Authentik ship as a commented reference, because a locally random value for a credential two systems must agree on is a wrong value that looks like a working one |
 | `olympus` | conforms; the golden-rule line already says Cerulean Vault and the `VAULT_*` posture is the reference, and §4.4 is applied (the gateway service, its volume and its targets are gone). Studio's tenancy wiring is §5.2 |
-| `onyx` | **closed.** The README's secrets line names Cerulean Vault, `docs/stack.md` gained the service map + "In the ecosystem" table, and the README's Quickstart now states that `.env` is gitignored and must never be committed or pasted into an issue |
+| `onyx` | **closed.** The README's secrets line names Cerulean Vault, `docs/stack.md` gained the service map + "In the ecosystem" table, the README's Quickstart now states that `.env` is gitignored and must never be committed or pasted into an issue, and the repo's Infisical half — `compose.infisical.yml`, `scripts/infisical-setup.{sh,py}`, `services/infisical/` — is deleted |
 
 ---
 
@@ -625,6 +636,18 @@ mechanical audit does not fail on:
       ignores the `slug=` filter, so it always took the update branch and 404'd),
       and Magnate's compose never passed `AUTHENTIK_*` into the container, so the
       admin panel's OIDC was configured in `.env` and dead in the process.
+- [x] **Infisical retired outright**, the step §6 originally left open. No repo
+      in the stack ships a `compose.infisical.yml`, an `INFISICAL_*` block, an
+      `infisical-setup.{sh,py}` or a `services/infisical/` package any more; the
+      `conform-project.sh` audit accepts the `vault://` posture only, and the
+      instance at `secrets.cerulean.innotel.us` survives as a **migration
+      source** for `scripts/vault-migrate.py` (see `sign-in-posture.md` §2).
+      Two host-local `.env` files still carry the old `INFISICAL_*` block with no
+      `VAULT_*` counterpart — the Zeus portal and Atlas, 11 and 4 keys, both
+      running on plaintext values today — so the operator's `vault-migrate.py` +
+      `VAULT_*` pass has to land there before the block can be deleted. That is
+      deployment state, not repo state, and it is the only half of §6 still
+      open.
 
 **Phase 3 — one builder, one web UI, one terminal UI**
 - [x] Studio consumes the control plane (§5.2): per-user keys, quota, audit, and

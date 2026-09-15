@@ -1567,9 +1567,10 @@ audit() {
     _c=$(grep -ci 'cerulean' "$dir/.env.example" || true)
     check_gt0 "$_c" ".env.example references Cerulean"
     check ".env.example references Magnate (if billing)" true
-    # Either posture passes: Cerulean Vault (the target) or Infisical (legacy,
-    # profile-gated — see docs/convergence-onyx-olympus-distro-atlas.md §6).
-    if grep -qiE 'vault|infisical' "$dir/.env.example"; then
+    # Cerulean Vault is the only posture: Infisical is retired, and a repo that
+    # still states it is out of date (docs/service-audit.md §1). A repo with no
+    # secret keys at all simply gets the note below.
+    if grep -qiE 'vault' "$dir/.env.example"; then
       check ".env.example states the secrets posture" true
     else
       echo "  (no secrets posture note — recommended)"

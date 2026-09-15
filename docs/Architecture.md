@@ -194,7 +194,6 @@ mesh's Consul agent lives. Services on the same host reach Consul directly as
 |-------|------------------|-----------|-------------------------|
 | 1     | Cerulean         | 3003      | 10.10.1.1:3003          |
 | 1     | Authentik        | 9000      | 10.10.1.1:9000          |
-| 1     | Infisical        | 8080      | 10.10.1.1:8080          |
 | 1     | Vault            | 8200      | 10.10.1.1:8200          |
 | 1     | Consul           | 8500      | 10.10.1.1:8500          |
 | 1     | LMS origin       | 18000     | 10.10.1.1:18000         |
@@ -225,6 +224,8 @@ mesh's Consul agent lives. Services on the same host reach Consul directly as
 ## Security Model
 
 - **Authentik** (Cerulean) is the single identity provider for all services
+- **Cerulean Vault** (Cerulean) is the single secret store — no infra repo runs
+  a second one; the retired Infisical instance is a migration source only
 - **OmniRoute** (Zeus) is the single LLM gateway for all AI services
 - **Coturn**: Zeus is primary; Capstone runs coturn only behind `standalone` profile
 - **WireGuard** encrypts all cross-server traffic

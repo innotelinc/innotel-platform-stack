@@ -329,11 +329,12 @@ values, resolved at startup.
   Signara · Capstone.
 - **Does not own:** identity, billing, DNS records, certificates (lifecycle), storage.
 
-> **Infisical is the legacy store.** It was the SecretOps platform through V1; the
-> per-repo `compose.infisical.yml` profiles and `infisical://` resolvers remain
-> supported and profile-gated (see [docs/service-audit.md](docs/service-audit.md) §1)
-> until each repo's `vault://` path lands. Olympus has migrated; ONYX, Atlas and
-> Distro are in flight — see
+> **Infisical is retired.** Cerulean Vault (HashiCorp Vault, KV v2) is the SecretOps
+> platform, and every repo in the stack has moved off the `compose.infisical.yml`
+> profile onto the `VAULT_*` posture (see
+> [docs/service-audit.md](docs/service-audit.md) §1). A value still carrying an
+> `infisical://` reference is a deployment error, not a fallback — the old instance
+> survives only as a migration *source* for `scripts/vault-migrate.py`. See
 > [**build-plane convergence**](docs/convergence-onyx-olympus-distro-atlas.md) §6.
 
 #### Cerulean — Auth & Trust stack
@@ -343,9 +344,9 @@ values, resolved at startup.
 - **Hosts the shared identity and secrets plane.** Cerulean runs the stack's Authentik
   and Cerulean Vault (HashiCorp Vault, KV v2) instances — it is the **single login point
   for every platform**. All sign-in, signup, and password flows go through its Authentik
-  at `https://auth.cerulean.innotel.us`; secrets live in its Vault, and the legacy
-  Infisical instance remains at `https://secrets.cerulean.innotel.us` until the
-  migration completes.
+  at `https://auth.cerulean.innotel.us`; secrets live in its Vault. The retired
+  Infisical instance is still reachable at `https://secrets.cerulean.innotel.us`,
+  but only as a migration source for `scripts/vault-migrate.py`.
 - **Per-platform auth aliases.** Every platform's documented login endpoint
   (`auth.<platform>.innotel.us` — e.g. `auth.magnate.innotel.us`, `auth.zeus.innotel.us`,
   `auth.capstone.innotel.us`) is an edge alias that fronts the same Cerulean Authentik,
@@ -613,8 +614,10 @@ Rules that hold in both:
   credentials, API keys, and TLS private keys are written to Vault, never committed.
 - **Secret flow:** setup resolves each platform's path-scoped Vault reference into the
   stack at startup; service credentials, API keys, and TLS private keys are written to
-  Vault, never committed. `vault://` references resolve at runtime; the legacy
-  `infisical://` form stays supported by the profile-gated Infisical instances.
+  Vault, never committed. A `vault://` reference is resolved by the layer that
+  consumes it — in a service (ONYX, Distro, Zeus), at setup (Atlas), or by the
+  operator materializing the value into `.env`; the retired `infisical://` form
+  is refused.
 - **Trust flow:** Cerulean issues ACME certificates and DNS records into your own BIND,
   provisions nginx proxy manager hosts, and (with Cerulean Vault) stores the private keys
   in SecretOps.

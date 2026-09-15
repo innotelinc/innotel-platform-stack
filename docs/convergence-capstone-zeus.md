@@ -1,6 +1,6 @@
 # Capstone ↔ Zeus Convergence
 
-**Status: in progress** · updated September 7, 2026
+**Status: in progress** · updated September 15, 2026
 
 > **Living tracker:** the Capstone repo's `docs/zeus-integration.md` is the
 > authoritative, current status for the shared-PBX integration (gaps G1–G4
@@ -79,7 +79,7 @@ ZEUS  (VoiceOps — owns: voice · fax · SMS · numbers · softphone)
   │  PBX/ARI · AMI · portal API (SMS/fax/voicemail)
   ▼
 CAPSTONE  (AgentOps — owns: agents · assistants · workflows · control center)
-  │  Authentik SSO · Infisical secrets · Magnate billing (both)
+  │  Authentik SSO · Cerulean Vault secrets · Magnate billing (both)
   ▼
 (identity · secrets · revenue · trust layers)
 ```
@@ -131,7 +131,7 @@ ops bar. Gap analysis:
 | Control Center ops dashboard (services/health/ports/alerts) | ✅ portal `/dashboard/health` ops view + `/api/health` | shared Control Center still open (Capstone dashboard is the recommended owner — §6 Q3) |
 | Observability (OTel → SigNoz) | ✅ optional profile shipped 2026-09-07 | `compose.observability.yml` (zeus- prefixed Capstone topology); app OTel instrumentation optional |
 | Smoke tests (`smoke-test.sh` / `smoke-e2e.sh`) | ✅ `scripts/smoke-test.sh` (portal/edge/PBX/fax/numbers, mirrors Capstone convention) | — |
-| Infisical profile + setup | ✅ | runtime `infisical://` resolution shipped (`docker-entrypoint.sh` + `scripts/infisical-env.mjs`, node --test covered) |
+| Cerulean Vault profile + resolver | ✅ | runtime `vault://` resolution shipped (`docker-entrypoint.sh` + `scripts/vault-env.mjs`, node --test covered); no Infisical profile ships |
 | Attribution guard + Pages landing | ✅ | done (guard + landing shipped) |
 | Stack doc + role page | ✅ `docs/stack.md` | link convergence doc (below) |
 
@@ -156,10 +156,11 @@ to Capstone's structural bar so the two projects feel like one platform.
 - [x] Control Center surface — portal `/dashboard/health` ops view shipped;
       a shared Capstone-owned Control Center remains open (see §6 Q3)
 - [x] Optional OTel → SigNoz profile — `compose.observability.yml` + ClickHouse/Keeper/collector configs (zeus- prefixed Capstone topology); app-side OTel instrumentation remains optional
-- [x] `infisical://` runtime secret resolution in the portal (Go-style client
-      or TS equivalent — same contract as Cerulean/Onyx; landed 2026-09-07 —
-      `docker-entrypoint.sh` resolves refs at boot via
-      `scripts/infisical-env.mjs`, docs/stack.md)
+- [x] `vault://` runtime secret resolution in the portal (TS resolver — same
+      contract as Cerulean/Onyx; landed 2026-09-07 — `docker-entrypoint.sh`
+      resolves refs at boot via `scripts/vault-env.mjs`, docs/stack.md). Moved
+      off the retired Infisical store on 2026-09-15: `vault-env.mjs` replaced
+      `infisical-env.mjs` and a leftover `infisical://` value is refused
 
 > Ansible (`zeus-ari.yml`) and the offline/live-USB ISO are the remaining
 > bare-metal parity gaps — **both deferred** per the §6.4 Q4 resolution
@@ -199,7 +200,14 @@ to Capstone's structural bar so the two projects feel like one platform.
 ## 5. What explicitly does NOT move
 
 - **Identity** stays Authentik (both platforms consume; neither owns).
-- **Secrets** stay Infisical (both consume).
+- **Secrets** stay Cerulean Vault (both consume). Infisical is retired — it
+  survives only as a migration *source* for `scripts/vault-migrate.py`, and a
+  leftover `infisical://` reference is a deployment error, not a fallback.
+  Deployed state (2026-09-15): Zeus's path-scoped token is minted
+  (`VAULT_PRODUCT_TOKENS=zeus` in Cerulean) and the portal resolves
+  `SESSION_SECRET` / `VOIPMS_SIP_PASS` from `vault://cerulean/zeus` at boot;
+  `TURN_CREDENTIAL` stays a literal in `.env` on purpose — coturn consumes it
+  through compose interpolation, which cannot resolve references.
 - **Billing** stays Magnate (both consume; Zeus's legacy `STRIPE_*`
   self-billing mode is deprecated and empty by default — revisit only when
   Magnate's billing API is production-ready).

@@ -24,9 +24,9 @@ Verdicts:
 | Service | Appears in | Verdict | Rationale |
 |---|---|---|---|
 | **Authentik** | cerulean (owner), + `auth.<platform>` NPM aliases for every stack | KEEP — required | IdentityOps is owned once (cerulean's compose); every other stack only fronts it via an NPM alias. No repo ships a second Authentik container. |
-| **Infisical** | cerulean (owner); optional `compose.infisical.yml` profile in 9 stacks | KEEP — profile-gated | SecretOps is owned once; the per-repo infisical compose files are the documented opt-in for offline/standalone installs (standard §8 posture). Default topology consumes cerulean's instance. |
-| **Postgres** | capstone, zeus(platform), monarch, signara(dev/prod), oasis, atheniq, atlas, npm (upstream CI), onyx, distro(redis-only), + infisical profiles | KEEP — required | Each platform owns its own application database — data isolation is the tenant boundary (standard §Security 4). A shared Postgres would couple tenant data across platforms. Version skew (16/16-alpine/16.4/17) is intentional: pin per repo, upgrade independently. |
-| **Redis** | capstone, zeus(platform), monarch(infisical), oasis, signara, + infisical profiles | KEEP — required | Same data-isolation rationale: queues/cache per platform. |
+| **Infisical** | retired — no repo ships a `compose.infisical.yml` any more | REMOVED | SecretOps is **Cerulean Vault** (HashiCorp Vault, KV v2). The instance at `secrets.cerulean.innotel.us` survives only as a migration *source* for `scripts/vault-migrate.py`; a leftover `infisical://` value in a `.env` is a deployment error, not a fallback. |
+| **Postgres** | capstone, zeus(platform), monarch, signara(dev/prod), oasis, atheniq, atlas, npm (upstream CI), onyx, distro(redis-only) | KEEP — required | Each platform owns its own application database — data isolation is the tenant boundary (standard §Security 4). A shared Postgres would couple tenant data across platforms. Version skew (16/16-alpine/16.4/17) is intentional: pin per repo, upgrade independently. |
+| **Redis** | capstone, zeus(platform), monarch, oasis, signara | KEEP — required | Same data-isolation rationale: queues/cache per platform. The retired Infisical profiles were the last Redis consumers to go. |
 | **MinIO** | capstone, signara(dev/prod), + platform-stack group 1 | KEEP — required | Object storage per platform for its own media/transcripts. ONYX remains the StorageOps layer for platform-level storage; these are application-internal buckets, not a second storage platform. |
 | **Coturn (TURN)** | capstone (profile `standalone`), zeus (primary) | KEEP — profile-gated | Zeus owns the shared TURN relay; capstone's copy only starts in standalone mode (`profiles: ["standalone"]`). In add-on mode the zeus instance is primary. |
 | **FreePBX/Asterisk** | capstone (profile `standalone`), zeus (owner) | KEEP — profile-gated | The convergence target: one shared PBX (zeus). Capstone's bundled PBX is now behind the `standalone` profile (`CAPSTONE_PBX=zeus` skips it). Dev/offline keeps the bundled copy by design (§6.4 Q1: kept). |
@@ -95,6 +95,8 @@ unaffected.
   if both run on one box, point zeus's OTel endpoint at capstone's collector
   instead of running a second ClickHouse (trigger: observability enabled on
   the shared server).
-- `compose.infisical.yml` profiles across 9 repos are byte-similar; if a
-  fourth variable ever diverges, promote them to a stack-lib-generated
-  template like the guard.
+- `compose.infisical.yml` profiles are gone from every repo (the store is
+  Cerulean Vault). The surviving shared secret tooling is
+  `scripts/vault-migrate.py`, mirrored verbatim like `stack-lib.sh` — if it ever
+  gains a repo-specific branch, promote it to a stack-lib-generated template
+  instead.
