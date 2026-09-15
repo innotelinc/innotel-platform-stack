@@ -402,7 +402,6 @@ cmd_status() {
       export TUTOR_MYSQL_ROOT_PASSWORD="${TUTOR_MYSQL_ROOT_PASSWORD:-placeholder}"
       export OASIS_PG_PASSWORD="${OASIS_PG_PASSWORD:-placeholder}"
       export REDIS_PASSWORD="${REDIS_PASSWORD:-placeholder}"
-      export INFISICAL_PG_PASSWORD="${INFISICAL_PG_PASSWORD:-placeholder}"
       local ps_out
       ps_out=$(compose "$dir" ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null) || true
       if [ -n "$ps_out" ] && ! echo "$ps_out" | grep -q "^NAME"; then
