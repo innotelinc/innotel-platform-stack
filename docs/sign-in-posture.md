@@ -10,6 +10,17 @@ the break-glass path for each. It exists because "we use SSO" is not a fact you
 can audit — a password form left in the template is a second identity store even
 when nobody uses it.
 
+> **Change of mechanism (2026-09-15).** Authentik **forward-auth is retired**.
+> No NPM proxy host carries an `auth_request`/`/outpost.goauthentik.io/...`
+> gate any more, and the per-zone outpost providers are superseded. Every
+> surface that cannot speak OIDC itself is instead fronted by a real OIDC
+> relying party — an **`oauth2-proxy` gateway sidecar** that runs the browser
+> through a code flow against Cerulean Authentik and shares one `.innotel.us`
+> session cookie. The first one is the NPM admin UI
+> (`cerulean-npm-sso`, see `1-primary/npm/docs/stack.md`). Sections below that
+> describe forward-auth/outpost wiring are kept as history and are no longer the
+> deployed state.
+
 ---
 
 ## 1. First-party apps — all Authentik-only
@@ -26,7 +37,7 @@ handler that mints the session is the control.
 | **Zeus** | portal | Authentik when the `AUTHENTIK_*` vars are set (`AUTH_MODE` auto) | `src/lib/oidc.ts` `passwordLoginEnabled()`, `app/api/auth/login/route.ts` → 403 | `AUTH_MODE=both` (button + form) or `freepbx` |
 | **Rizz Aura** | app / rankings / community / admin | Authentik OIDC only — **no password store at all** | `api/auth.mjs` (every frontend redirects to `api` for login) | none |
 | **Capstone dashboard** | dashboard | Authentik OIDC only | `dashboard-backend/app/main.py` `/auth/login` is an OIDC redirect | none |
-| **NPM Edge (the admin UI)** | `proxy.innotel.us`, `admin.zeus`, `admin.monarch` | Authentik forward-auth sign-in only — **no password path on the edge** | `backend/lib/sso.js`: `cameFromEdge()` (loopback) + `identityAllowed()` gate `POST /tokens/sso`; `passwordGrantAllowed()` refuses `POST /tokens` on every edge request | `BREAKGLASS_LOGIN=1`, off the edge (the LAN admin port) |
+| **NPM Edge (the admin UI)** | `proxy.innotel.us`, `admin.zeus`, `admin.monarch` | Authentik OIDC only (via the `oauth2-proxy` gateway `cerulean-npm-sso`) — **no password path on the edge** | `backend/lib/sso.js`: `cameFromEdge()` (loopback) + `identityAllowed()` gate `POST /tokens/sso`; `passwordGrantAllowed()` refuses `POST /tokens` on every edge request | `BREAKGLASS_LOGIN=1`, off the edge (the LAN admin port) |
 
 ### The break-glass convention
 
