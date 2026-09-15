@@ -10,20 +10,95 @@ the break-glass path for each. It exists because "we use SSO" is not a fact you
 can audit — a password form left in the template is a second identity store even
 when nobody uses it.
 
-> **Change of mechanism (2026-09-15).** Authentik **forward-auth is retired**.
-> No NPM proxy host carries an `auth_request`/`/outpost.goauthentik.io/...`
-> gate any more, and the per-zone outpost providers are superseded. Every
-> surface that cannot speak OIDC itself is instead fronted by a real OIDC
-> relying party — an **`oauth2-proxy` gateway sidecar** that runs the browser
-> through a code flow against Cerulean Authentik and shares one `.innotel.us`
-> session cookie. The first one is the NPM admin UI
-> (`cerulean-npm-sso`, see `1-primary/npm/docs/stack.md`). Sections below that
-> describe forward-auth/outpost wiring are kept as history and are no longer the
-> deployed state.
+> **Mechanism (2026-09-15).** Authentik **forward-auth is retired**. No NPM proxy
+> host carries an `auth_request` gate or `/outpost.goauthentik.io/...` subrequest
+> any more, and the per-zone outpost providers are superseded. A surface either
+> speaks **OIDC itself** or is fronted by a real OIDC relying party — an
+> **`oauth2-proxy` gateway** that runs the browser through an authorization-code
+> flow against Cerulean Authentik. There is no outpost and no `auth_request`
+> anywhere in the path.
 
 ---
 
-## 1. First-party apps — all Authentik-only
+## 1. How a gateway works, and the three things that make it work
+
+```
+browser ──https──▶ NPM edge (192.168.1.46)
+                     │  e.g. n8n.capstone.innotel.us
+                     ▼  http://192.168.1.46:14010
+               n8n-sso (oauth2-proxy)
+                     │   ──▶ Authentik: /application/o/authorize/  (code + PKCE)
+                     │   ──▶ redis: cerulean-sso-sessions (the session lives here)
+                     ▼  http://n8n:5678
+                  n8n  (its own login page is unused; nothing else fronts it)
+```
+
+Every gateway shares **one `_innotel_sso` cookie on `.innotel.us`** and **one
+session store**, so a single Authentik sign-in covers all of them.
+
+Three settings are load-bearing, and each was **measured on the live edge**, not
+assumed. All three were missing from the first cut of the gateways, and the
+combination meant the sign-in had never actually completed:
+
+| Setting | What goes wrong without it |
+| --- | --- |
+| `--insecure-oidc-allow-unverified-email` | Authentik's own `email` scope mapping sets `email_verified: false` (it has no authoritative source for the claim), and oauth2-proxy refuses such a token: `Error redeeming code during OAuth2 callback: email in id_token (…) isn't verified` → **HTTP 500** on `/oauth2/callback`. |
+| `--oidc-groups-claim=groups` | With no groups claim, `--allowed-group` restricts **nothing** — any authenticated identity is admitted, and the group binding becomes decoration. |
+| `--session-store-type=redis` | A cookie session carries the email, the ID token and every group. `dhunter` is in **28** groups, so it exceeds the 4KB cookie ceiling; oauth2-proxy splits it across several cookies, those `Set-Cookie` headers overflow the edge's `proxy_buffer_size`, and nginx answers the login with `upstream sent too big header while reading response header from upstream` → **HTTP 502** on `/oauth2/callback`. |
+
+The third one is not size-dependent on the *user*: it was reproduced with a
+single-group identity too, because the ID token alone is already over the
+ceiling. Server-side sessions remove the ceiling rather than raise it, and the
+browser holds one opaque id.
+
+**One store, three networks.** The gateways live in three different Docker
+networks (the edge's own, Monarch's, Capstone's), so the session store is
+published on the host — `cerulean-sso-sessions`, `192.168.1.46:16380` — with a
+password that is the whole control on that listener (an empty one refuses to
+start). Sessions are the only thing in it, there is no volume, and losing it
+costs a re-login.
+
+### The gateway inventory
+
+| Host(s) | Gateway | Listen (host) | Upstream | Authentik client |
+| --- | --- | --- | --- | --- |
+| `proxy.innotel.us`, `admin.zeus`, `admin.monarch`, `admin.signara` | `cerulean-npm-sso` | `127.0.0.1:4180` (the edge's own netns) | NPM admin UI `127.0.0.1:81` | `npm-edge` |
+| `radarr` · `sonarr` · `lidarr` · `whisparr` · `bazarr` · `prowlarr` `.monarch.innotel.us` | `{radarr,sonarr,lidarr,whisparr,bazarr,prowlarr}-sso` | `14001`–`14006` | `http://<app>:<port>` | `monarch-media` |
+| `qbittorrent` · `sabnzbd` `.monarch.innotel.us` | `qbittorrent-sso`, `sabnzbd-sso` | `14007`, `14008` | `http://qbittorrent:8080`, `http://sabnzbd:8080` | `monarch-media` |
+| `req.monarch.innotel.us`, `req.innotel.us` | `jellyseerr-sso` | `14009` | `http://jellyseerr:5055` | `monarch-media` |
+| `n8n.capstone.innotel.us` | `n8n-sso` | `14010` | `http://n8n:5678` | `innotel-app-gateway` |
+| `grist.capstone.innotel.us` | `grist-sso` | `14011` | `http://grist:8484` | `innotel-app-gateway` |
+| `signoz.capstone.innotel.us` | `signoz-sso` | `14012` | `http://signoz:8080` | `innotel-app-gateway` |
+| `workflow.capstone.innotel.us` | `workflow-sso` | `14013` | `http://workflow-studio:8090` | `innotel-app-gateway` |
+| `pbx.capstone`, `pbx.innotel.us`, `pbx.zeus`, `fax.zeus` | `pbx-sso` | `14014` | `http://192.168.1.46:8083` (FreePBX) | `innotel-app-gateway` |
+| `dns.internal.innotel.us` | `technitium-sso` | `14015` | `http://192.168.1.46:5380` | `innotel-app-gateway` |
+
+Each gateway's deployment file is the stack that owns the app: the media
+gateways in `3-media/monarch/docker-compose.yml`, the app gateways in
+`2-voice/capstone/docker-compose.yml`, and the edge's own in
+`1-primary/npm/compose.cerulean.yml`.
+
+**Skip-auth routes**, i.e. what stays reachable without a session:
+
+| Gateway | Open paths | Why |
+| --- | --- | --- |
+| `n8n-sso` | `^/webhook/`, `^/webhook-test/`, `^/healthz$` | Receiving webhooks is n8n's purpose; an interactive login in front of them would break every caller rather than add a check. The editor and the REST API stay gated. |
+| `signoz-sso` | `^/api/v1/health$` | liveness. Traces arrive at the OTel collector's own ports, not here. |
+| `grist-sso`, `workflow-sso`, `pbx-sso`, `technitium-sso`, and the media gateways | **nothing** | Their APIs are reached internally (container name / loopback), never through the public name, so there is no integration to preserve. Grist in particular runs in **single-identity mode** (`GRIST_DEFAULT_EMAIL`), so its `/api` is effectively unauthenticated — exempting it would publish the dashboards. |
+
+### The bare `innotel.us` zone
+
+`proxy.innotel.us` (the NPM admin UI) is an edge door in the **bare**
+`innotel.us` zone, and `req.innotel.us` is the subscriber-facing Jellyseerr
+name. Both are outside `MONARCH_DOMAIN` / `NPM_BASE_DOMAIN`, so no
+`npm-proxy-hosts.py` manages them: they are **manual** proxy hosts. They are
+pointed at a gateway like everything else, and re-pointing them is a manual
+step — the redirect URIs they use (`https://req.innotel.us/oauth2/callback`)
+are registered on the `monarch-media` provider.
+
+---
+
+## 2. First-party apps — all Authentik-only
 
 Enforcement is always **server-side**. Hiding a form is presentation; the
 handler that mints the session is the control.
@@ -33,11 +108,12 @@ handler that mints the session is the control.
 | **Magnate** | `/admin`, `/admin/login` | Authentik OIDC only | `lib/auth.ts` `breakglassLoginEnabled()` gates `app/api/admin/login/route.ts`; `components/AdminLogin.tsx` renders the form only when on | `BREAKGLASS_LOGIN=1` |
 | **Cerulean** | portal (all `/api/*` behind a session) | Authentik OIDC only | `server/src/config.ts` `auth.localEnabled` (default **false**), `server/src/routes.ts` `POST /auth/login` → 403 | `BREAKGLASS_LOGIN=1` (legacy alias `AUTH_LOCAL_ENABLED=1`) |
 | **Distro** | control plane `/admin`, `/login` | Authentik OIDC only | `src/oidc.js` `localLoginEnabled()`, `src/http.js` gates `/api/auth/signup` + `/api/auth/login` → 403 | `BREAKGLASS_LOGIN=1` |
-| **Olympus (Studio)** | Studio UI | Authentik OIDC (PKCE) — **no local path exists** | `web/studio/lib/auth.ts` | none needed; the recovery path is re-provisioning the `studio` app |
-| **Zeus** | portal | Authentik when the `AUTHENTIK_*` vars are set (`AUTH_MODE` auto) | `src/lib/oidc.ts` `passwordLoginEnabled()`, `app/api/auth/login/route.ts` → 403 | `AUTH_MODE=both` (button + form) or `freepbx` |
-| **Rizz Aura** | app / rankings / community / admin | Authentik OIDC only — **no password store at all** | `api/auth.mjs` (every frontend redirects to `api` for login) | none |
-| **Capstone dashboard** | dashboard | Authentik OIDC only | `dashboard-backend/app/main.py` `/auth/login` is an OIDC redirect | none |
-| **NPM Edge (the admin UI)** | `proxy.innotel.us`, `admin.zeus`, `admin.monarch` | Authentik OIDC only (via the `oauth2-proxy` gateway `cerulean-npm-sso`) — **no password path on the edge** | `backend/lib/sso.js`: `cameFromEdge()` (loopback) + `identityAllowed()` gate `POST /tokens/sso`; `passwordGrantAllowed()` refuses `POST /tokens` on every edge request | `BREAKGLASS_LOGIN=1`, off the edge (the LAN admin port) |
+| **Olympus (Studio)** | Studio UI | Authentik OIDC (PKCE) — **no local path exists** | `web/studio/lib/auth.ts` | none needed |
+| **Zeus** | portal | Authentik when the `AUTHENTIK_*` vars are set (`AUTH_MODE` auto) | `src/lib/oidc.ts` `passwordLoginEnabled()`, `app/api/auth/login/route.ts` → 403 | `AUTH_MODE=both` (button + form) |
+| **Rizz Aura** | app / rankings / community / admin | Authentik OIDC only — **no password store at all** | `api/auth.mjs` | none |
+| **Capstone dashboard** | Control Center | Authentik OIDC only | `dashboard-backend/app/main.py` `/auth/login` is an OIDC redirect | none |
+| **NPM Edge (admin UI)** | `proxy.innotel.us`, `admin.zeus`, `admin.monarch`, `admin.signara` | Authentik OIDC only, via the `cerulean-npm-sso` gateway — **no password path on the edge** | `backend/lib/sso.js`: `cameFromEdge()` (loopback) + `identityAllowed()` gate `POST /tokens/sso`; `passwordGrantAllowed()` refuses `POST /tokens` on every edge request | `BREAKGLASS_LOGIN=1`, off the edge (the LAN admin port) |
+| **Vault** | `secrets.cerulean.innotel.us` | Authentik OIDC (native `auth/oidc`, role `operator`, group `cerulean-platform`) | `scripts/vault-entrypoint.sh` step 4c configures it; the role's `bound_claims` requires the group | Vault's **token method**, which cannot be disabled, off the public name |
 
 ### The break-glass convention
 
@@ -45,11 +121,8 @@ handler that mints the session is the control.
 when Authentik is unreachable and you need to get in to fix it. It is off unless
 explicitly set, and it is read server-side, so the form and the endpoint agree.
 
-Recovery runbook:
-
 ```bash
 # 1. On the affected app's host, set the flag and restart that one service.
-#    e.g. Distro:
 cd 5-dev/distro && sed -i 's/^BREAKGLASS_LOGIN=.*/BREAKGLASS_LOGIN=1/' .env
 docker compose up -d control-plane
 
@@ -60,315 +133,120 @@ sed -i 's/^BREAKGLASS_LOGIN=.*/BREAKGLASS_LOGIN=/' .env
 docker compose up -d control-plane
 ```
 
-Cerulean keeps the older name for the same switch: set `AUTH_LOCAL_ENABLED=1`
-(or `BREAKGLASS_LOGIN=1`) and restart.
+Cerulean keeps the older name for the same switch (`AUTH_LOCAL_ENABLED=1`), and
+Zeus already had this shape as `AUTH_MODE=both`.
 
-Zeus already had this shape as `AUTH_MODE`; `AUTH_MODE=both` is its break-glass.
+Two break-glass paths are deliberately **off the public name** rather than
+flagged:
 
-NPM Edge is the one case where the switch is *not* the whole story: its
-password grant is refused on every request that came from the edge, including
-when `BREAKGLASS_LOGIN=1` is set, because a door to the admin UI is SSO-only by
-construction. The way back in is off the edge — the admin port on the LAN
-(`http://<host>:81`) — which is also why that port stays published.
+* **NPM Edge** — its password grant is refused on every request that came from
+  the edge, even with `BREAKGLASS_LOGIN=1`, because that door is SSO-only by
+  construction. The way back in is the admin port on the LAN
+  (`http://<host>:81`), which is why that port stays published.
+* **Vault** — the token method remains enabled and is the way in when Authentik
+  is down. Pasted-token sign-in is no longer the *intended* door, only the
+  recovery one.
 
 ---
 
-## 2. Third-party apps — what each actually needs
+## 3. Third-party apps
 
-These are upstream projects; "make it SSO-only" means one of three things, and
-only the first is a configuration change.
+"Make it SSO-only" means one of three things, and only the first is a pure
+configuration change.
 
 | App | Today | SSO posture |
 |---|---|---|
 | **Jellyfin** | Authentik **LDAP outpost** (`jellyfin-ldap`) — logins resolve against Cerulean users, `paid_users` gates access | ✅ **already SSO.** Disabling a user in Authentik blocks their media login |
 | **Homarr** (Monarch dashboard) | `AUTH_PROVIDERS: "oidc"` with `AUTH_OIDC_*` set | ✅ **already OIDC-only** |
-| **Dograh** | Authentik application `dograh` (provider 28) | ✅ **already OIDC-only** — `AUTH_PROVIDER=oidc`, client `dograh`, and the container's `AUTHENTIK_CLIENT_SECRET` matches the provider's, so `/api/v1/auth/oidc/login` → Authentik `authorize` with PKCE |
-| **OmniRoute gateway** | local dashboard password (`OMNIROUTE_INITIAL_PASSWORD`) | Fronted by the **Capstone-zone forward-auth** provider (`omniroute.capstone.innotel.us`) |
-| **FreePBX** | local admin (`pbx.freepbx` credentials) | No OIDC support. Fronted by the **Zeus-zone forward-auth** provider at `pbx.zeus.innotel.us` |
-| **n8n** (Capstone) | local owner account | OIDC/SAML require n8n **Enterprise**; fronted by the **Capstone-zone forward-auth** provider |
-| **Grist** (Capstone) | local account | OIDC requires **Enterprise**; fronted by the **Capstone-zone forward-auth** provider |
-| **SigNoz** (Capstone) | local admin | SSO requires **Enterprise**; fronted by the **Capstone-zone forward-auth** provider |
-| **Infisical** | local admin | **Retired** SecretOps — no repo runs the profile any more, so there is no Infisical login left to inventory. Its replacement is the gate that matters — `secrets.cerulean.innotel.us` (Vault) is fronted by the **Cerulean-zone forward-auth** provider |
-| **Technitium** | `TECHNITIUM_ADMIN_PASSWORD` | No OIDC. Keep local (DNS admin, not user-facing) or forward-auth the console |
-| **MinIO** | access keys | Native OIDC exists — set `MINIO_IDENTITY_OPENID_*`; object-store API keys are not a user login |
-| **searxng · iptv · subscribe-portal · workflow-studio** | no login | n/a — nothing to convert |
+| **Dograh** | Authentik application `dograh` (provider 28) | ✅ **already OIDC-only** |
+| **n8n · Grist · SigNoz · Workflow Studio · FreePBX/AvantFax · Technitium** | own local login | **Fronted by an `oauth2-proxy` gateway** (`innotel-app-gateway`) — see §1. Authentik is the only door on the public name |
+| **The media stack** (Radarr, Sonarr, Lidarr, Whisparr, Bazarr, Prowlarr, qBittorrent, SABnzbd, Jellyseerr) | own local login | **Fronted by an `oauth2-proxy` gateway** (`monarch-media`); the apps run `AuthenticationMethod=External`, i.e. they trust the proxy and have no login of their own |
+| **OmniRoute gateway** | local dashboard password | Fronted by `olympus-gateway-sso` at `gateway.olympus.innotel.us` (see `5-dev/olympus/docs/gateway-sso.md`); OmniRoute's own OIDC cannot be enabled — it strips the trailing slash from the issuer and Authentik's `iss` always ends with one |
+| **MinIO** | access keys | Native OIDC exists (`MINIO_IDENTITY_OPENID_*`); object-store API keys are not a user login |
+| **searxng · iptv · subscribe-portal · workflow-studio** | no login | n/a — nothing to convert (workflow-studio now has a gateway because the *app* it hangs off does) |
 
-**Forward-auth is the established pattern here, not a workaround**, and it is
-now wired for **every zone on the host**. Authentik runs one proxy outpost (*authentik
-Embedded Outpost*) carrying a **domain-level** provider per zone — the external host is
-the zone's `auth.` name and `cookie_domain` is the zone itself, so one provider gates
-every app underneath it:
+### Guest surfaces that are public on purpose
 
-| Zone | Provider | `cookie_domain` |
-|---|---|---|
-| capstone | `capstone-npm-forward-auth` (24) | `capstone.innotel.us` |
-| monarch | `monarch-npm-forward-auth` (26) | `monarch.innotel.us` |
-| zeus | `zeus-npm-forward-auth` (32) | `zeus.innotel.us` |
-| olympus | `olympus-npm-forward-auth` (33) | `olympus.innotel.us` |
-| cerulean | `cerulean-zone-npm-forward-auth` (34) | `cerulean.innotel.us` |
-
-All five are attached to the embedded outpost and were verified by driving the
-outpost's `/outpost.goauthentik.io/auth/nginx` endpoint with each app's host
-(`Host` + `X-Forwarded-Host`, exactly as the nginx snippet does): every protected
-host answers **401** unauthenticated — `n8n`, `grist`, `signoz`, `omniroute`,
-`pbx.capstone`, `pbx.zeus`, `secrets.cerulean`, `proxy.innotel.us` — while
-leaving the identity provider's own hosts alone.
-
-The other half is the **edge**, and it is live for the Capstone zone. Driving the
-public hostnames shows the real gate:
-
-```
-n8n.capstone.innotel.us     302 -> https://auth.capstone.innotel.us/outpost.goauthentik.io/start?rd=...
-grist.capstone.innotel.us   302 -> ... (same outpost)
-signoz.capstone.innotel.us  302 -> ... (same outpost)
-```
-
-That is `auth_request` already wired in NPM — Capstone's
-`scripts/npm-proxy-hosts.py` renders the snippet and defaults forward-auth **on**
-— so n8n, Grist and SigNoz are Authentik-gated **today**. The last two ungated
-hosts were closed the same way: NPM API credentials do exist after all, in
-`1-primary/cerulean/.env`, so it was a scripted change rather than a console one.
-
-| Host | Before | Now |
-|---|---|---|
-| `pbx.zeus.innotel.us` | 302 → its own `/admin` (FreePBX login) | 302 → `auth.zeus.innotel.us/outpost.goauthentik.io/start` |
-| `secrets.cerulean.innotel.us` | 307 → its own `/ui/` (Vault login) | 302 → `auth.cerulean.innotel.us/outpost.goauthentik.io/start` |
-| `proxy.innotel.us` (the NPM admin UI) | its own login form | 302 → `auth.innotel.us/outpost.goauthentik.io/start` |
-
-Nothing reaches those hosts programmatically — both are interactive UIs, so
-gating them cannot break an integration. The snippet is now rendered by the
-provisioners themselves: Zeus's and Cerulean's `scripts/npm-proxy-hosts.py` carry
-the same `FORWARD_AUTH_SNIPPET` as Capstone's, so re-running any of them
-re-applies the gate instead of wiping it. `forward_auth: False` opts a host out —
-`auth`/`dns`/`certs`/`admin` are the Cerulean app itself, and gating `auth` would
-lock the zone out of its own IdP.
-
-#### The bare `innotel.us` zone
-
-`proxy.innotel.us` is the first gated host in the **bare** `innotel.us` zone, and
-that is why it needed more than an NPM edit. The embedded outpost resolves the
-app from the forwarded `Host`, so it only authorizes hosts a `forward_domain`
-provider's `cookie_domain` actually covers; the five existing providers covered
-`capstone`/`cerulean`/`monarch`/`olympus`/`zeus` only. Gating the host without one
-made the auth subrequest fail and NPM return **500** — the same shaped failure as
-the earlier `forward_single` mistake.
-
-The zone provider was created with the generic provisioner (which is parameterised
-by `MONARCH_DOMAIN` and is not Monarch-specific):
-
-```
-MONARCH_DOMAIN=innotel.us \
-  AUTHENTIK_FORWARD_PROVIDER="Innotel Zone NPM Forward Auth" \
-  AUTHENTIK_FORWARD_APP_SLUG=innotel-npm-forward-auth \
-  AUTHENTIK_FORWARD_GROUP=cerulean-platform \
-  python3 3-media/monarch/scripts/authentik-forward-auth.py
-```
-
-(`forward_domain`, `cookie_domain=innotel.us`, `external_host=https://auth.innotel.us`,
-provider pk 35, application `innotel-npm-forward-auth`, attached to the embedded
-outpost.) Its `external_host` is the **base** `auth.innotel.us` that already
-existed, which is why the redirect lands there and not on a zone IdP.
-
-The gate is **not** open to any authenticated user: the application carries a
-policy binding to the **`cerulean-platform`** group, so only its members pass.
-This is the one place the provisioner had a silent gap — it looked
-`AUTHENTIK_FORWARD_GROUP` up and printed `PASS`, but never created the binding,
-so setting the var restricted nothing. `authentik-forward-auth.py` now binds the
-application (and `--check` reports a missing binding as drift).
-
-**Every NPM forward-auth gate is now group-scoped**, each to its own zone's
-group — the pattern `capstone-npm-forward-auth` already followed:
-
-| Application | Gates | Group |
-|---|---|---|
-| `capstone-npm-forward-auth` | 7 `capstone` hosts | `Capstone` |
-| `cerulean-zone-npm-forward-auth` | `secrets.cerulean`, `admin.zeus` | `Cerulean` |
-| `monarch-npm-forward-auth` | 10 `monarch` hosts (the *arr apps + `admin`) | `Monarch` |
-| `zeus-npm-forward-auth` | `pbx.zeus`, `admin.zeus` | `Zeus` |
-| `olympus-npm-forward-auth` | (none gated yet) | `Olympus` *(created)* |
-| `innotel-npm-forward-auth` | `proxy.innotel.us` | `cerulean-platform` |
-
-The bare `innotel.us` zone is the exception: it is the platform-wide admin edge,
-not a product, so it binds the platform-operator group rather than a product
-group. There was **no `Olympus` group** — it was created (plain, matching the
-other product groups) so the olympus provider is not left as a permanent "any
-authenticated user" hole for the first host that gets gated there. The host's
-zone decides which application governs it, so `admin.zeus.innotel.us` is gated by
-the **zeus** application even though its snippet's sign-in URL points at
-`auth.cerulean.innotel.us`.
-
-A second, unrelated defect surfaced while verifying: Authentik's application
-**list** endpoint can silently omit an application — it reported `count=32` with
-31 results and no next page, and `?search=olympus-npm-forward-auth` returned
-`count=1` with **zero** results — while a direct slug `GET` resolved it fine.
-The provisioner looked applications up through that list, so `--check` reported
-the perfectly healthy `olympus-npm-forward-auth` as *missing*. `Ak.get_application()`
-now does a direct slug `GET` and only falls back to the list, and all six gates
-`--check` clean. It is **not** caused by the group binding — the app stayed
-unlisted with the binding deleted. `3-media/monarch/scripts/tests/test_authentik_forward_auth.py`
-now pins all three behaviours (binding creation, drift detection, slug
-fallback); mutating `get_application` back to a list-only lookup fails it.
-
-#### Verified end-to-end, not just inspected
-
-`1-primary/cerulean/scripts/verify-forward-auth.py` creates a throwaway
-Authentik identity, drives Authentik's real authentication flow against the
-live edge, and deletes the identity on the way out — including when a check
-fails. It now covers all seven gated hosts in two phases: with the identity in
-**no** group every gate must refuse it, then each group is added **one at a
-time** and must open exactly the hosts bound to it. Adding every group at once
-would not catch a gate bound to the *wrong* group — the mistake that matters.
-
-```
-[2] a non-member (no groups) is refused by every gate        # 7/7 refused
-[3] each group opens exactly the hosts bound to it
-    + Capstone          -> n8n.capstone.innotel.us
-    + Cerulean          -> secrets.cerulean.innotel.us
-    + Monarch           -> admin.monarch.innotel.us, radarr.monarch.innotel.us
-    + Zeus              -> admin.zeus.innotel.us, pbx.zeus.innotel.us
-    + cerulean-platform -> proxy.innotel.us
-PASS — 7 gated hosts: refused to a non-member and open to a member
-```
-
-That run found a **pre-existing bug** rather than confirming the bindings:
-`admin.zeus.innotel.us` — a *second* edge door to the NPM admin UI, forwarding
-to `:81` like `proxy.innotel.us` and the working `admin.monarch.innotel.us` —
-signed in at `auth.cerulean.innotel.us`. The sign-in host is what selects the
-provider, and that provider's cookie is scoped to `cerulean.innotel.us`, which a
-`zeus.innotel.us` host can never present; the gate bounced forever for everyone,
-group member or not. It now signs in at its own zone's `auth.zeus`, like
-`pbx.zeus`, and the `Zeus` group reaches it.
-
-#### Membership audit
-
-Only three identities are people; the rest are Authentik plumbing
-(`ak-outpost-*`, `ak-Capstone Dashboard-client_credentials`, `authentik-ldap`)
-which never carries a browser session through a forward-auth gate.
-
-| identity | Cerulean | cerulean-platform | Monarch | Zeus | Capstone |
-|---|---|---|---|---|---|
-| `dhunter` | yes | yes | yes | yes | yes |
-| `akadmin` | yes | yes | yes | yes | yes |
-| `justin`  | – | – | – | – | yes |
-
-**`justin` is the one identity this tightening locks out.** Every gate used to
-admit any authenticated user; `justin` is only in `Capstone`, so the Cerulean,
-cerulean-platform, Monarch and Zeus gates are now closed to them. If that is not
-intended, add `justin` to the relevant group(s) — nothing else in the audit
-changes.
-
-The new `Olympus` group was seeded from the `cerulean-platform` roster
-(`akadmin`, `dhunter`), which is Olympus's own documented rule
-(`GATEWAY_SSO_ALLOWED_GROUP` defaults to `cerulean-platform`) — worth knowing
-that it therefore mirrors `cerulean-platform` exactly.
-
-The NPM half is one host's `advanced_config`, rendered by Cerulean's
-`forward_auth_snippet()`. It is a **manual** patch rather than a reconcile: the
-host sits outside `NPM_BASE_DOMAIN`, so no `npm-proxy-hosts.py` manages it and
-none will wipe the gate — but equally none will re-apply it. Re-paste from
-`1-primary/cerulean/scripts/npm-proxy-hosts.py` if it is ever lost.
-
-Because the admin UI is now gated at the edge, automation was moved off it:
-monarch's `NPM_BASE_URL` is the LAN API `http://192.168.1.46:81`, not
-`https://proxy.innotel.us` (pointing it at the public host would have 302'd the
-API calls to the sign-in page and surfaced as **"proxy hosts drifted"**). The
-break-glass path is unchanged and unauthenticated: NPM is still reachable
-directly on the LAN at `http://192.168.1.46:81`, so a broken or unreachable
-Authentik can never lock the proxy's own recovery UI out.
-
-`omniroute.capstone.innotel.us` does not resolve at all — OmniRoute is declared
-`optional: true` in the Capstone host map and its dashboard was never given an
-NPM host, so there is no edge to gate; the provider is ready if it is published.
-The snippet lives in `2-voice/capstone/scripts/npm-proxy-hosts.py`
-(`FORWARD_AUTH_SNIPPET`) to paste from.
+`subscribe.*.innotel.us` (the pricing/checkout portal) and the media *request*
+page (`req.innotel.us`, now Jellyseerr through the gateway, so it requires an
+Authentik session) are the only names that are meant to be reachable by people
+with no platform account. `subscribe` is a marketing page — it has no login to
+gate.
 
 ---
 
-## 3. What this pass changed
+## 4. Verifying it, rather than trusting it
 
-- **Magnate** — `/admin/login` is Authentik-only. The `AUTHENTIK_*` variables are
-  now **passed into the container** by `docker-compose.yml`; before this they
-  existed only in `.env` (compose substitution) and never reached the process,
-  so `oidcEnabled()` was false and the SSO button never rendered — the panel was
-  effectively password-only despite the app supporting OIDC.
-- **Cerulean** — `AUTH_LOCAL_ENABLED` now defaults to **false** in
-  `server/src/config.ts`, so a checkout without the flag is SSO-only, and
-  `POST /auth/login` refuses with 403 instead of accepting a password.
-- **Distro** — the control plane's `/api/auth/signup` and `/api/auth/login` are
-  gated, and the `distro` OIDC **application + provider were provisioned in
-  Authentik** (they did not exist). Cerulean's `scripts/authentik-setup.py` got a
-  fix along the way — Authentik's `/core/applications/` endpoint ignores a
-  `slug=` filter, so provisioning a *new* application always failed with a 404
-  on PUT.
-- **Studio** — brought up against the `studio` Authentik app and Distro's
-  control plane (`CONTROL_PLANE_INTERNAL_URL` / `CONTROL_INTERNAL_TOKEN`).
-- **Audited as already compliant:** Zeus, Rizz Aura, Capstone dashboard, Homarr,
-  Jellyfin (LDAP).
-- **Forward-auth providers for all five zones** were created/repaired and attached
-  to the embedded outpost (see §2). Creating `zeus`, `olympus` and `cerulean` was
-  not enough on its own: they were first written as `forward_single` with an empty
-  `cookie_domain`, which only authenticates the `auth.` host, not the apps beside
-  it. They are now `forward_domain` with the zone as `cookie_domain`, matching the
-  already-proven capstone/monarch pair.
-- **The retired `atlas-chef` application and provider are gone from Authentik**
-  (Chef retired as a builder).
-- **Magnate was verified end-to-end, not just inspected.** A throwaway user on the
-  admin allowlist and in the `Magnate` group was driven through the *real* flow over
-  the public hostnames — `admin.magnate.innotel.us` → PKCE redirect →
-  `auth.cerulean.innotel.us` (Authentik's own authentication flow) → authorization
-  code → Magnate's callback exchanges it with the client secret + verifier →
-  `admin_session` cookie set → `GET /admin` **200**. The temp user was deleted
-  afterwards. So the panel accepts an Authentik-issued identity, and the password
-  endpoint's 403 is a closed door rather than a broken one. That flow is now a
-  **committed regression test**: `1-primary/magnate/scripts/verify-sso.py`
-  (`npm run verify:sso`) creates a temp user, drives the real dance, asserts
-  `POST /api/admin/login` → 403, and deletes the user even when a check fails
-  (0 pass / 1 fail / 2 unreachable).
-- **Magnate's Authentik admin API was dead, and is now alive.** `AUTHENTIK_BASE_URL`
-  was never set (so `authentikConfigured()` was false and `lib/authentik.ts` threw
-  "base URL is not configured"), and `AUTHENTIK_BOOTSTRAP_TOKEN` was stale —
-  "Token invalid/expired". Both are fixed in `.env` (base URL +
-  the shared instance token) and documented in `.env.example`; the Stripe webhook
-  that provisions the Authentik account and `paid_users` had been silently skipping.
-- **FreePBX and Vault are gated at the edge** — see §2, and both provisioners now
-  render the snippet.
-- **NPM Edge's own login is gone, and it is the last surface that had one.**
-  Upstream Nginx Proxy Manager has an email+password user table and no OIDC, so
-  the admin UI was the one door on the host that Authentik could gate but not
-  own. The fork (`1-primary/npm`) now ships a first-party image
-  (`docker/Dockerfile.sso`, tag `innotel/npm-edge`) whose `backend/lib/sso.js`
-  signs the UI in with the identity the edge already authenticated, and refuses
-  the password grant on every edge request. What proves "this came from the
-  edge" is the connection itself: nginx runs in the same container, so the
-  edge's requests are the only ones that arrive over loopback, and
-  `socket.remoteAddress` cannot be forged by a header the way
-  `X-authentik-email` can. That is why every admin proxy host
-  (`proxy.innotel.us`, `admin.zeus`, `admin.monarch`) now forwards to the UI's
-  `127.0.0.1` rather than the host's LAN IP — pointing one at the LAN IP does
-  not open a hole, it just gets no SSO and says so. Cerulean's `NPM_EMAIL` stays
-  as the one account allowed to use the password grant off-edge, because
-  `npm-proxy-hosts.py` provisions hosts through the API with it; the LAN port
-  stays published as the break-glass door. `backup-ui` is deliberately left
-  LAN-only: it is management plane, not a user surface.
+Two things have to be true for every gated host, and both are cheap to check:
 
-## 4. Open items
+```bash
+# 1. the public name demands Authentik (302, with the right client id)
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://n8n.capstone.innotel.us/
 
-1. **Magnate's SecretOps doc rename is uncommitted.** `docs/stack.md`,
-   `compose.infisical.yml`, `setup.sh` and `scripts/stack-lib.sh` carry the
-   Infisical → Cerulean Vault rename but are unstaged, and `scripts/mesh.sh` is
-   untracked. Commit or revert them so the tree stops drifting.
-2. `cerulean-vault` and `cerulean-technitium` keep their own credentials by
-   design — they are infrastructure, not user surfaces.
-3. **Technitium's console** has no OIDC. If it is ever published through the edge,
-   front it with the Cerulean-zone provider the way Vault now is.
+# 2. no host anywhere carries a forward-auth gate any more
+#    (via the NPM API: every proxy host's advanced_config must be empty of
+#     auth_request, and there must be no outpost references)
+```
+
+Sign-in itself is verified by driving the **real** flow, not by inspecting
+config. The probe used for this pass creates a throwaway Authentik identity,
+runs Authentik's own flow executor for the client under test, follows the code
+back through the edge, and asserts three things: a member signs in and reaches
+the app, an identity in 28 groups also signs in (the cookie-size case), and a
+non-member is **refused**. It deletes the identity on the way out — including
+when a check fails.
+
+Where that leaves the platform, measured:
+
+```
+edge admin (proxy.innotel.us)   1 group   PASS   callback 302 → UI 200, 1 session cookie
+edge admin (proxy.innotel.us)   28 groups PASS   callback 302 → UI 200, 1 session cookie
+edge admin (proxy.innotel.us)   no group  PASS   callback 403 (refused)
+media (radarr.monarch…)         same three cases, PASS
+app (n8n.capstone…)             same three cases, PASS
+Vault (secrets.cerulean…)       member    PASS   Vault token issued, listed + read the store
+Vault (secrets.cerulean…)       non-member PASS  refused at Authentik before any token
+```
+
+`npm-proxy-hosts.py --check` in each zone remains the drift check for the host
+map, and `1-primary/magnate/scripts/verify-sso.py` (magnate's own) is the
+committed end-to-end regression test for that app.
 
 ---
 
-## 5. Host reconcile — project names now match the composes
+## 5. Open items
 
-Every compose project on the host runs under the name its canonical file pins and
-from the canonical directory; nothing is launched with `-p <legacy-name>` any
-more.
+1. **The apps' own ports are still reachable on the LAN.** Closing this is done
+   for the **media** apps — their host ports are bound to `127.0.0.1`, so the
+   gateway is the only door and the LAN address answers nothing. The **app**
+   gateways (n8n `:5678`, Grist `:8484`, SigNoz `:3301`, Workflow Studio `:8090`,
+   FreePBX `:8083`) still publish on the LAN, because their integrations are
+   documented as reaching them there (`FREEPBX_URL` in Zeus's compose,
+   `dashboard-backend`'s SigNoz links, `generate_ui.py`). Binding them to
+   loopback is a per-service change that has to move those references to the
+   container name or the gateway first. Technitium is the hard case: it runs
+   with host networking, so it binds the host's interfaces directly and compose
+   cannot restrict it.
+2. **Vault's UI offers two methods.** OIDC is the door; the token tab is
+   break-glass and cannot be removed. Landing the UI directly on OIDC would need
+   an edge redirect on `secrets.cerulean.innotel.us`, which means teaching
+   `1-primary/cerulean/scripts/npm-proxy-hosts.py` to render a per-host
+   `advanced_config` — it currently writes an empty one for every host, so a
+   manual edit there would be wiped by the next run.
+3. **`cerulean-technitium` and the media downloader ports** (qBittorrent's
+   `8080` is loopback now, but its torrenting port `6881` stays open by design)
+   are the remaining deliberate LAN listeners.
+4. **`omniroute.capstone.innotel.us` does not resolve** — OmniRoute is declared
+   `optional: true` in the Capstone host map and its dashboard has no NPM host,
+   so there is no edge to gate. The provider is ready if it is published.
+
+---
+
+## Appendix — host reconcile (unrelated to sign-in)
+
+Every compose project on the host runs under the name its canonical file pins
+and from the canonical directory; nothing is launched with `-p <legacy-name>`
+any more.
 
 ```
 capstone-voice-aiagent-platform  ->  capstone    (23 containers)
@@ -378,42 +256,36 @@ zeus-pbx-platform                ->  zeus        (3)
 ```
 
 Named volumes were copied to the canonical prefix before the cutover
-(`capstone-*` 13 volumes, `cerulean_infisical-*` 2), the containers were recreated
-from the canonical compose with the same profiles, and the containers' anonymous
-volumes (image `VOLUME`s: searxng's `/etc/searxng` + cache, the n8n sandbox's
-dind `/var/lib/docker`, the ClickHouse keeper's `/var/lib/clickhouse`) were copied
-into their replacements and the containers restarted. Zeus needed no volume copy —
-`pbx-*` and `zeus-portal-data` are declared with explicit `name:`, so they are
-project-independent — and Monarch none either, because its canonical
+(`capstone-*` 13 volumes, `cerulean_infisical-*` 2), the containers recreated
+from the canonical compose with the same profiles, and the containers'
+anonymous volumes (image `VOLUME`s: searxng's `/etc/searxng` + cache, the n8n
+sandbox's dind `/var/lib/docker`, the ClickHouse keeper's
+`/var/lib/clickhouse`) copied into their replacements and restarted. Zeuss
+needed no volume copy — `pbx-*` and `zeus-portal-data` are declared with
+explicit `name:` — and Monarch none either, because its canonical
 `monarch_clipbucket_*` volumes already existed.
 
-Two things to know:- **The legacy volumes are gone.** All 18 pre-migration volumes
-  (`capstone-voice-aiagent-platform_*`, `cerulean-dns-platform_*`,
-  `monarch-media-platform_clipbucket_*`, `zeus-pbx-platform_omniroute-data`) were
-  deleted after every canonical counterpart was confirmed present with
-  `du`-comparable or larger contents and no container referenced one. The Monarch
-  `*_clipbucket_*` pair was empty (stubs) and Zeus's dormant `omniroute-data` held
-  only a 0-byte `storage.sqlite` — copied to `zeus_omniroute-data` first. Rollback
-  is now the copied volumes alone.
-- **Do not `up -d` Monarch without a service list.** Its compose also defines
+Two things to know:
+
+* **The legacy volumes are gone.** All 18 pre-migration volumes were deleted
+  after every canonical counterpart was confirmed present with `du`-comparable
+  or larger contents and no container referenced one. Rollback is now the copied
+  volumes alone.
+* **Do not `up -d` Monarch without a service list.** Its compose also defines
   `requestrr`, `flaresolverr`, `clipbucket`, `monarch-recs`, `monarch-health`,
   `watchtower` and the `legacy`/`npm` profiles, none of which run on this host;
   a bare `up -d` would start seven extra containers.
 
-Also fixed on the way: the Capstone project's recorded compose file used to live at
-a path that no longer existed (18 containers were unmanageable) and Docker had
+Also fixed on the way: the Capstone project's recorded compose file used to live
+at a path that no longer existed (18 containers were unmanageable) and Docker had
 re-created that path **as empty directories** where three config *files* are
-mounted — `n8n-grader-workflow.json` was mounted as a directory, so the import job
-could not read it. The five legacy root paths remain as **symlinks** to the
-canonical dirs (`cerulean-dns-platform`, `zeus-pbx-platform`,
-`capstone-voice-aiagent-platform`, `monarch-media-platform`,
-`rizzaura-platform`) — Rizz Aura still records its working dir through one, which
-is harmless, and the rest are now unused aliases.
+mounted — `n8n-grader-workflow.json` was mounted as a directory, so the import
+job could not read it. The five legacy root paths remain as **symlinks** to the
+canonical dirs.
 
-The one host that is still on a non-canonical image mix on purpose: Capstone's
+The one host still on a non-canonical image mix on purpose: Capstone's
 `dograh-api` runs the published `ghcr.io/innotelinc/dograh-api:latest` while
 `dograh-ui` runs the locally built `dograh-local/dograh-ui:capstone`, because
 `docker-compose.dograh-build.yml` is only applied to the UI. Recreating the API
-from that override swaps it to the local build — pass `--no-build` if you ever do,
-or the override triggers a full source build (15–25 min, and it OOMs without
-`--build-arg NODE_BUILD_HEAP_MB`).
+from that override swaps it to the local build — pass `--no-build` if you ever
+do, or the override triggers a full source build.
