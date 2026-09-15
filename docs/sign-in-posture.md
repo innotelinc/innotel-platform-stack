@@ -217,6 +217,7 @@ a test result rather than a claim:
 | `1-primary/cerulean/scripts/verify-sso.py` | the four edge admin names, Vault's redirect + `auth_url`, the console bind, the session-store bind, the app's password endpoint |
 | `2-voice/capstone/scripts/verify-sso.py` | n8n, Grist, SigNoz, Workflow Studio, FreePBX, Technitium, plus the loopback-only ports and the session store |
 | `3-media/monarch/scripts/verify-sso.py` | the nine media apps on both Jellyseerr names, plus the loopback-only ports |
+| `1-primary/signara/scripts/verify-sso.py` | Signara's API flow end to end, its application-binding refusal, and that no password endpoint exists |
 | `1-primary/magnate/scripts/verify-sso.py` | Magnate's own OIDC-only admin sign-in |
 
 Each creates a throwaway Authentik identity (and a second one outside the
