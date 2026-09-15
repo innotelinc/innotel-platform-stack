@@ -16,7 +16,8 @@ container) and connects via a WireGuard mesh overlay network.
 │  │ Cerulean │ │ Capstone │ │ Monarch  │ │ Rizzaura │ │  Atlas   │        │
 │  │ AthenIQ  │ │   Zeus   │ │ Jellyfin │ │  ONYX    │ │  Oasis   │        │
 │  │ Magnate  │ │OmniRoute │ │   *arr   │ │          │ │  Gitea   │        │
-│  │ Consul   │ │          │ │   NPM    │ │          │ │  Chef    │        │
+│  │ Consul   │ │          │ │          │ │          │ │  Chef    │        │
+│  │   NPM    │                                                          │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘        │
 │                                                                             │
 │  Consul Registry (10.10.1.1:8500) ← every group registers here            │
@@ -27,9 +28,15 @@ container) and connects via a WireGuard mesh overlay network.
 
 | # | Name      | Role                      | Services                          | RAM    |
 |---|-----------|---------------------------|-----------------------------------|--------|
-| 1 | Primary   | Auth backbone + LMS + billing | Cerulean, AthenIQ, Magnate, Signara, Consul | ~10 GiB |
+<<<<<<< HEAD
+| 1 | Primary   | Auth backbone + LMS + billing + edge | Cerulean, AthenIQ, Magnate, NPM edge, Consul | ~10 GiB |
 | 2 | Voice     | PBX + VoIP + LLM gateway  | Capstone, Zeus, OmniRoute, coturn | ~6 GiB |
-| 3 | Media     | Streaming + video delivery | Jellyfin, *arr, NPM edge, PLUTUS   | ~10 GiB |
+| 3 | Media     | Streaming + automation    | Jellyfin, *arr                    | ~8 GiB |
+=======
+| 1 | Primary   | Auth backbone + LMS + billing + edge | Cerulean, AthenIQ, Magnate, NPM edge, Consul | ~10 GiB |
+| 2 | Voice     | PBX + VoIP + LLM gateway  | Capstone, Zeus, OmniRoute, coturn | ~6 GiB |
+| 3 | Media     | Streaming + automation    | Jellyfin, *arr                    | ~8 GiB |
+>>>>>>> 117eeec (docs(edge): the NPM cutover is complete — real ports, wildcard re-issue, .71 retired)
 | 4 | Social    | Leaderboard + storage     | Rizzaura, ONYX                    | ~6 GiB |
 | 5 | Dev       | Code + mail + factory     | Atlas (Gitea+Chef), Oasis, Distro, Olympus | ~8 GiB |
 
@@ -198,7 +205,7 @@ mesh's Consul agent lives. Services on the same host reach Consul directly as
 | 2     | Zeus Portal      | 3001      | 10.10.2.1:3001          |
 | 2     | coturn           | 3478      | 10.10.2.1:3478          |
 | 2     | OmniRoute        | 20128     | 10.10.2.1:20128         |
-| 3     | NPM              | 80/443    | 10.10.3.1:80            |
+| 1     | NPM edge         | 80/443    | 10.10.1.1:80            |
 | 3     | Jellyfin         | 8096      | 10.10.3.1:8096          |
 | 3     | Prowlarr         | 9696      | 10.10.3.1:9696          |
 | 3     | PLUTUS web       | 3000      | 10.10.3.1:3000          |
