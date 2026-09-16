@@ -1428,9 +1428,9 @@ audit() {
 
   heading "Auditing ${dir} (${name})"
 
-  _ok=$([ -f "$dir/README.md" ] && echo ok || true)
+  if [ -f "$dir/README.md" ]; then _ok=ok; else _ok=""; fi
   check_eq "$_ok" ok "README.md exists"
-  _ok=$([ -f "$dir/LICENSE" ] && echo ok || true)
+  if [ -f "$dir/LICENSE" ]; then _ok=ok; else _ok=""; fi
   check_eq "$_ok" ok "LICENSE exists"
   # LICENSE must be COMMITTED (a fresh clone only has tracked files) — a
   # file that merely exists locally but is gitignored fails CI audits.
@@ -1440,24 +1440,24 @@ audit() {
   # NOASSERTION for stub notices, which breaks the repo-page license badge.
   _lc=$(wc -l < "$dir/LICENSE" 2>/dev/null || echo 0)
   if grep -qi 'GNU AFFERO GENERAL PUBLIC LICENSE' "$dir/LICENSE" 2>/dev/null; then
-    _ok=$([ "$_lc" -ge 400 ] && grep -qi 'END OF TERMS AND CONDITIONS' "$dir/LICENSE" && echo ok || true)
+    if [ "$_lc" -ge 400 ] && grep -qi 'END OF TERMS AND CONDITIONS' "$dir/LICENSE"; then _ok=ok; else _ok=""; fi
   elif grep -qi 'MIT License' "$dir/LICENSE" 2>/dev/null; then
-    _ok=$([ "$_lc" -ge 15 ] && grep -qi 'THE SOFTWARE IS PROVIDED' "$dir/LICENSE" && echo ok || true)
+    if [ "$_lc" -ge 15 ] && grep -qi 'THE SOFTWARE IS PROVIDED' "$dir/LICENSE"; then _ok=ok; else _ok=""; fi
   else
     _ok=
   fi
   check_eq "$_ok" ok "LICENSE is canonical full text (GitHub-detectable)"
-  _ok=$([ -f "$dir/.env.example" ] && echo ok || true)
+  if [ -f "$dir/.env.example" ]; then _ok=ok; else _ok=""; fi
   check_eq "$_ok" ok ".env.example exists"
   # .env.example must be COMMITTED — a fresh clone only has tracked files.
   _ok=$(git -C "$dir" check-ignore -q .env.example 2>/dev/null && echo ignored || echo ok)
   check_eq "$_ok" ok ".env.example is tracked (not gitignored)"
-  _ok=$([ -f "$dir/.gitignore" ] && echo ok || true)
+  if [ -f "$dir/.gitignore" ]; then _ok=ok; else _ok=""; fi
   check_eq "$_ok" ok ".gitignore exists"
 
   _gi_matches=$(grep -c '^\.env' "$dir/.gitignore" 2>/dev/null || true)
   check_gt0 "$_gi_matches" ".gitignore covers .env"
-  _ok=$([ -f "$dir/web/landing/index.html" ] && echo ok || true)
+  if [ -f "$dir/web/landing/index.html" ]; then _ok=ok; else _ok=""; fi
   check_eq "$_ok" ok "web/landing/index.html exists"
   # A repo with a landing page must have it published to GitHub Pages — a
   # Pages-disabled repo shows a broken/blank site. Checked when we can reach
@@ -1490,11 +1490,11 @@ audit() {
   else
     echo "  (no live Pages check — needs gh + a GitHub origin remote)"
   fi
-  _ok=$([ -f "$dir/docs/stack.md" ] && echo ok || true)
+  if [ -f "$dir/docs/stack.md" ]; then _ok=ok; else _ok=""; fi
   check_eq "$_ok" ok "docs/stack.md exists"
-  _ok=$([ -f "$dir/.github/workflows/attribution-guard.yml" ] && echo ok || true)
+  if [ -f "$dir/.github/workflows/attribution-guard.yml" ]; then _ok=ok; else _ok=""; fi
   check_eq "$_ok" ok ".github/workflows/attribution-guard.yml"
-  _ok=$([ -f "$dir/.githooks/guard-lib" ] && echo ok || true)
+  if [ -f "$dir/.githooks/guard-lib" ]; then _ok=ok; else _ok=""; fi
   check_eq "$_ok" ok ".githooks/guard-lib exists"
   if [ -f "$dir/Makefile" ]; then
     check "Makefile exists (or intentionally absent)" true

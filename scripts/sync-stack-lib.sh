@@ -24,8 +24,6 @@ say() { printf 'sync-stack-lib: %s\n' "$*"; }
 
 [ -f "$LIB_SRC" ] || die "canonical library not found at $LIB_SRC"
 
-root="$(cd "${HERE}/../.." && pwd)"
-
 targets=()
 if [ "${1:-}" = "--all" ]; then
   # Every sibling of the directory that holds this repo.
