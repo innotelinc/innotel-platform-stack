@@ -65,6 +65,7 @@ consumer.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -109,6 +110,38 @@ def sh(args: list[str], *, check: bool = True, input: bytes | None = None) -> su
 
 def docker(*args: str, check: bool = True, input: bytes | None = None) -> subprocess.CompletedProcess:
     return sh(["docker", *args], check=check, input=input)
+
+
+def docker_save_streamed(images: list[str], out_path: Path) -> None:
+    """`docker save` straight into a gzip file, one buffer at a time.
+
+    The obvious shape — collect `docker save`'s stdout, then gzip the bytes —
+    holds every layer of every image in RAM simultaneously. That is invisible
+    for a small stack and fatal for a big one: 24 images (capstone + zeus) is
+    more uncompressed data than this host has memory, and the pack was
+    OOM-killed mid-image, twice, with no traceback and no bundle — just a
+    staging directory. Streaming keeps memory flat and scales with the stack
+    instead of with the host.
+
+    stderr goes to a temp file, not a pipe: docker save is chatty when it
+    fails, and a full stderr pipe would block it while we are blocked reading
+    its stdout. The reader would wait on a writer that is waiting on the reader.
+    """
+    with tempfile.TemporaryFile() as errf:
+        proc = subprocess.Popen(["docker", "save", *images],
+                                stdout=subprocess.PIPE, stderr=errf)
+        with open(out_path, "wb") as fh:
+            # Images are already compressed layers; gzip buys little beyond the
+            # metadata, so level 1 keeps the CPU cost off the critical path.
+            with gzip.GzipFile(fileobj=fh, mode="wb", compresslevel=1) as gz:
+                assert proc.stdout is not None
+                shutil.copyfileobj(proc.stdout, gz, 1 << 20)
+            proc.stdout.close()
+        rc = proc.wait()
+        errf.seek(0)
+        detail = errf.read().decode(errors="replace").strip()[-400:]
+    if rc != 0:
+        raise SystemExit(f"command failed: docker save ({len(images)} image(s))\n{detail}")
 
 
 def digest_file(path: Path) -> str:
@@ -508,13 +541,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
             # and restore looks for images.tar.gz — calling it images.tar made
             # every bundle fail restore's member check.
             dst = tmp / "images.tar.gz"
-            result = docker("save", *images_to_save)
-            # gzip at level 1: images are already compressed layers, gzip mostly
-            # buys something only on the metadata
-            import gzip
-            with open(dst, "wb") as fh:
-                with gzip.GzipFile(fileobj=fh, mode="wb", compresslevel=1) as gz:
-                    gz.write(result.stdout)
+            docker_save_streamed(images_to_save, dst)
             members.append(("images.tar.gz", dst))
 
         # manifest with per-member hashes, so restore can prove the bundle
