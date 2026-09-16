@@ -610,6 +610,17 @@ def extract_bundle(archive: Path, workdir: Path) -> dict:
     return manifest
 
 
+def compose_understands(flag: str) -> bool:
+    """Whether this host's compose CLI knows a flag, asked once and remembered."""
+    if flag not in _COMPOSE_FLAGS:
+        help_text = docker("compose", "up", "--help", check=False).stdout.decode(errors="replace")
+        _COMPOSE_FLAGS[flag] = flag in help_text
+    return _COMPOSE_FLAGS[flag]
+
+
+_COMPOSE_FLAGS: dict[str, bool] = {}
+
+
 def existing_volumes(names: list[str]) -> list[str]:
     if not names:
         return []
@@ -776,9 +787,31 @@ def cmd_restore(args: argparse.Namespace) -> int:
             cmd = ["compose"]
             for f in rel_files:
                 cmd += ["-f", str(ROOT_DIR / f)]
-            cmd += ["up", "-d", "--no-deps", *sorted(services)]
+            cmd += ["up", "-d", "--no-deps"]
+            # A service declared with `pull_policy: build` (the dograh build
+            # overlay, capstone's n8n) rebuilds on every `up` — which on the
+            # destination means compiling from source for an image that just
+            # arrived in the bundle, and on a small host that build is what gets
+            # OOM-killed. The images came with the bundle, so there is nothing to
+            # build. Skipped when the pack deliberately omitted images
+            # (--no-images), where rebuilding IS the point.
+            if bundle.get("images") and compose_understands("--no-build"):
+                cmd.append("--no-build")
+            cmd += sorted(services)
             print(f"  up         {rel_dir}  [{len(services)} service(s)]")
-            docker(*cmd, check=False)
+            result = docker(*cmd, check=False)
+            if result.returncode != 0:
+                # Compose reports one bad service by failing the whole
+                # invocation and creating nothing, so a swallowed error here
+                # looks like a clean restore with a host that came up empty.
+                # Print the tail of what compose said; that is the whole
+                # diagnosis, and without it the only symptom is silence.
+                said = (result.stderr or b"") + b"\n" + (result.stdout or b"")
+                tail = [ln for ln in said.decode(errors="replace").splitlines() if ln.strip()][-10:]
+                print(f"  ⚠ {rel_dir}: compose up exited {result.returncode}", file=sys.stderr)
+                for line in tail:
+                    print(f"      {line}", file=sys.stderr)
+
 
         print()
         print("  done. Check:")
