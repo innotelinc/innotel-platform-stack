@@ -144,6 +144,27 @@ def docker_save_streamed(images: list[str], out_path: Path) -> None:
         raise SystemExit(f"command failed: docker save ({len(images)} image(s))\n{detail}")
 
 
+def run_streaming(args: list[str], *, src: Path, decompress: bool = False) -> None:
+    """Run a command with a file — optionally gzipped — as its stdin.
+
+    The obvious shape, ``input=src.read_bytes()``, holds the whole payload in
+    memory. For a database volume that is one volume's worth — survivable. For
+    ``docker load`` it is every image in the bundle at once, decompressed: more
+    than a small host has, and the failure is an OOM kill with no traceback and
+    a half-restored host. Reading the file straight into the child's stdin keeps
+    memory flat regardless of what is being moved.
+    """
+    with tempfile.TemporaryFile() as errf:
+        with open(src, "rb") as raw:
+            stream = gzip.GzipFile(fileobj=raw, mode="rb") if decompress else raw
+            proc = subprocess.run(args, stdin=stream, stdout=subprocess.DEVNULL,
+                                  stderr=errf)
+        errf.seek(0)
+        detail = errf.read().decode(errors="replace").strip()[-400:]
+    if proc.returncode != 0:
+        raise SystemExit(f"command failed: {' '.join(args)}\n{detail}")
+
+
 def digest_file(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -699,8 +720,8 @@ def cmd_restore(args: argparse.Namespace) -> int:
             # -i is load-bearing: the tar stream arrives on stdin and docker
             # drops it unless told to keep it, which once made every volume
             # restore "succeed" with an empty volume.
-            sh(["docker", "run", "--rm", "-i", "-v", f"{vol}:/dst", "alpine:3.20",
-                "tar", "xf", "-", "-C", "/dst"], input=src.read_bytes())
+            run_streaming(["docker", "run", "--rm", "-i", "-v", f"{vol}:/dst", "alpine:3.20",
+                           "tar", "xf", "-", "-C", "/dst"], src=src)
 
         # ── bind mounts inside the group dir ──
         for rel in bundle["binds_inside"]:
@@ -716,9 +737,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
         images_tar = workdir / "images.tar.gz"
         if images_tar.is_file():
             print(f"  images     loading {len(bundle['images'])} — the slow part")
-            import gzip
-            payload = gzip.decompress(images_tar.read_bytes())
-            docker("load", input=payload)
+            run_streaming(["docker", "load"], src=images_tar, decompress=True)
 
         # ── bring the group up, in the recorded order ──
         # Replay exactly what each container was created with: its -f list and
