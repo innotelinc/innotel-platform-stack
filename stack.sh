@@ -865,6 +865,12 @@ cmd_download() {
   fi
 }
 
+cmd_migrate() {
+  local sub="${1:?Usage: stack.sh migrate pack <group> --stop --out DIR | stack.sh migrate restore --in BUNDLE [--force]}"
+  shift
+  exec python3 "${STACK_DIR}/scripts/migrate-stack.py" "$sub" "$@"
+}
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 cmd="${1:-help}"
@@ -883,6 +889,7 @@ case "$cmd" in
   mesh)     cmd_mesh ;;
   discover) cmd_discover "$@" ;;
   register) cmd_register "$@" ;;
+  migrate)  cmd_migrate "$@" ;;
   help|--help|-h)
     echo -e "${BOLD}Innotel Platform Stack — Unified Orchestrator${NC}\n"
     echo -e "Usage: ./stack.sh <command> [args]\n"
@@ -907,6 +914,8 @@ case "$cmd" in
     echo "  mesh                  Start mesh network only"
     echo "  discover <service>    Find a service across all groups"
     echo "  register <svc> <addr> <port> [tags]  Register a service"
+    echo "  migrate pack <group> --stop --out DIR   Bundle a stack: volumes, envs, vault secrets, images"
+    echo "  migrate restore --in BUNDLE [--force]   Rebuild that stack here from the bundle"
     ;;
   *)
     err "Unknown command: $cmd"
