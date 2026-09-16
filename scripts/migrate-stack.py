@@ -51,7 +51,16 @@ Nothing here prints a secret: values are written to the bundle only.
 
 Usage:
   migrate-stack.py pack <group> --stop --out DIR [--no-images]
-  migrate-stack.py restore --in BUNDLE [--force] [--skip-volumes] [--dry-run]
+                     [--components monarch] [--exclude-services omniroute]
+  migrate-stack.py restore --in BUNDLE [--force] [--dry-run]
+
+A whole group moves by default. ``--components`` narrows it to named component
+directories inside the group, which is how a single product leaves a shared
+host: the group's other components, and the group-level compose file that
+defines the shared services, stay where they are. ``--exclude-services``
+leaves a named service running on the source host — for something the platform
+addresses by IP rather than by name, where moving it would silently break every
+consumer.
 """
 from __future__ import annotations
 
@@ -120,15 +129,27 @@ def group_dir(group: str) -> Path:
     return d
 
 
-def compose_projects(group_path: Path) -> list[dict]:
+def compose_projects(group_path: Path, components: list[str] | None = None) -> list[dict]:
     """Every compose file under the group dir, in a stable restore order.
 
     The group-level ``docker-compose.yml`` comes first (it usually defines the
     network the repos join); everything else follows path-sorted, so a repo's
     own stack starts after the mesh exists.
+
+    ``components`` narrows the result to those component subdirectories. The
+    group-level file is left out in that mode: it defines the group's *shared*
+    services (a gateway other components dial, a shared database) and its
+    networks, and nothing under a component directory needs it to come back —
+    every container in a scoped move was started from a component directory's
+    own compose file, which declares the networks it joins itself.
     """
     files = sorted(group_path.rglob("docker-compose*.yml"))
     files = [f for f in files if not any(part in SKIP_DIRS for part in f.parts)]
+    if components:
+        wanted = set(components)
+        files = [f for f in files
+                 if f.parent != group_path
+                 and f.relative_to(group_path).parts[0] in wanted]
     group_level = [f for f in files if f.parent == group_path]
     rest = [f for f in files if f.parent != group_path]
     ordered = group_level + rest
@@ -142,8 +163,15 @@ def compose_projects(group_path: Path) -> list[dict]:
     ]
 
 
-def group_containers(group_path: Path) -> list[dict]:
-    """Every compose-managed container whose project lives under this group dir."""
+def group_containers(group_path: Path, components: list[str] | None = None,
+                     exclude_services: list[str] | None = None) -> list[dict]:
+    """Every compose-managed container whose project lives under this group dir.
+
+    ``components`` keeps only containers whose compose dir sits under one of
+    those component directories; ``exclude_services`` drops named services —
+    used for a service that must stay behind on the source host (a platform
+    gateway other stacks dial by address, which cannot move with one stack).
+    """
     out = docker("ps", "-a", "--filter", "label=com.docker.compose.project", "-q")
     records = []
     for cid in out.stdout.decode().split():
@@ -151,10 +179,20 @@ def group_containers(group_path: Path) -> list[dict]:
         labels = inspect.get("Config", {}).get("Labels") or {}
         workdir = labels.get("com.docker.compose.project.working_dir", "")
         try:
-            under = Path(workdir).resolve().is_relative_to(group_path.resolve())
+            workdir_path = Path(workdir).resolve()
+            under = workdir_path.is_relative_to(group_path.resolve())
         except (ValueError, OSError):
             under = False
         if not under:
+            continue
+        if components:
+            try:
+                first = workdir_path.relative_to(group_path.resolve()).parts[0]
+            except (ValueError, OSError):
+                continue
+            if first not in set(components):
+                continue
+        if labels.get("com.docker.compose.service") in set(exclude_services or ()):
             continue
         mounts = []
         for m in inspect.get("Mounts", []):
@@ -162,6 +200,13 @@ def group_containers(group_path: Path) -> list[dict]:
                 mounts.append({"type": "volume", "name": m["Name"], "dest": m["Destination"]})
             elif m["Type"] == "bind":
                 mounts.append({"type": "bind", "source": m["Source"], "dest": m["Destination"]})
+        # The exact -f list this container was created with (compose records it
+        # as a comma-separated absolute list). Restore replays this list rather
+        # than every compose file that happens to sit in the directory: a repo
+        # carries alternate overlays and upstream dev stacks that were never
+        # part of the running deployment, and `up -d` on those would invent
+        # services the old host never ran.
+        config_files = [f for f in (labels.get("com.docker.compose.project.config_files") or "").split(",") if f]
         records.append({
             "name": inspect["Name"].lstrip("/"),
             "project": labels.get("com.docker.compose.project", ""),
@@ -170,15 +215,22 @@ def group_containers(group_path: Path) -> list[dict]:
             "running": inspect.get("State", {}).get("Running", False),
             "mounts": mounts,
             "compose_dir": workdir,
+            "compose_files": config_files,
         })
     return records
 
 
-def env_files(group_path: Path) -> list[Path]:
+def env_files(group_path: Path, components: list[str] | None = None) -> list[Path]:
     found = []
     for p in sorted(group_path.rglob(".env")):
         if any(part in SKIP_DIRS for part in p.parts):
             continue
+        if components:
+            rel_parts = p.relative_to(group_path).parts
+            # A group-level .env is shared config for every component, so it
+            # still travels when a subset moves.
+            if len(rel_parts) > 1 and rel_parts[0] not in set(components):
+                continue
         found.append(p)
     root_env = REPO_ROOT / ".env"
     if root_env.is_file():
@@ -327,12 +379,19 @@ def cmd_pack(args: argparse.Namespace) -> int:
     out_dir = Path(args.out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    components = [c.strip() for c in (args.components or "").split(",") if c.strip()]
+    exclude_services = [s.strip() for s in (args.exclude_services or "").split(",") if s.strip()]
+
     gnum = args.group.lstrip("-")
     gname = GROUPS[gnum]
-    container_records = group_containers(group_path)
-    projects = compose_projects(group_path)
+    container_records = group_containers(group_path, components, exclude_services)
+    projects = compose_projects(group_path, components)
 
     print(f"group {gnum}-{gname}: {group_path}")
+    if components:
+        print(f"  components    : {', '.join(components)}")
+    if exclude_services:
+        print(f"  left behind   : {', '.join(exclude_services)} (not packed, not stopped)")
     print(f"  compose files : {len(projects)}")
     print(f"  containers    : {len(container_records)} ({sum(1 for c in container_records if c['running'])} running)")
 
@@ -346,7 +405,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
             docker("stop", name)
         # wait for them to actually exit
         for _ in range(30):
-            still = [c for c in group_containers(group_path) if c["running"]]
+            still = [c for c in group_containers(group_path, components, exclude_services) if c["running"]]
             if not still:
                 break
             time.sleep(1)
@@ -366,7 +425,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
         print(f"    ⚠ outside bind mount, migrate by hand: {src}")
 
     # ── env files + vault secrets ──
-    envs = env_files(group_path)
+    envs = env_files(group_path, components)
     all_refs = {}
     for e in envs:
         refs = vault_refs(e)
@@ -398,6 +457,8 @@ def cmd_pack(args: argparse.Namespace) -> int:
         "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "group": gnum,
         "group_name": gname,
+        "components": components,
+        "excluded_services": exclude_services,
         "source_host": socket.gethostname(),
         "source_root": str(ROOT_DIR),
         "projects": projects,
@@ -633,14 +694,45 @@ def cmd_restore(args: argparse.Namespace) -> int:
             docker("load", input=payload)
 
         # ── bring the group up, in the recorded order ──
-        print()
-        for project in bundle["projects"]:
-            proj_dir = ROOT_DIR / project["dir"]
-            if not (proj_dir / project["file"]).is_file():
-                print(f"  ⚠ {project['path']} does not exist on this host — check out the repo first", file=sys.stderr)
+        # Replay exactly what each container was created with: its -f list and
+        # its own service names. That is what keeps a service deliberately left
+        # behind on the source host from coming back here, keeps an overlay in
+        # its right place, and keeps an unused compose file in the repo from
+        # starting anything. --no-deps stops compose pulling in a dependency
+        # that is not part of this move. Paths are relative to the source root,
+        # because the two hosts need not share a checkout path.
+        source_root = Path(bundle.get("source_root") or ROOT_DIR)
+
+        def _rel(p: str) -> str:
+            try:
+                return str(Path(p).relative_to(source_root))
+            except (ValueError, OSError):
+                return p
+
+        plans: dict[tuple[str, tuple[str, ...]], list[str]] = {}
+        for c in bundle["containers"]:
+            if not c.get("service") or not c.get("compose_dir"):
                 continue
-            print(f"  up         {project['path']}")
-            docker("compose", "-f", str(proj_dir / project["file"]), "up", "-d", check=False)
+            key = (_rel(c["compose_dir"]), tuple(_rel(f) for f in (c.get("compose_files") or [])))
+            services = plans.setdefault(key, [])
+            if c["service"] not in services:
+                services.append(c["service"])
+
+        print()
+        for (rel_dir, rel_files), services in plans.items():
+            if not rel_files:
+                print(f"  ⚠ {rel_dir}: packed container(s) carry no compose file list — start by hand", file=sys.stderr)
+                continue
+            missing = [f for f in rel_files if not (ROOT_DIR / f).is_file()]
+            if missing:
+                print(f"  ⚠ {rel_dir}: missing {', '.join(missing)} — check out the repo first", file=sys.stderr)
+                continue
+            cmd = ["compose"]
+            for f in rel_files:
+                cmd += ["-f", str(ROOT_DIR / f)]
+            cmd += ["up", "-d", "--no-deps", *sorted(services)]
+            print(f"  up         {rel_dir}  [{len(services)} service(s)]")
+            docker(*cmd, check=False)
 
         print()
         print("  done. Check:")
@@ -663,6 +755,12 @@ def main() -> int:
     p_pack.add_argument("--stop", action="store_true", help="stop running containers first (consistent databases)")
     p_pack.add_argument("--live", action="store_true", help="pack while containers run (risky for DBs)")
     p_pack.add_argument("--no-images", action="store_true", help="skip docker save; restore rebuilds/pulls")
+    p_pack.add_argument("--components", metavar="A,B",
+                       help="move only these component directories of the group "
+                            "(e.g. monarch from group 3, or capstone,zeus from group 2)")
+    p_pack.add_argument("--exclude-services", metavar="SVC,...",
+                       help="leave these services behind (kept running on this host, "
+                            "not packed) — for a shared service other stacks dial by address")
     p_pack.set_defaults(func=cmd_pack)
 
     p_restore = sub.add_parser("restore", help="restore a bundle onto this host")
