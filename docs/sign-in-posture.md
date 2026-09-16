@@ -333,3 +333,39 @@ The one host still on a non-canonical image mix on purpose: Capstone's
 `docker-compose.dograh-build.yml` is only applied to the UI. Recreating the API
 from that override swaps it to the local build — pass `--no-build` if you ever
 do, or the override triggers a full source build.
+
+## 5. Live audit after the split (2026-09-16)
+
+Re-checked against the hosts the stacks actually run on — `.46` (primary + edge),
+`.30` (voice), `.50` (factory), `.56` (media) — rather than against the files.
+
+**Cerulean Authentik is the only login on every service, and no service's own
+login form is reachable off its own host.** What that rests on, per surface:
+
+| Surface | Why the form is unreachable |
+|---|---|
+| The media apps (`radarr`, `sonarr`, `lidarr`, `whisparr`, `bazarr`, `prowlarr`, `qbittorrent`, `sabnzbd`, `jellyseerr`) | each app is bound to `127.0.0.1:<port>` and runs `AuthenticationMethod=External` — the app has **no login of its own**, and the only LAN-listening door is its `oauth2-proxy` gateway on `14001`–`14009` |
+| `n8n`, `grist`, `signoz`, `workflow-studio`, FreePBX/AvantFax, Technitium | fronted by their gateway on `14010`–`14015`; the upstream is loopback or a container name, never a published port |
+| First-party apps (Magnate, Cerulean, Distro, Studio, Zeus portal, Rizz Aura, Capstone dashboard) | password path refuses unless `BREAKGLASS_LOGIN=1` is set **on that app's own host** (Zeus: `AUTH_MODE`); Studio has no local path at all |
+| NPM Edge admin UI | `cameFromEdge()` + `identityAllowed()` gate `POST /tokens/sso`, and `passwordGrantAllowed()` refuses `POST /tokens` on every edge request — a password grant from inside the edge returns 401 (verified: it is what stops a scripted edge edit without the SSO route) |
+| Vault, Jellyfin, Homarr, Dograh, OmniRoute dashboard | Vault via native OIDC (group-bound role); Jellyfin via the **Cerulean LDAP outpost** so only Cerulean identities exist; Homarr and Dograh OIDC-only; the gateway dashboard behind `olympus-gateway-sso` |
+
+### Two surfaces still present a form, and why that is a decision, not a gap
+
+1. **Jellyfin** — its login form is the LDAP bind: the fields are Cerulean
+   credentials and a disabled Authentik user cannot sign in, but the page itself
+   is still a form. Removing it means fronting Jellyfin with an `oauth2-proxy`
+   gateway and binding `8096` to loopback — which also removes the path the
+   **native TV/mobile clients** use, because they speak the Jellyfin API rather
+   than a browser OIDC flow. Web-only access can be made form-free; native
+   clients cannot. That trade-off is the owner's call, not a script's.
+2. **FreePBX/AvantFax** — the GUI is already loopback-only and reachable only
+   through `pbx-sso`. Its local admin login is the **only** recovery path when
+   Authentik or the gateway is down (short of `fwconsole` over SSH); deleting it
+   is a break-glass decision.
+
+Two smaller reachable forms remain on `.56` for services with no gateway yet —
+`clipbucket` (`:8098`) and `requestrr` (`:4545`). Both are fronted by nothing, so
+they are LAN-reachable with their own logins. Either give them a gateway the way
+the other nine have one, or bind them to loopback once the edge fronts a gateway
+port.

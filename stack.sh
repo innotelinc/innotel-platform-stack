@@ -48,43 +48,49 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 # ── Group definitions ─────────────────────────────────────────────────────────
 declare -A STACK_GROUPS=(
-  [1]="primary|Cerulean + AthenIQ + Magnate + Signara|~10 GiB"
+  [1]="primary|Cerulean + AthenIQ + Magnate + Signara + NPM Edge|~10 GiB"
   [2]="voice|Capstone + Zeus + OmniRoute|~6 GiB"
-  [3]="media|Monarch (Jellyfin + *arr + NPM) + PLUTUS|~10 GiB"
+  [3]="media|Monarch (Jellyfin + *arr) + PLUTUS|~10 GiB"
   [4]="social|Rizzaura + ONYX|~6 GiB"
   [5]="dev|Atlas + Oasis + Distro + Olympus|~8 GiB"
 )
 
 # ── Component registry ─────────────────────────────────────────────────────────
 # Every stack component, the repository it comes from, and the checkout
-# directory the group compose files expect (they build from `../../../<dir>`, so
-# components live as siblings of this repo). `stack.sh download` clones/updates
-# them; `stack.sh up <component>` resolves a component to its hosting group.
+# directory the group compose files expect. The migration moved every repo *into*
+# its group dir (`<n>-<group>/<repo>`), so the checkout dir is group-relative —
+# `<parent-of-stack>/<dir>` is the real path, not the pre-migration flat sibling
+# (`cerulean-dns-platform`, `zeus-pbx-platform`, …) those names used to be.
+# `stack.sh download` clones/updates them; `stack.sh up <component>` resolves a
+# component to its hosting group; `stack.sh verify` checks the checkout is where
+# the group compose builds from.
 #
 #   name → "<owner/repo>|<checkout dir>|<group>|<branch>|<description>"
 #
 # A component with an empty group is download-only (no compose services).
 declare -A STACK_COMPONENTS=(
-  [cerulean]="innotelinc/cerulean|cerulean-dns-platform|1|main|TrustOps — Authentik SSO, Infisical, Vault, DNS + certs"
-  [atheniq]="innotelinc/atheniq|atheniq|1|main|LearningOps — Open edX LMS (tutor-managed)"
-  [magnate]="innotelinc/jellyfin-subscription-platform|magnate-subscription-platform|1|main|RevenueOps — billing and subscriptions"
-  [signara]="innotelinc/signara|signara-trust-platform|1|main|DocumentOps — signing and audit"
-  [capstone]="innotelinc/capstone|capstone-voice-aiagent-platform|2|main|AgentOps — voice AI agents over Zeus"
-  [zeus]="innotelinc/zeus|zeus-pbx-platform|2|main|VoiceOps — PBX, VoIP, SMS"
-  [monarch]="innotelinc/monarch|monarch-media-platform|3|main|MediaOps — streaming, media libraries, *arr"
-  [plutus]="innotelinc/plutus|plutus|3|main|VideoOps — AI shopping channel (Convex + ffmpeg)"
-  [npm]="innotelinc/npm|npm|3|develop|EdgeOps — NPM edge (proxy hosts, TLS termination)"
-  [rizzaura]="innotelinc/rizzaura-platform|rizzaura-platform|4|main|CommunityOps — leaderboards and reputation"
-  [onyx]="innotelinc/onyx-oss-platform|onyx-oss-platform|4|main|StorageOps — object storage, backups, snapshots"
-  [atlas]="innotelinc/atlas|atlas|5|main|CodeOps — Gitea, Chef, Convex, CI"
-  [oasis]="innotelinc/oasis|oasis-mail-platform|5|main|MailOps — mail, calendar, contacts"
-  [distro]="innotelinc/distro|distro|5|main|BuilderOps — in-browser AI app builder"
-  [olympus]="innotelinc/olympus|olympus|5|main|FactoryOps — issue → validated PR factory"
-  [zapit]="innotelinc/zapit|zapit||main|TransferOps — ephemeral P2P transfer (no group)"
+  [cerulean]="innotelinc/cerulean|1-primary/cerulean|1|main|TrustOps — Authentik SSO, Cerulean Vault, DNS + certs"
+  [atheniq]="innotelinc/atheniq|1-primary/atheniq|1|main|LearningOps — Open edX LMS (tutor-managed)"
+  [magnate]="innotelinc/magnate|1-primary/magnate|1|main|RevenueOps — billing and subscriptions"
+  [signara]="innotelinc/signara|1-primary/signara|1|main|DocumentOps — signing and audit"
+  [sign]="innotelinc/sign|1-primary/sign|1|main|DocumentOps — e-signature stopgap (OpenSign fork) at sign.innotel.us"
+  [verifier]="innotelinc/verifier|1-primary/verifier|1|main|PlatformOps — conformity + attribution guard tooling"
+  [npm]="innotelinc/npm|1-primary/npm|1|develop|EdgeOps — NPM edge (proxy hosts, TLS termination)"
+  [capstone]="innotelinc/capstone|2-voice/capstone|2|main|AgentOps — voice AI agents over Zeus"
+  [zeus]="innotelinc/zeus|2-voice/zeus|2|master|VoiceOps — PBX, VoIP, SMS"
+  [monarch]="innotelinc/monarch|3-media/monarch|3|main|MediaOps — streaming, media libraries, *arr"
+  [plutus]="innotelinc/plutus|3-media/plutus|3|main|VideoOps — AI shopping channel (Convex + ffmpeg)"
+  [rizzaura]="innotelinc/rizzaura|4-social/rizzaura|4|main|CommunityOps — leaderboards and reputation"
+  [onyx]="innotelinc/onyx|4-social/onyx|4|main|StorageOps — object storage, backups, snapshots"
+  [zapit]="innotelinc/zapit|4-social/zapit||main|TransferOps — ephemeral P2P transfer (no group)"
+  [atlas]="innotelinc/atlas|5-dev/atlas|5|main|CodeOps — Gitea, Convex, CI"
+  [oasis]="innotelinc/oasis|5-dev/oasis|5|master|MailOps — mail, calendar, contacts"
+  [distro]="innotelinc/distro|5-dev/distro|5|main|BuilderOps — in-browser AI app builder"
+  [olympus]="innotelinc/olympus|5-dev/olympus|5|main|FactoryOps — issue → validated PR factory"
 )
 
 # `download all` order — bash associative arrays are unordered, so keep a list.
-STACK_COMPONENT_ORDER="cerulean atheniq magnate signara capstone zeus monarch plutus npm rizzaura onyx atlas oasis distro olympus zapit"
+STACK_COMPONENT_ORDER="cerulean atheniq magnate signara sign verifier npm capstone zeus monarch plutus rizzaura onyx zapit atlas oasis distro olympus"
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 info()  { echo -e "${BLUE}[info]${NC}  $*"; }
@@ -177,11 +183,19 @@ export_group_env() {
     export CONSUL_SERVER_ADDR="$consul_addr"
   fi
 
-  # Registry address for service registration/discovery (mesh IP of Consul)
+  # Registry address for service registration/discovery (mesh IP of Consul).
+  # With no .env entry the mesh IP reads back empty, and "${ip}:8500" becomes
+  # ":8500" — a host-less URL every consul-reg companion resolves nowhere, so
+  # registrations fail silently and `discover`/Consul DNS just comes up empty.
+  # Fall back to the mesh network's own name instead of exporting garbage.
   local registry_mesh_ip
   registry_mesh_ip=$(get_mesh_ip 1)
-  export REGISTRY_ADDR="${registry_mesh_ip}:8500"
-  export CONSUL="$REGISTRY_ADDR"
+  if [ -n "$registry_mesh_ip" ]; then
+    export REGISTRY_ADDR="${registry_mesh_ip}:8500"
+  else
+    export REGISTRY_ADDR="${REGISTRY_ADDR:-mesh-consul:8500}"
+  fi
+  export CONSUL="${CONSUL:-$REGISTRY_ADDR}"
 }
 
 ensure_env() {

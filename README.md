@@ -243,6 +243,17 @@ clones them as siblings of the checkout — see
 | 4 | social | `./stack.sh download rizzaura onyx` |
 | 5 | dev | `./stack.sh download atlas oasis distro olympus` |
 
+Where each group actually runs today, and what it needs from the others (a
+group dir holds only the repos that run there — the rest are reached over the
+LAN/mesh by address, never by a second copy):
+
+| Host | Group(s) | Also runs |
+|---|---|---|
+| `192.168.1.46` (primary + edge) | 1, 4 | Cerulean (Authentik + Vault), AthenIQ, Magnate, Signara, the NPM edge, Atlas, Distro, ONYX, Rizz Aura, zapit — and the **one** OmniRoute gateway on `:20128`, which every other box consumes by address |
+| `192.168.1.30` | 2 (voice) | Capstone (26 services) and Zeus (`docker-compose.full.yml`: FreePBX, portal, coturn) |
+| `192.168.1.50` | 5 (factory half) | Olympus + Studio + its gateway and sites; tenancy stays on Distro at `.46:20140` |
+| `192.168.1.56` | 3 (media) | Monarch (Jellyfin, *arr, downloaders, media SSO gateways) |
+
 A single-box deployment (`./stack.sh up all`) needs every component:
 `./stack.sh download all`. `zapit` (TransferOps) belongs to no group — download
 it on its own when you want to run it.
@@ -640,6 +651,16 @@ Rules that hold in both:
    organization; secrets in Cerulean Vault are scope-limited to each product's path.
 5. **Network boundary** — internal APIs (recommendations, health, secrets) stay
    unpublished; only canonical subdomains are proxied.
+6. **Sign-in boundary** — **Cerulean Authentik is the only login, on every
+   service, with no local login form anywhere in the stack.** Third-party apps
+   that ship their own login are fronted by an `oauth2-proxy` gateway and run
+   with their own auth switched off (`AuthenticationMethod=External` for the
+   *arr and downloader apps), first-party apps refuse their password path
+   unless `BREAKGLASS_LOGIN=1` is set on their own host, and the apps' own ports
+   are bound to loopback so the form is not reachable even on the LAN. The
+   per-service evidence — every gateway, every open path, every break-glass — is
+   in [docs/sign-in-posture.md](docs/sign-in-posture.md) and is re-checked by
+   `./stack.sh verify`-adjacent tests rather than trusted.
 6. **Commit boundary** — the attribution guard runs locally and in CI on every
    repository: no credit to anyone but the project owner.
 

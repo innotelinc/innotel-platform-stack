@@ -50,3 +50,32 @@ jobs:
           grep -qi '<title>' "$f" || { echo "::error::landing has no <title>"; exit 1; }
           grep -qi 'og:title' "$f" || { echo "::error::landing has no og:title"; exit 1; }
           echo "landing: ok"
+
+  scripts:
+    name: Shell and script checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Bash syntax
+        run: |
+          set -euo pipefail
+          for f in stack.sh scripts/*.sh; do bash -n "$f"; done
+          echo "bash -n: ok"
+
+      - name: shellcheck
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning stack.sh scripts/*.sh
+          echo "shellcheck: ok"
+
+      # The migration tool's unit tests cover what moves: declared services,
+      # the restore plans, vault references and the streaming pack paths.
+      # Docker is faked at the module boundary, so no daemon is needed here.
+      - name: migrate-stack tests
+        run: python3 -m unittest discover -s scripts/tests -t scripts/tests -v
+
+      - name: Python syntax
+        run: python3 -m py_compile scripts/*.py scripts/tests/*.py
