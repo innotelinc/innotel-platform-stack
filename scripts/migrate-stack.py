@@ -40,9 +40,15 @@ WHAT IT MOVES, and why each thing is the thing it is:
 
 Restore brings the group up with ``docker compose up -d`` in the recorded
 order, against the restored volumes and env files, and finishes with a status
-summary. It refuses to overwrite existing volumes or env files without
-``--force`` — a bundle unpacked over a live deployment is exactly the
-"mix two deployments" mistake the Studio migration tool refuses.
+summary. It starts what each compose file **declares**, not only the containers
+the source host happened to be running: a service that never got a container
+there (build-on-first-up, a one-shot initializer, something simply never
+started) has no container record to replay, and a restore that only replayed
+containers would come back looking complete with those services absent. A
+service still not up at the end is named rather than implied. It refuses to
+overwrite existing volumes or env files without ``--force`` — a bundle unpacked
+over a live deployment is exactly the "mix two deployments" mistake the Studio
+migration tool refuses.
 
 The bundle is one tarball plus a manifest with SHA-256 per member, so ``restore``
 can prove what it is about to write is what was packed.
@@ -112,36 +118,43 @@ def docker(*args: str, check: bool = True, input: bytes | None = None) -> subpro
     return sh(["docker", *args], check=check, input=input)
 
 
-def docker_save_streamed(images: list[str], out_path: Path) -> None:
-    """`docker save` straight into a gzip file, one buffer at a time.
+def stream_to_file(args: list[str], out_path: Path, *, compress: bool) -> None:
+    """Run a command and stream its stdout straight into a file.
 
-    The obvious shape — collect `docker save`'s stdout, then gzip the bytes —
-    holds every layer of every image in RAM simultaneously. That is invisible
-    for a small stack and fatal for a big one: 24 images (capstone + zeus) is
-    more uncompressed data than this host has memory, and the pack was
-    OOM-killed mid-image, twice, with no traceback and no bundle — just a
-    staging directory. Streaming keeps memory flat and scales with the stack
-    instead of with the host.
+    The obvious shape — collect the process output, then write it — holds the
+    whole payload in RAM. That is invisible for a small stack and fatal for a
+    big one: 24 images (capstone + zeus) is more uncompressed data than this
+    host has memory, and a database volume tar is one volume's worth at a time.
+    Streaming keeps memory flat and scales with the stack instead of with the
+    host.
 
-    stderr goes to a temp file, not a pipe: docker save is chatty when it
-    fails, and a full stderr pipe would block it while we are blocked reading
-    its stdout. The reader would wait on a writer that is waiting on the reader.
+    stderr goes to a temp file, not a pipe: these commands are chatty when they
+    fail, and a full stderr pipe would block the writer while we are blocked
+    reading its stdout. The reader would wait on a writer that is waiting on the
+    reader.
     """
     with tempfile.TemporaryFile() as errf:
-        proc = subprocess.Popen(["docker", "save", *images],
-                                stdout=subprocess.PIPE, stderr=errf)
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=errf)
+        assert proc.stdout is not None
         with open(out_path, "wb") as fh:
-            # Images are already compressed layers; gzip buys little beyond the
-            # metadata, so level 1 keeps the CPU cost off the critical path.
-            with gzip.GzipFile(fileobj=fh, mode="wb", compresslevel=1) as gz:
-                assert proc.stdout is not None
-                shutil.copyfileobj(proc.stdout, gz, 1 << 20)
-            proc.stdout.close()
+            if compress:
+                # Already-compressed payloads (image layers) gain little from
+                # gzip; level 1 keeps the CPU cost off the critical path.
+                with gzip.GzipFile(fileobj=fh, mode="wb", compresslevel=1) as gz:
+                    shutil.copyfileobj(proc.stdout, gz, 1 << 20)
+            else:
+                shutil.copyfileobj(proc.stdout, fh, 1 << 20)
+        proc.stdout.close()
         rc = proc.wait()
         errf.seek(0)
         detail = errf.read().decode(errors="replace").strip()[-400:]
     if rc != 0:
-        raise SystemExit(f"command failed: docker save ({len(images)} image(s))\n{detail}")
+        raise SystemExit(f"command failed: {' '.join(args)}\n{detail}")
+
+
+def docker_save_streamed(images: list[str], out_path: Path) -> None:
+    """`docker save` straight into a gzip file, one buffer at a time."""
+    stream_to_file(["docker", "save", *images], out_path, compress=True)
 
 
 def run_streaming(args: list[str], *, src: Path, decompress: bool = False) -> None:
@@ -215,6 +228,63 @@ def compose_projects(group_path: Path, components: list[str] | None = None) -> l
         }
         for f in ordered
     ]
+
+
+def compose_declared_services(compose_files: list[str]) -> list[str]:
+    """The services one `docker compose -f …` invocation would start.
+
+    `config --services` resolves profiles against the file's own environment,
+    so a service behind `profiles: [legacy]` is left out — which is the point:
+    it was never part of the running deployment. An empty list means the file
+    could not be rendered here (missing env, a bad overlay); the caller falls
+    back to the containers it actually saw.
+    """
+    cmd = ["compose"]
+    for f in compose_files:
+        cmd += ["-f", f]
+    cmd += ["config", "--services"]
+    result = docker(*cmd, check=False)
+    if result.returncode != 0:
+        return []
+    return sorted({ln.strip() for ln in result.stdout.decode(errors="replace").splitlines() if ln.strip()})
+
+
+def declared_services(container_records: list[dict]) -> list[dict]:
+    """What each used compose file declares, keyed like the restore's plans.
+
+    One entry per distinct `-f` list a container on this host was created with,
+    so overlays are captured exactly as they were used. This is what lets a
+    restore bring up a service that never got a container on the source host —
+    build-on-first-up, a one-shot initializer, or something simply never
+    started: replaying containers alone leaves those behind with no error.
+    """
+    out: list[dict] = []
+    seen = set()
+    for c in container_records:
+        files = c.get("compose_files") or []
+        if not files:
+            continue
+        key = (c["compose_dir"], tuple(files))
+        if key in seen:
+            continue
+        seen.add(key)
+        services = compose_declared_services(files)
+        if services:
+            out.append({"compose_dir": c["compose_dir"], "compose_files": files,
+                        "services": services})
+    return out
+
+
+def compose_existing_services(compose_files: list[str]) -> set[str]:
+    """Service names that have a container for this `-f` list, running or not."""
+    cmd = ["compose"]
+    for f in compose_files:
+        cmd += ["-f", f]
+    cmd += ["ps", "-a", "--format", "{{.Service}}"]
+    result = docker(*cmd, check=False)
+    if result.returncode != 0:
+        return set()
+    return {ln.strip() for ln in result.stdout.decode(errors="replace").splitlines() if ln.strip()}
 
 
 def group_containers(group_path: Path, components: list[str] | None = None,
@@ -412,17 +482,18 @@ def collect_vault_secrets(all_refs: dict[str, dict[str, str]], creds) -> dict:
 
 
 def tar_volume(volume: str, out_path: Path) -> None:
-    """Tar a named volume read-only, streaming from a throwaway alpine container."""
-    result = docker("run", "--rm", "-v", f"{volume}:/src:ro", "alpine:3.20",
-                    "tar", "cf", "-", "-C", "/src", ".")
-    with open(out_path, "wb") as fh:
-        fh.write(result.stdout)
+    """Tar a named volume read-only, streaming from a throwaway alpine container.
+
+    Streamed for the same reason `docker save` is: buffering the tar holds the
+    whole database in memory on the host that is already the small one.
+    """
+    stream_to_file(["docker", "run", "--rm", "-v", f"{volume}:/src:ro", "alpine:3.20",
+                    "tar", "cf", "-", "-C", "/src", "."], out_path, compress=False)
 
 
 def tar_tree(source: Path, out_path: Path) -> None:
-    result = sh(["tar", "cf", "-", "-C", str(source.parent), source.name])
-    with open(out_path, "wb") as fh:
-        fh.write(result.stdout)
+    stream_to_file(["tar", "cf", "-", "-C", str(source.parent), source.name],
+                   out_path, compress=False)
 
 
 # ── pack ──────────────────────────────────────────────────────────────────────
@@ -440,6 +511,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
     gname = GROUPS[gnum]
     container_records = group_containers(group_path, components, exclude_services)
     projects = compose_projects(group_path, components)
+    service_sets = declared_services(container_records)
 
     print(f"group {gnum}-{gname}: {group_path}")
     if components:
@@ -448,6 +520,17 @@ def cmd_pack(args: argparse.Namespace) -> int:
         print(f"  left behind   : {', '.join(exclude_services)} (not packed, not stopped)")
     print(f"  compose files : {len(projects)}")
     print(f"  containers    : {len(container_records)} ({sum(1 for c in container_records if c['running'])} running)")
+
+    # A service the compose files declare whose container does not exist here was
+    # never started on this host. It has no container record to replay, so name
+    # it now: the restore is what brings it up, and a pack that stayed quiet
+    # about it would make the gap look like it was never there.
+    declared = {svc for s in service_sets for svc in s["services"]}
+    packed_services = {c["service"] for c in container_records}
+    absent = sorted(declared - packed_services - set(exclude_services))
+    if absent:
+        print(f"  declared      : {len(absent)} service(s) have no container here; restore starts them")
+        print(f"                  {', '.join(absent)}")
 
     # ── stop the group so database files are consistent ──
     running = [c["name"] for c in container_records if c["running"]]
@@ -517,6 +600,7 @@ def cmd_pack(args: argparse.Namespace) -> int:
         "source_root": str(ROOT_DIR),
         "projects": projects,
         "containers": container_records,
+        "service_sets": service_sets,
         "volumes": volume_names,
         "binds_inside": bind_inside,
         "binds_outside": bind_outside,
@@ -629,6 +713,49 @@ def existing_volumes(names: list[str]) -> list[str]:
     return [n for n in names if n in present]
 
 
+def build_restore_plans(bundle: dict, rel) -> tuple[dict[tuple[str, tuple[str, ...]], list[str]], set[str]]:
+    """The `-f` list and services each restore `up` should be run with.
+
+    Keys are ``(compose dir, compose file list)``, both relative to the source
+    root, in the order the containers were recorded — the order compose brings a
+    group back up in. Values are the services to name on the `up`.
+
+    Starts from the containers the source host actually had, then adds back the
+    services the compose files *declare* but that never got a container there:
+    build-on-first-up, a one-shot initializer, anything simply never started.
+    Those have no container record to replay, and a restore that only replayed
+    containers would come back looking complete with them absent — no container,
+    and so nothing to report. ``excluded_services`` is dropped from both: those
+    are meant to remain on the source host.
+
+    Returns the plans and the set of services that came from a container, which
+    is what says whether ``--no-build`` is safe for a plan (everything it starts
+    arrived in the bundle).
+    """
+    excluded = set(bundle.get("excluded_services") or ())
+    containers = bundle.get("containers") or []
+    packed_services = {c.get("service") for c in containers}
+    plans: dict[tuple[str, tuple[str, ...]], list[str]] = {}
+    for c in containers:
+        if not c.get("service") or not c.get("compose_dir"):
+            continue
+        key = (rel(c["compose_dir"]), tuple(rel(f) for f in (c.get("compose_files") or [])))
+        services = plans.setdefault(key, [])
+        if c["service"] not in excluded and c["service"] not in services:
+            services.append(c["service"])
+    for s in bundle.get("service_sets") or []:
+        files = s.get("compose_files") or []
+        if not files:
+            continue
+        key = (rel(s["compose_dir"]), tuple(rel(f) for f in files))
+        services = plans.setdefault(key, [])
+        for svc in s.get("services") or []:
+            if svc in excluded or svc in services:
+                continue
+            services.append(svc)
+    return plans, packed_services
+
+
 def cmd_restore(args: argparse.Namespace) -> int:
     archive = Path(args.archive).resolve()
     if not archive.is_file():
@@ -644,6 +771,9 @@ def cmd_restore(args: argparse.Namespace) -> int:
         for p in bundle["projects"]:
             print(f"    {p['path']}")
         print(f"  containers       : {len(bundle['containers'])}")
+        declared = sorted({svc for s in (bundle.get("service_sets") or []) for svc in (s.get("services") or [])})
+        if declared:
+            print(f"  declared services: {len(declared)} (restore starts these, not only the packed containers)")
         print(f"  volumes          : {len(bundle['volumes'])}")
         print(f"  env files        : {len(bundle['env_files'])}")
         print(f"  vault secret paths: {len((bundle.get('vault') or {}).get('secrets') or {})}")
@@ -766,17 +896,13 @@ def cmd_restore(args: argparse.Namespace) -> int:
             except (ValueError, OSError):
                 return p
 
-        plans: dict[tuple[str, tuple[str, ...]], list[str]] = {}
-        for c in bundle["containers"]:
-            if not c.get("service") or not c.get("compose_dir"):
-                continue
-            key = (_rel(c["compose_dir"]), tuple(_rel(f) for f in (c.get("compose_files") or [])))
-            services = plans.setdefault(key, [])
-            if c["service"] not in services:
-                services.append(c["service"])
+        plans, packed_services = build_restore_plans(bundle, _rel)
 
         print()
+        not_up: list[tuple[str, str]] = []
         for (rel_dir, rel_files), services in plans.items():
+            if not services:  # every service here was excluded from the move
+                continue
             if not rel_files:
                 print(f"  ⚠ {rel_dir}: packed container(s) carry no compose file list — start by hand", file=sys.stderr)
                 continue
@@ -784,6 +910,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
             if missing:
                 print(f"  ⚠ {rel_dir}: missing {', '.join(missing)} — check out the repo first", file=sys.stderr)
                 continue
+            added = [s for s in services if s not in packed_services]
             cmd = ["compose"]
             for f in rel_files:
                 cmd += ["-f", str(ROOT_DIR / f)]
@@ -794,8 +921,10 @@ def cmd_restore(args: argparse.Namespace) -> int:
             # arrived in the bundle, and on a small host that build is what gets
             # OOM-killed. The images came with the bundle, so there is nothing to
             # build. Skipped when the pack deliberately omitted images
-            # (--no-images), where rebuilding IS the point.
-            if bundle.get("images") and compose_understands("--no-build"):
+            # (--no-images), where rebuilding IS the point — and when a service
+            # here was never packed, so its image was never saved and building it
+            # is the only way it comes back.
+            if not added and bundle.get("images") and compose_understands("--no-build"):
                 cmd.append("--no-build")
             cmd += sorted(services)
             print(f"  up         {rel_dir}  [{len(services)} service(s)]")
@@ -811,7 +940,20 @@ def cmd_restore(args: argparse.Namespace) -> int:
                 print(f"  ⚠ {rel_dir}: compose up exited {result.returncode}", file=sys.stderr)
                 for line in tail:
                     print(f"      {line}", file=sys.stderr)
+            # A service compose accepted but created nothing for is the failure
+            # mode this whole list exists to prevent: it is exactly the service
+            # the source host was never running, so it has to be reported or the
+            # restore is indistinguishable from one that moved everything.
+            existing = compose_existing_services([str(ROOT_DIR / f) for f in rel_files])
+            for svc in services:
+                if svc not in existing:
+                    not_up.append((rel_dir, svc))
 
+        if not_up:
+            print(f"\n  {len(not_up)} service(s) did not come up:", file=sys.stderr)
+            for rel_dir, svc in not_up:
+                print(f"    {svc}  ({rel_dir})", file=sys.stderr)
+            print("      re-run the up by hand in that directory to see why.", file=sys.stderr)
 
         print()
         print("  done. Check:")

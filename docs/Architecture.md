@@ -28,23 +28,20 @@ container) and connects via a WireGuard mesh overlay network.
 
 | # | Name      | Role                      | Services                          | RAM    |
 |---|-----------|---------------------------|-----------------------------------|--------|
-<<<<<<< HEAD
 | 1 | Primary   | Auth backbone + LMS + billing + edge | Cerulean, AthenIQ, Magnate, NPM edge, Consul | ~10 GiB |
 | 2 | Voice     | PBX + VoIP + LLM gateway  | Capstone, Zeus, OmniRoute, coturn | ~6 GiB |
-| 3 | Media     | Streaming + automation    | Jellyfin, *arr                    | ~8 GiB |
-=======
-| 1 | Primary   | Auth backbone + LMS + billing + edge | Cerulean, AthenIQ, Magnate, NPM edge, Consul | ~10 GiB |
-| 2 | Voice     | PBX + VoIP + LLM gateway  | Capstone, Zeus, OmniRoute, coturn | ~6 GiB |
-| 3 | Media     | Streaming + automation    | Jellyfin, *arr                    | ~8 GiB |
->>>>>>> 117eeec (docs(edge): the NPM cutover is complete — real ports, wildcard re-issue, .71 retired)
+| 3 | Media     | Streaming + automation + video | Jellyfin, *arr (SSO-gated), PLUTUS | ~8 GiB |
 | 4 | Social    | Leaderboard + storage     | Rizzaura, ONYX                    | ~6 GiB |
-| 5 | Dev       | Code + mail + factory     | Atlas (Gitea+Chef), Oasis, Distro, Olympus | ~8 GiB |
+| 5 | Dev       | Code + mail + factory     | Atlas (Gitea+Convex), Oasis, Distro, Olympus + Studio | ~8 GiB |
 
 ## Components (`./stack.sh download`)
 
-The groups build from the platform repositories, checked out as **siblings of
-this repo** (`groups/<n>-<name>/docker-compose.yml` references
-`../../../<component-dir>`). `stack.sh download` puts them there:
+The groups build from the platform repositories, checked out **inside their
+group directory** (`<n>-<name>/<component>/`), with the group's own
+`<n>-<name>/docker-compose.yml` building from `./<component>`. `stack.sh
+download` puts them there — the checkout dir in the registry (`1-primary/npm`,
+`3-media/monarch`, …) is group-relative, so `verify` checks what the group
+compose actually builds from:
 
 ```bash
 ./stack.sh download --list              # components, repos, groups
@@ -220,6 +217,8 @@ mesh's Consul agent lives. Services on the same host reach Consul directly as
 | 5     | Oasis Mail       | 587       | 10.10.5.1:587           |
 | 5     | Distro web       | 5173      | 10.10.5.1:5173          |
 | 5     | Olympus Studio   | 3001      | 10.10.5.1:3001          |
+| 5     | Convex dashboard | 6790      | 127.0.0.1:6790          |
+| 3     | Media SSO gateways | 14001-14009 | 10.10.3.1:14001 |
 
 ## Security Model
 
