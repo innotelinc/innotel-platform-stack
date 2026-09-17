@@ -33,7 +33,7 @@ Verdicts:
 | **OmniRoute** | zeus (shared gateway), platform-stack group 2 | CONSOLIDATE — done | One gateway serves the ecosystem. Distro's bundled `local-gateway` profile and Group 5's `distro-gateway` were removed; every platform points at the shared instance ([build-plane convergence](convergence-onyx-olympus-distro-atlas.md) §4). |
 | **Nginx Proxy Manager** | npm (EdgeOps owner, shared at .71), monarch (bundle), onyx (profile `npm`), platform-stack group 3 | KEEP — profile-gated | One shared edge fronts every public host. The in-compose copies exist for self-contained appliance installs only and are profile-gated. |
 | **BIND** | cerulean (`cerulean-bind`, owner), platform-stack mesh | KEEP — required | TrustOps owns DNS; nothing else ships a nameserver. |
-| **SigNoz stack (ClickHouse/otel)** | capstone (owner), zeus (`compose.observability.yml`, optional profile) | KEEP — profile-gated | Capstone owns the observability topology; zeus's copy is the optional mirror documented in the convergence doc (Phase 1). App-side instrumentation stays optional. |
+| **Observability** | capstone (owner, now metrics-only: OTel collector → Prometheus → Grafana), zeus (`compose.observability.yml`, optional profile, still the SigNoz/ClickHouse topology) | KEEP — profile-gated | Capstone owns the observability topology, and as of 2026-09 it stores **no traces**: the collector converts each span to a RED metric and drops it, which removed the ClickHouse + Keeper + metastore + SigNoz cluster there. Zeus's copy is the optional mirror documented in the convergence doc (Phase 1) and still ships the old topology; app-side instrumentation stays optional. |
 | **n8n** | capstone only | KEEP — required | Workflow automation is part of AgentOps; nobody else ships it. |
 | **Kokoro / Speaches (TTS/STT)** | capstone only; zeus consumes via ARI agents | KEEP — required | Speech stack is AgentOps-owned; Zeus never hosts agents. |
 | **Grist** | capstone only | KEEP — required | Dashboards for the control center; single consumer. |
@@ -69,7 +69,7 @@ live box, with headroom:
 
 | Stack | Capped services | Limit |
 |---|---|---|
-| capstone | minio 1g · kokoro 2g · speaches 2g · n8n 1g (+ `NODE_OPTIONS=--max-old-space-size=768`) · grist 768m · signoz-clickhouse 2g | ~8.8g worst case (profile-gated services excluded from default) |
+| capstone | minio 1g · kokoro 2g · speaches 2g · n8n 1g (+ `NODE_OPTIONS=--max-old-space-size=768`) · grist 768m · tts-shim 2g · prometheus 1g · grafana 512m · otel-collector 512m | ~10.8g worst case (profile-gated services excluded from default) |
 | zeus | omniroute 1g | 1g |
 | monarch | jellyfin 4g (transcode bursts) | 4g |
 | distro | web 1536m | 1.5g |
@@ -91,12 +91,47 @@ unaffected.
 
 - Signara pins `postgres:16-alpine` in dev/prod and `postgres:16.4-alpine` in
   oasis — harmless skew; converge on one minor at the next joint upgrade.
-- Zeus's optional observability profile duplicates capstone's SigNoz stack;
-  if both run on one box, point zeus's OTel endpoint at capstone's collector
-  instead of running a second ClickHouse (trigger: observability enabled on
-  the shared server).
+- Zeus's optional observability profile duplicates capstone's observability
+  stack (and still ships the SigNoz/ClickHouse topology, while capstone's is
+  metrics-only). If both run on one box, point zeus's OTLP endpoint at capstone's
+  collector and read the result from capstone's Prometheus/Grafana instead of
+  running a second ClickHouse (trigger: observability enabled on the shared
+  server).
 - `compose.infisical.yml` profiles are gone from every repo (the store is
   Cerulean Vault). The surviving shared secret tooling is
   `scripts/vault-migrate.py`, mirrored verbatim like `stack-lib.sh` — if it ever
   gains a repo-specific branch, promote it to a stack-lib-generated template
   instead.
+
+## 5. Estate capacity & the nightly cleanup (17 September 2026)
+
+A capacity pass stopped every container that had nothing to do, then measured:
+
+| Host | Containers | RAM used | Disk reclaimed |
+|---|---|---|---|
+| Capstone (.30) | 29 → 11 | 4.6 → 2.2 GiB | 23 → 12 GB |
+| Cerulean (.46) | 50 → 20 | 3.5 → 3.0 GiB | 143 → 114 GB |
+| Olympus (.50) | 7 → 5 | 231 MiB (already lean) | 10 → 8.2 GB |
+| Monarch (.56) | 34 → 9 | 2.7 → 1.2 GiB | 70 → 62 GB |
+
+What stayed: identity/edge/DNS/Vault (Cerulean), Postgres/Redis/MinIO + voice
+core + Zeus (Capstone), Studio/runner/preview (Olympus), Jellyfin + Homarr +
+health (Monarch). Everything else is one `docker compose up -d` away — compose
+recreates from the retained named volumes.
+
+### The rule the pass wrote down
+
+The one-shot cleanup's `docker container prune` also removed containers an
+operator had parked on purpose; compose brought them back, and the incident is
+why the standing rule is a script, not a memory. `scripts/docker-cleanup.sh`
+(mirrored verbatim into every member repo like `mesh.sh`; ips is canonical) is
+installed as `/etc/cron.d/docker-cleanup` on all four hosts, nightly at 04:17:
+
+- build cache pruned, 2 GB always kept warm;
+- dangling and container-unreferenced images pruned (a stopped container keeps
+  its image, so `docker start` never re-pulls);
+- containers exited/dead/created for more than 1 day removed — a same-day park
+  is never swept;
+- container logs over 50 MB truncated to 10 MB;
+- **volumes are never touched** — "reclaimable" is not something docker can
+  judge when a volume may hold the only copy of something.
