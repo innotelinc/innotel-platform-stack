@@ -238,7 +238,20 @@ TEMPLATE = """<!doctype html>
     // platform, so the master dashboard is the only place a price is set.
     (function () {{
       var SERVICE = "{SERVICE}";
-      var PORTAL_SIGNUP = "{PORTAL_URL}/signup";
+      // SIGNUP IS MAGNATE'S, and it is not on this portal.
+      //
+      // This used to be `{PORTAL_URL}/signup` — a `/signup` path on this
+      // portal — which does not exist. The portal is a static nginx whose only fallback
+      // is `try_files $uri /index.html`, so every "Subscribe" on every service
+      // page quietly returned the buyer to the apex grid: the page the button
+      // was on, one level up. Measured, not inferred — the button's own href
+      // resolved to the plans directory.
+      //
+      // Signup lives where the plans do: Magnate is the billing platform, and
+      // `/signup?plan=<slug>` is the page that takes the money. Magnate 404s it
+      // without a valid plan slug, which is the other half of why a link to
+      // /signup with no plan looked broken.
+      var SIGNUP = "{MAGNATE_URL}/signup";
       var plansEl = document.getElementById("plans");
       var emptyEl = document.getElementById("empty");
       function money(cents) {{
@@ -257,7 +270,7 @@ TEMPLATE = """<!doctype html>
           '<div class="price">$' + money(p.priceMonthlyCents) + "<small>/month</small></div>" +
           (p.priceYearlyCents ? '<div style="font-size:12px;color:var(--muted)">or $' + money(p.priceYearlyCents) + "/year</div>" : "") +
           "<ul>" + feats + "</ul>" +
-          '<a class="cta" href="' + PORTAL_SIGNUP + "?plan=" + encodeURIComponent(p.slug) + '">Subscribe</a>';
+          '<a class="cta" href="' + SIGNUP + "?plan=" + encodeURIComponent(p.slug) + '">Subscribe</a>';
         return el;
       }}
       fetch("{MAGNATE_URL}/api/plans?service=" + encodeURIComponent(SERVICE))
@@ -270,7 +283,7 @@ TEMPLATE = """<!doctype html>
         }})
         .catch(function () {{
           emptyEl.hidden = false;
-          emptyEl.innerHTML = 'Prices are temporarily unavailable — <a href="{PORTAL_URL}">open the billing portal</a>.';
+          emptyEl.innerHTML = 'Prices are temporarily unavailable — <a href="{MAGNATE_URL}">open the billing platform</a>.';
         }});
     }})();
   </script>
@@ -368,6 +381,15 @@ def render_index() -> str:
         SERVICE="generic",
         MAGNATE_URL="https://app.magnate.innotel.us",
         PORTAL_URL="https://subscribe.innotel.us",
+    )
+    # The header link asks "which plans are there?" on a service page, where the
+    # answer is the directory. On the directory itself it answered with the page
+    # the reader was already on — a link that looks like navigation and is not.
+    # What a visitor to the directory actually needs is their own subscription,
+    # so it points at the account portal, which is Magnate's.
+    page = page.replace(
+        '<a class="signin" href="https://subscribe.innotel.us">All Innotel plans</a>',
+        '<a class="signin" href="https://app.magnate.innotel.us/manage">Manage your subscription</a>',
     )
     # The directory replaces the single-service plan grid …
     page = page.replace(

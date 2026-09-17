@@ -51,12 +51,24 @@ single-group identity too, because the ID token alone is already over the
 ceiling. Server-side sessions remove the ceiling rather than raise it, and the
 browser holds one opaque id.
 
-**One store, three networks.** The gateways live in three different Docker
-networks (the edge's own, Monarch's, Capstone's), so the session store is
-published on the host — `cerulean-sso-sessions`, `192.168.1.46:16380` — with a
+**One store, three networks — and now three hosts.** The gateways live in three
+different Docker networks (the edge's own, Monarch's, Capstone's), so the session
+store is published on the edge host — `cerulean-sso-sessions`,
+`192.168.1.46:16380`, on loopback, docker0 *and* the LAN address — with a
 password that is the whole control on that listener (an empty one refuses to
 start). Sessions are the only thing in it, there is no volume, and losing it
 costs a re-login.
+
+The LAN bind is not decoration. Capstone, Monarch and Olympus were split onto
+servers of their own, and **neither the edge's loopback nor its docker0 gateway
+is reachable across a host boundary** — so each zone that moved away must set
+`SSO_SESSION_REDIS_HOST` to `192.168.1.46`. `172.17.0.1` is correct only on the
+edge host itself, where it names the store directly; anywhere else it names that
+host's *own* empty docker0 and every gateway exits on
+`dial tcp 172.17.0.1:16380: connect: connection refused`. Olympus is the one
+zone that does not share this store at all: it runs its own
+(`olympus-gateway-sso-sessions`) with its own cookie secret, so a sign-in there
+is a second sign-in.
 
 ### The gateway inventory
 
@@ -66,24 +78,41 @@ costs a re-login.
 | `radarr` · `sonarr` · `lidarr` · `whisparr` · `bazarr` · `prowlarr` `.monarch.innotel.us` | `{radarr,sonarr,lidarr,whisparr,bazarr,prowlarr}-sso` | `14001`–`14006` | `http://<app>:<port>` | `monarch-media` |
 | `qbittorrent` · `sabnzbd` `.monarch.innotel.us` | `qbittorrent-sso`, `sabnzbd-sso` | `14007`, `14008` | `http://qbittorrent:8080`, `http://sabnzbd:8080` | `monarch-media` |
 | `req.monarch.innotel.us`, `req.innotel.us` | `jellyseerr-sso` | `14009` | `http://jellyseerr:5055` | `monarch-media` |
+| `media.innotel.us`, `media.magnate.innotel.us` | `jellyfin-sso` | `14010` (`.56`) | `http://jellyfin:8096` | `monarch-media` |
+| `tube.innotel.us` | `clipbucket-sso` | `14011` (`.56`) | `http://clipbucket:80` | `monarch-media` |
+| `tv.monarch.innotel.us` | `iptv-sso` | `14012` (`.56`) | `http://iptv:3000` | `monarch-media` |
+| `requestrr.monarch.innotel.us` | `requestrr-sso` | `14013` (`.56`) | `http://requestrr:4545` | `monarch-media` |
 | `n8n.capstone.innotel.us` | `n8n-sso` | `14010` | `http://n8n:5678` | `innotel-app-gateway` |
 | `grist.capstone.innotel.us` | `grist-sso` | `14011` | `http://grist:8484` | `innotel-app-gateway` |
-| `signoz.capstone.innotel.us` | `signoz-sso` | `14012` | `http://signoz:8080` | `innotel-app-gateway` |
+| `grafana.capstone.innotel.us` | `grafana-sso` | `14012` | `http://grafana:3000` | `innotel-app-gateway` |
 | `workflow.capstone.innotel.us` | `workflow-sso` | `14013` | `http://workflow-studio:8090` | `innotel-app-gateway` |
 | `pbx.capstone`, `pbx.innotel.us`, `pbx.zeus`, `fax.zeus` | `pbx-sso` | `14014` | `http://192.168.1.46:8083` (FreePBX) | `innotel-app-gateway` |
 | `dns.internal.innotel.us` | `technitium-sso` | `14015` | `http://192.168.1.46:5380` | `innotel-app-gateway` |
 
+Host ports are *per host*, and `14010`–`14013` are now used twice: they are
+Capstone's app gateways on `.30` and the four media gateways above on `.56`. The
+edge forwards each name to the port on the machine that runs that stack, so the
+repeat is not a conflict — but a table like this is the wrong place to look for
+one, which is why the host is named where it is not the edge's.
+
 Each gateway's deployment file is the stack that owns the app: the media
 gateways in `3-media/monarch/docker-compose.yml`, the app gateways in
 `2-voice/capstone/docker-compose.yml`, and the edge's own in
-`1-primary/npm/compose.cerulean.yml`.
+`1-primary/npm/compose.cerulean.yml`. **`technitium-sso` is the exception, and
+it is the reason its row reads `.46`:** it used to run in Group 2 beside
+Capstone, which worked only while every product shared one host — the console it
+fronts is loopback-bound, so when the voice stack moved to a server of its own
+the gateway went with it and could not reach anything, and
+`dns.internal.innotel.us` answered 502 to anyone who had just signed in. It now
+deploys with the console, from `1-primary/cerulean/docker-compose.yml` under the
+`technitium` profile.
 
 **Skip-auth routes**, i.e. what stays reachable without a session:
 
 | Gateway | Open paths | Why |
 | --- | --- | --- |
 | `n8n-sso` | `^/webhook/`, `^/webhook-test/`, `^/healthz$` | Receiving webhooks is n8n's purpose; an interactive login in front of them would break every caller rather than add a check. The editor and the REST API stay gated. |
-| `signoz-sso` | `^/api/v1/health$` | liveness. Traces arrive at the OTel collector's own ports, not here. |
+| `grafana-sso` | `^/api/health$` | liveness. Spans arrive at the OTel collector's own ports (`4317`/`4318`), are converted to metrics in Prometheus, and are not stored — so there is no trace UI to gate behind this name. |
 | `grist-sso`, `workflow-sso`, `pbx-sso`, `technitium-sso`, and the media gateways | **nothing** | Their APIs are reached internally (container name / loopback), never through the public name, so there is no integration to preserve. Grist in particular runs in **single-identity mode** (`GRIST_DEFAULT_EMAIL`), so its `/api` is effectively unauthenticated — exempting it would publish the dashboards. |
 
 ### The bare `innotel.us` zone
@@ -159,11 +188,23 @@ configuration change.
 | **Jellyfin** | Authentik **LDAP outpost** (`jellyfin-ldap`) — logins resolve against Cerulean users, `paid_users` gates access | ✅ **already SSO.** Disabling a user in Authentik blocks their media login |
 | **Homarr** (Monarch dashboard) | `AUTH_PROVIDERS: "oidc"` with `AUTH_OIDC_*` set | ✅ **already OIDC-only** |
 | **Dograh** | Authentik application `dograh` (provider 28) | ✅ **already OIDC-only** |
-| **n8n · Grist · SigNoz · Workflow Studio · FreePBX/AvantFax · Technitium** | own local login | **Fronted by an `oauth2-proxy` gateway** (`innotel-app-gateway`) — see §1. Authentik is the only door on the public name |
-| **The media stack** (Radarr, Sonarr, Lidarr, Whisparr, Bazarr, Prowlarr, qBittorrent, SABnzbd, Jellyseerr) | own local login | **Fronted by an `oauth2-proxy` gateway** (`monarch-media`); the apps run `AuthenticationMethod=External`, i.e. they trust the proxy and have no login of their own |
+| **n8n · Grist · Grafana · Workflow Studio · FreePBX/AvantFax · Technitium** | own local login | **Fronted by an `oauth2-proxy` gateway** (`innotel-app-gateway`) — see §1. Authentik is the only door on the public name |
+| **The media stack** (Radarr, Sonarr, Lidarr, Whisparr, Bazarr, Prowlarr, qBittorrent, SABnzbd, Jellyseerr) | own local login | **Fronted by an `oauth2-proxy` gateway** (`monarch-media`); the apps run `AuthenticationMethod=External`, i.e. they trust the proxy and have no login of their own. **Two of them keep a second credential store the gateway cannot see**, so gating the name is not the whole job — see the note under the table |
+| **Jellyfin · Clipbucket · the IPTV guide · Requestrr** | own login (Jellyfin through the LDAP outpost, the other three their own forms) | **Fronted by a gateway since 2026-09-16** — the three names that answered with no gate at all (`media.*`, `tube.*`, `tv.monarch.*`) plus the Discord bot's console. Each app is bound to `127.0.0.1` on the media host, so its gateway is the only door, not one of two |
 | **OmniRoute gateway** | local dashboard password | Fronted by `olympus-gateway-sso` at `gateway.olympus.innotel.us` (see `5-dev/olympus/docs/gateway-sso.md`); OmniRoute's own OIDC cannot be enabled — it strips the trailing slash from the issuer and Authentik's `iss` always ends with one |
 | **MinIO** | access keys | Native OIDC exists (`MINIO_IDENTITY_OPENID_*`); object-store API keys are not a user login |
 | **searxng · iptv · subscribe-portal · workflow-studio** | no login | n/a — nothing to convert (workflow-studio now has a gateway because the *app* it hangs off does) |
+
+**The gateway gates the name; it does not close the app's own store.** Two of the
+media apps keep credentials outside Authentik, and each is a way in that no
+gateway covers — the reason a user disabled in Authentik could still sign in.
+Neither is configuration in the estate's repos, so each has a script (committed,
+unit-tested, and run by `3-media/monarch/scripts/drift-check.sh`):
+
+| App | What it would otherwise keep | Posture now |
+|---|---|---|
+| **Jellyseerr / Seerr** | `main.localLogin` — "Enable Local Sign-In": email and password in Seerr's own store (Seerr has **no OIDC support**, measured: no `openid` anywhere in its server or sources) | `scripts/seerr-login-methods.py` — off, and `--check` fails while it is on. Jellyfin sign-in stays: it is the Cerulean identity (LDAP), and it is how a user obtains a Seerr session without a second password |
+| **Jellyfin** | accounts in Jellyfin's own database rather than the LDAP outpost | `scripts/jellyfin-login-methods.py` — the only permitted local account is the break-glass `admin`; strays are *disabled* (reversible, history survives), never deleted |
 
 ### Guest surfaces that are public on purpose
 
@@ -215,8 +256,9 @@ a test result rather than a claim:
 | Test | Covers |
 |---|---|
 | `1-primary/cerulean/scripts/verify-sso.py` | the four edge admin names, Vault's redirect + `auth_url`, the console bind, the session-store bind, the app's password endpoint |
-| `2-voice/capstone/scripts/verify-sso.py` | n8n, Grist, SigNoz, Workflow Studio, FreePBX, Technitium, plus the loopback-only ports and the session store |
-| `3-media/monarch/scripts/verify-sso.py` | the nine media apps on both Jellyseerr names, plus the loopback-only ports |
+| `2-voice/capstone/scripts/verify-sso.py` | n8n, Grist, Grafana, Workflow Studio, FreePBX, Technitium, plus the loopback-only ports and the session store |
+| `3-media/monarch/scripts/verify-sso.py` | the fifteen media names (the nine apps on both Jellyseerr names, plus `media.*`, `media.magnate.*`, `tube.*`, `tv.monarch.*`, `requestrr.monarch.*`), the non-member refusal, and every loopback-only app port |
+| `3-media/monarch/scripts/seerr-login-methods.py` · `jellyfin-login-methods.py` | the two apps' *own* credential stores: Seerr's local sign-in off, and no Jellyfin-local account signable other than the break-glass `admin` (their unit tests run in that repo's CI; `drift-check` runs them as checks) |
 | `1-primary/signara/scripts/verify-sso.py` | Signara's API flow end to end, its application-binding refusal, and that no password endpoint exists |
 | `1-primary/magnate/scripts/verify-sso.py` | Magnate's own OIDC-only admin sign-in |
 
@@ -234,7 +276,7 @@ Every item the earlier pass left open is now shut, and each closure has a
 committed test behind it (the table in §4).
 
 1. **The apps' own ports are loopback-only.** n8n `:5678`, Grist `:8484`,
-   SigNoz `:3301`, Workflow Studio `:8090` and FreePBX `:8083` now publish on
+   Grafana `:3301` (the port SigNoz held), Workflow Studio `:8090` and FreePBX `:8083` now publish on
    `127.0.0.1`, so their gateway is the only door — which is what makes their
    own login forms being switched off safe. Every reference that used to reach
    them across the LAN was moved first: n8n writes to Grist as
@@ -242,16 +284,35 @@ committed test behind it (the table in §4).
    container name (`http://zeus-freepbx`, it shares `pbx-net`), that same name
    is the PBX gateway's upstream, and host-side scripts keep dialling
    `127.0.0.1`.
-2. **Technitium's console is off the LAN.** It is host-networked, so compose
-   cannot restrict it — but Technitium can: `webServiceLocalAddresses` is now
-   `127.0.0.1,172.17.0.1`. Containers dial `http://172.17.0.1:5380` (the
-   docker0 gateway, reachable from every bridge), the LAN address is refused,
-   and the public door stays `dns.internal.innotel.us` behind its gateway.
-   `scripts/setup.sh` enforces the setting on an existing config directory,
-   since the environment variable is only read on first start.
-3. **The shared SSO session store is off the LAN.** `cerulean-sso-sessions`
-   was published on the LAN address; it now publishes on loopback + docker0,
-   and each zone's gateways set `SSO_SESSION_REDIS_HOST=172.17.0.1`.
+2. **Technitium's console is off the LAN, and signs in through Authentik.** It
+   is host-networked, so compose cannot restrict it — but Technitium can:
+   `webServiceLocalAddresses` is now `127.0.0.1,172.17.0.1`. Containers dial
+   `http://172.17.0.1:5380` (the docker0 gateway, reachable from every bridge),
+   the LAN address is refused, and the public door stays
+   `dns.internal.innotel.us` behind its gateway. `scripts/setup.sh` enforces the
+   setting on an existing config directory, since the environment variable is
+   only read on first start.
+
+   The gateway there is only half of it, and this is the one surface where that
+   distinction is visible: the console has a login of its own, and a gateway in
+   front of it can prove *someone* signed in but never *who* — so the DNS/DHCP
+   admin plane kept a password that Authentik does not know about. Technitium
+   speaks OIDC itself, so `scripts/technitium-sso.py` points its own sign-in
+   (Settings → Single Sign-On) at the `technitium` provider with
+   `cerulean-platform → Administrators` mapped. `verify-sso.py` asserts it: the
+   console's `/sso/login`, asked with the headers the gateway sends, must leave
+   for this IdP as the client the provider has registered and for the callback it
+   has registered. The local password form stays on purpose — DNS is what
+   resolves the IdP, so an SSO-only console is one nobody can reach on the day DNS
+   is what broke.
+3. **The shared SSO session store is password-guarded, and published where it
+   has to be.** `cerulean-sso-sessions` listens on the edge host's loopback,
+   its docker0 and its LAN address (`192.168.1.46:16380`). The LAN bind is what
+   lets a stack that moved to another server keep the same session: the other
+   two bindings are unreachable from there, and a zone whose gateways were left
+   on `172.17.0.1` (Monarch's were — see the live audit below) never reaches the
+   store at all. The password is the whole control on that listener, and an
+   empty one refuses to start.
 4. **Vault's UI lands on OIDC.** Vault's `sys/config/ui` is Enterprise-only, so
    there is no server-side default method, and its ember router moves to
    `/ui/vault/auth` client-side — a redirect on that path would never fire. The
@@ -345,7 +406,7 @@ login form is reachable off its own host.** What that rests on, per surface:
 | Surface | Why the form is unreachable |
 |---|---|
 | The media apps (`radarr`, `sonarr`, `lidarr`, `whisparr`, `bazarr`, `prowlarr`, `qbittorrent`, `sabnzbd`, `jellyseerr`) | each app is bound to `127.0.0.1:<port>` and runs `AuthenticationMethod=External` — the app has **no login of its own**, and the only LAN-listening door is its `oauth2-proxy` gateway on `14001`–`14009` |
-| `n8n`, `grist`, `signoz`, `workflow-studio`, FreePBX/AvantFax, Technitium | fronted by their gateway on `14010`–`14015`; the upstream is loopback or a container name, never a published port |
+| `n8n`, `grist`, `grafana`, `workflow-studio`, FreePBX/AvantFax, Technitium | fronted by their gateway on `14010`–`14015`; the upstream is loopback or a container name, never a published port |
 | First-party apps (Magnate, Cerulean, Distro, Studio, Zeus portal, Rizz Aura, Capstone dashboard) | password path refuses unless `BREAKGLASS_LOGIN=1` is set **on that app's own host** (Zeus: `AUTH_MODE`); Studio has no local path at all |
 | NPM Edge admin UI | `cameFromEdge()` + `identityAllowed()` gate `POST /tokens/sso`, and `passwordGrantAllowed()` refuses `POST /tokens` on every edge request — a password grant from inside the edge returns 401 (verified: it is what stops a scripted edge edit without the SSO route) |
 | Vault, Jellyfin, Homarr, Dograh, OmniRoute dashboard | Vault via native OIDC (group-bound role); Jellyfin via the **Cerulean LDAP outpost** so only Cerulean identities exist; Homarr and Dograh OIDC-only; the gateway dashboard behind `olympus-gateway-sso` |
@@ -354,18 +415,107 @@ login form is reachable off its own host.** What that rests on, per surface:
 
 1. **Jellyfin** — its login form is the LDAP bind: the fields are Cerulean
    credentials and a disabled Authentik user cannot sign in, but the page itself
-   is still a form. Removing it means fronting Jellyfin with an `oauth2-proxy`
-   gateway and binding `8096` to loopback — which also removes the path the
-   **native TV/mobile clients** use, because they speak the Jellyfin API rather
-   than a browser OIDC flow. Web-only access can be made form-free; native
-   clients cannot. That trade-off is the owner's call, not a script's.
+   is still a form. **Taken the other way on 2026-09-16** (the call this section
+   said was the owner's): the public names are fronted by `jellyfin-sso` and the
+   app is bound to `127.0.0.1:8097`, so the form is no longer reachable off the
+   host, and a browser still lands on it *after* the gateway — two prompts, one
+   identity. The cost is the path the section warned about: **native TV/mobile
+   clients speak the Jellyfin API, not a browser OIDC flow**, so a client that
+   cannot open a sign-in page cannot reach Jellyfin by name any more. Bringing
+   them back is a skip-auth rule for their own tokens at the gateway
+   (`X-Emby-Token` / an API key), not re-opening `8097` — re-opening it
+   republishes exactly the form the gateway exists to remove.
 2. **FreePBX/AvantFax** — the GUI is already loopback-only and reachable only
    through `pbx-sso`. Its local admin login is the **only** recovery path when
    Authentik or the gateway is down (short of `fwconsole` over SSH); deleting it
    is a break-glass decision.
 
-Two smaller reachable forms remain on `.56` for services with no gateway yet —
-`clipbucket` (`:8098`) and `requestrr` (`:4545`). Both are fronted by nothing, so
-they are LAN-reachable with their own logins. Either give them a gateway the way
-the other nine have one, or bind them to loopback once the edge fronts a gateway
-port.
+**Both smaller reachable forms are closed (2026-09-16).** `clipbucket` (`:8098`)
+and `requestrr` (`:4545`) were the last two ports on `.56` answering off-host
+with their own logins. Each got both halves of the fix this section offered — a
+gateway (`clipbucket-sso` at `14011`, `requestrr-sso` at `14013`) *and* a
+loopback bind — so the gateway is the only door rather than one of two.
+`requestrr` also gained the name it had never had:
+`requestrr.monarch.innotel.us`, an `npm-hosts.conf` row because it is inside
+`MONARCH_DOMAIN` (the `media.*` and `tube.*` names are not, which is why those
+stay edge changes). The Homarr tile that pointed at `<host>:4545` now points at
+that name.
+
+One step is easy to miss when a name is added, and its symptom points at the
+wrong thing: the gateway's redirect URI must be **registered on the provider**,
+not merely listed in the app's `.env`, or the sign-in dies at the callback with
+`invalid_request: redirect_uri does not match` before any login form appears.
+`MONARCH_SSO_REDIRECT_URIS` in `3-media/monarch/.env.example` is the list — it
+now carries all seventeen callbacks — and the command that registers it is
+written beside the variable.
+
+### The store's address is the one thing a moved gateway cannot guess (2026-09-16)
+
+The split moved the gateways but not the store, so the store's address is the one
+thing a zone cannot derive from its own environment. It is also easy to be *wrong
+about*: oauth2-proxy opens its Redis connection lazily, on the first session it
+actually stores, so a gateway's absence from the store's client list is not
+evidence of anything.
+
+That mistake was made here first, then corrected. `redis-cli client list` on the
+store showed:
+
+```
+7 addr=192.168.1.30     # Capstone's app gateways — connections dated to their restart
+1 addr=127.0.0.1        # the edge's own gateway
+0 addr=192.168.1.56     # Monarch's media gateways
+```
+
+and it read as "Monarch's gateways cannot reach the store". They can: a bare `nc`
+run inside `radarr-sso`'s own network namespace reaches `192.168.1.46:16380`, and
+`.56`'s `.env` already carried `SSO_SESSION_REDIS_HOST=192.168.1.46`. The `.30`
+connections are the ones that had been *used*; the media gateways had simply not
+stored a session since they were restarted. What settles the question is the
+zone's own test, which drives a real authorization-code flow per target — and
+both moved zones pass it.
+
+Where that leaves the config: `SSO_SESSION_REDIS_HOST` must be the edge host's LAN
+address on every zone that does not run the store. Monarch's `.env.example`
+shipped the wrong value (`172.17.0.1` — that zone's own docker0, which holds no
+store) and Capstone's template said nothing host-specific needed pinning; both now
+carry `192.168.1.46` with the reason. Both zones' `verify-sso.py` asserted the
+store was *off* the LAN and answering on loopback — true only while every stack
+shared one box, and false in both directions now — and instead assert it answers
+where their gateways dial and refuses an unauthenticated `PING`.
+
+#### Measured by running the flows, not by reading config (2026-09-16)
+
+| Zone | Host | Result |
+| --- | --- | --- |
+| Media — 9 gateways, `req.innotel.us` and its alias | `.56` | **PASS**: every name issued `_innotel_sso` and opened, non-member refused `403`, app ports loopback-only, store answers and returns `NOAUTH` |
+| App — n8n, Grist, SigNoz, Workflow Studio, FreePBX/AvantFax, Technitium | `.30` | **5 of 6 PASS**; `dns.internal.innotel.us` answers **502** — see below |
+| Olympus — Studio on both its names | `.50` | **PASS**: both names drove a full PKCE flow, sealed `studio_session`, and returned the projects document |
+
+> **A zone's test is only as good as the token it runs with.** Olympus's first
+> run reported a failed sign-in whose cause was its own `AUTHENTIK_TOKEN` (a
+> `vault://cerulean/olympus/authentik#AUTHENTIK_TOKEN` reference) answering
+> `403 Token invalid/expired` when the test tried to create its throwaway
+> identity — the client-credentials check still passed, and the run went green
+> once a live token was supplied. That token needs re-minting, or the zone's
+> regression test fails for a reason that has nothing to do with the zone.
+
+**`dns.internal.innotel.us` is now broken by construction.** Its gateway
+(`technitium-sso`) moved to `.30` with the rest of Group 2, but the console it
+fronts stayed on `.46`: `cerulean-technitium` is `network_mode: host` and binds
+`127.0.0.1` and `172.17.0.1` only, refusing the LAN address by design (§5.2), and
+there is no mesh network between the hosts — so `.30` cannot reach it at all
+(`192.168.1.46:5380` and its own `172.17.0.1:5380` both refuse). Closing this is a
+posture choice, not a config typo:
+
+- run `technitium-sso` on `.46`, where its upstream lives on loopback and docker0,
+  and point `dns.internal.innotel.us` at that host — keeps the console off the LAN,
+  which is the posture §5.2 established; or
+- bind the console on `.46`'s LAN address and point the `.30` gateway at it —
+  simpler, but a bind is per-interface: it re-exposes the DNS/DHCP admin console to
+  the whole office network, where its gateway can be bypassed.
+
+**Olympus is unaffected by any of this.** It runs its own gateway and its own
+session store (`olympus-gateway-sso-sessions`, its own cookie secret), so a sign-in
+there is a second sign-in rather than a shared one — the one zone that deliberately
+does not ride this store, and the reason its gateway still works with the edge on
+another host.

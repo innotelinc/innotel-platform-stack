@@ -77,5 +77,30 @@ jobs:
       - name: migrate-stack tests
         run: python3 -m unittest discover -s scripts/tests -t scripts/tests -v
 
+      # One gateway serves the estate, and its own port is not a routable target:
+      # `make gateway-auth-mode` makes Cerulean Authentik its only gate, so the
+      # reachability of 20128 becomes the whole control and it is published on
+      # the gateway host's loopback and bridge alone. Every consumer therefore
+      # dials the SSO proxy in front of it (`:20129`), which exempts `/v1` for
+      # API clients. Five consumers were still pointing at the closed port when
+      # that changed, each failing in a way that looked like something else;
+      # this is the guard against a sixth. Here the checkout is this repo alone,
+      # so the scan has no estate above it — the step proves the checker runs and
+      # is clean on this tree, its rules are covered by the unit tests in the
+      # step above, and each host runs it over the whole estate with `--root`.
+      - name: No service target dials the gateway's own port
+        run: python3 scripts/check-gateway-targets.py
+
+      # A group compose re-declares what its member repos already declare, so the
+      # two drift and nothing says so: a host rebuilt from `2-voice` came up with
+      # Capstone's shell and none of its services, and `3-media` lacked the apps
+      # its host runs. Action 7 of docs/stack-migration-gaps.md asked for this as
+      # a recurring check rather than a one-off. As with the gateway check, this
+      # checkout is the repo alone, so there is no group above it: the step
+      # proves the checker runs, its rules are covered by the unit tests in the
+      # step above, and each host runs it over the estate with `--root`.
+      - name: Group composes declare what their member repos run
+        run: python3 scripts/check-group-compose-drift.py
+
       - name: Python syntax
         run: python3 -m py_compile scripts/*.py scripts/tests/*.py

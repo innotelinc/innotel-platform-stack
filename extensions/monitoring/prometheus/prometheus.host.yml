@@ -1,0 +1,18 @@
+# Per-host Prometheus (standalone variant). Scrapes node-exporter for the host
+# itself and Prometheus for its own health. Add targets here — not in the shared
+# `prometheus.yml`, which is the mesh-attached config.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    stack: innotel-host
+
+scrape_configs:
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
