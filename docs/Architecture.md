@@ -87,7 +87,9 @@ Any service can discover another by name:
 ```bash
 # Find where OmniRoute lives
 ./stack.sh discover omniroute
-# → 10.10.2.1:20128
+# → the gateway host's mesh address. The dialable door is the SSO proxy in front
+#   of the gateway (:20129); the gateway's own :20128 answers on that host's
+#   loopback and bridge alone — see scripts/check-gateway-targets.py
 
 # Find where Authentik lives
 ./stack.sh discover authentik
@@ -137,6 +139,43 @@ extensions/my-extension/
 | `omniroute-llm` | OpenAI-compatible LLM gateway        | —                   |
 | `monitoring`    | Prometheus + Grafana                 | cerulean-auth       |
 | `minio-storage` | S3-compatible object storage         | —                   |
+
+### Standalone Per-Host Variant
+
+An extension fragment is written for a host that has joined the mesh: it attaches
+to `innotel-mesh-net` and registers with Consul. The hosts that run a product
+stack but no mesh — `.50` (Olympus) and `.56` (Monarch) — cannot start
+`monitoring` that way, so the extension ships a second compose file:
+
+| File                     | For                                        | Contains                                                       |
+|--------------------------|--------------------------------------------|----------------------------------------------------------------|
+| `docker-compose.ext.yml` | a mesh host, via `./stack.sh enable monitoring <group>` | Prometheus + Grafana + Consul registration        |
+| `docker-compose.host.yml`| a host with no mesh, started by hand       | node-exporter + Prometheus + Grafana, its own `innotel-metrics` network |
+
+```bash
+cd extensions/monitoring
+cp .env.host.example .env.host            # .env.host is gitignored
+GRAFANA_PASSWORD=$(openssl rand -hex 16) docker compose -p innotel-metrics \
+  -f docker-compose.host.yml --env-file .env.host up -d
+```
+
+Every port is loopback-only, matching the rest of the platform, so the UI is
+reached over an SSH tunnel — `ssh -L 3301:127.0.0.1:3301 root@<host>`, then
+http://localhost:3301. Set `PROMETHEUS_PORT` where the default is already taken:
+`.56` runs sabnzbd on `9090` and uses `9095`.
+
+Three things differ from the mesh variant, all three deliberately:
+
+- **The Prometheus config is a separate file.** `prometheus/prometheus.host.yml`
+  scrapes node-exporter and Prometheus itself; `prometheus/prometheus.yml` is the
+  mesh config, and discovers services through Consul instead.
+- **There is no OTLP collector**, because neither stack emits OTel yet.
+- **The dashboard belongs to this variant.**
+  `grafana/dashboards/host-overview.json` reads node-exporter metrics, so only
+  this compose mounts `grafana/dashboards`; the mesh variant mounts
+  `grafana/provisioning/datasources` alone. Both share the pinned datasource uid
+  (`prometheus`) that every provisioned panel references by uid rather than by
+  name.
 
 ## Single-Server Mode
 
@@ -200,7 +239,7 @@ mesh's Consul agent lives. Services on the same host reach Consul directly as
 | 2     | FreePBX          | 8083      | 10.10.2.1:8083          |
 | 2     | Zeus Portal      | 3001      | 10.10.2.1:3001          |
 | 2     | coturn           | 3478      | 10.10.2.1:3478          |
-| 2     | OmniRoute        | 20128     | 10.10.2.1:20128         |
+| 2     | OmniRoute        | 20129     | 192.168.1.46:20129 (the SSO proxy; the gateway's own :20128 is that host's loopback + bridge only) |
 | 1     | NPM edge         | 80/443    | 10.10.1.1:80            |
 | 3     | Jellyfin         | 8096      | 10.10.3.1:8096          |
 | 3     | Prowlarr         | 9696      | 10.10.3.1:9696          |

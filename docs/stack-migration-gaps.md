@@ -212,6 +212,239 @@ believing a restore is complete.
   same apps on the same ports. Deploying those hosts means their repo composes;
   the group composes are for a host that has none running.
 
+### Re-checked from the edge (2026-09-16)
+
+Ports, probed from the primary host against **the addresses the proxy hosts
+actually forward to** — the only check available without shell on the other three
+boxes, and the one that catches a name pointed at where a stack used to live.
+
+| Host | Answers on the LAN | Silent | Consequence |
+|---|---|---|---|
+| `.30` Zeus + Capstone | `3001` portal, `3010` UI, `3478` coturn, `8089` ARI/WS, `8095` dashboard-api, `8096` dashboard, `14010`–`14015` the six app gateways | **`8000`** | `api.capstone.innotel.us` and `backend.api.capstone.innotel.us` both forward to `.30:8000` and reach nothing — dograh-api is not listening there |
+| `.50` Olympus | `3050` Studio, `20129` gateway-sso, `20130` site server | `16379` (its own store, loopback — by design) | no public name is broken |
+| `.56` Monarch | `3011`, `7575` homarr, `8097`, `8098` clipbucket, `4545` requestrr, `6881` peer port, `14001`–`14009` the nine gateways | **`3000`/`3210`/`3211`/`6791`** | PLUTUS is still not running (as recorded above); Clipbucket and requestrr are still ungated |
+
+Three more findings from the same pass:
+
+- **`tube.innotel.us` forwards to `.46:8098`, which answers nothing**, while
+  Clipbucket listens on `.56:8098` (open, redirecting to its own login). The
+  media stack moved and this one proxy host did not;
+  `3-media/monarch/docs/operations.md` still records `.46:8098` as its target.
+- **`homarr`, `requestrr` and `clipbucket` all run on `.56` but are absent from
+  `3-media/docker-compose.yml`** — a group-3 host started from the group compose
+  comes up without them. Same drift as action 1, measured rather than inferred.
+- **`dns.internal.innotel.us` answers 502.** Its gateway moved to `.30` with Group
+  2, but the Technitium console it fronts stayed on `.46` and is bound to loopback
+  and docker0 only, so the new host cannot reach it at all. A posture decision
+  rather than a typo — both ways to close it are set out in
+  [`sign-in-posture.md`](sign-in-posture.md) §5.
+
+### What the host pass then fixed, and what is still open (2026-09-16)
+
+With shell on the three hosts, the port probe above turned into actual fixes and
+one correction of the probe's own reasoning:
+
+| Found | Action |
+|---|---|
+| `.30`: `capstone-postgres-1`, `capstone-redis-1` and `minio` all **Exited (255)**, `restart=no`, stopped together at 22:43 — seven minutes after the rest of the stack was recreated. `dograh-api` (host-networked, dials `127.0.0.1:5432`) had been crash-looping on `ConnectionRefusedError ('127.0.0.1', 5432)` ever since | started all three; `dograh-api` came back healthy, and `api.capstone.innotel.us` went from connection-refused to answering (`404` at `/`, `200` at `/docs`) |
+| `.30`: `dograh-api` then logged `DOGRAH_FAILURE … ari-connection` — its Asterisk ARI endpoint is stored **per organization in Postgres**, not in `.env`, and still named the pre-migration host (`http://192.168.1.46:8088`) | updated the one row (`telephony_configurations`, provider `ari`) to `http://192.168.1.30:8088`; `[ARI org=1] WebSocket connected` and no further provider errors. A DB-wide scan for `192.168.1.46` found only this row and 16 historical `webhook_deliveries.payload` records, which were left alone |
+| `tube.innotel.us` forwards to `.46:8098`, where every request since the split was logged `connect() failed (111: Connection refused)` while Clipbucket listens on `.56:8098` | re-pointed the manual proxy host to `.56:8098` through the NPM API; the name answers again (this host is not in the monarch host map, which is scoped to `*.monarch.innotel.us`, so it stays manual) |
+| `backend.api.capstone.innotel.us` answers nothing over HTTPS while `api.capstone.innotel.us` does | **Not a fault**: the host has no `listen 443` — it is an HTTP-only duplicate that answers `404` on port 80, and both point correctly at `.30:8000` |
+| The shared SSO session store appeared unreachable from `.56` (no client connection) | **The probe was wrong, not the config.** oauth2-proxy dials Redis lazily, so only *used* gateways appear in the store's client list; `.56` was already pointed at `192.168.1.46` and a bare `nc` from inside `radarr-sso` proves the path. Both moved zones now pass their own end-to-end `verify-sso.py` — see [`sign-in-posture.md`](sign-in-posture.md) §5 |
+
+Still open on the hosts, all three needing a decision rather than a repair:
+
+- **PLUTUS is up on `.56` now** (this was open when the table above was written):
+  `.env.local` written for that host, the Convex schema pushed and seeded against
+  the backend there (`clipCount: 3`), and `backend` / `web` (3000) / `dashboard`
+  (6791) running. The push ran from `.46` against `http://192.168.1.56:3210` with a
+  key generated inside the backend, so nothing had to be installed on `.56` (it has
+  no `node_modules`; `web` is nginx serving the export). `OMNIROUTE_BASE_URL` turned
+  out never to have been set on the deployment — the Convex functions were falling
+  back to `localhost:20128` *inside their own container* — and is now
+  `http://192.168.1.46:20129/v1`. Open: the storefront's own public name is still
+  only `subscribe.plutus` / `auth.plutus` pointing at `.46`, so nothing routes the
+  migrated app yet.
+- **Clipbucket is running but serving its installer.** Its DB volume has **0
+  tables** on `.56` and on `.46` alike (the `clipbucket` schema holds only
+  `db.opt`), and `monarch_clipbucket_files` is the freshly cloned source (122–141
+  MB),  so there is no migrated content on either host to point it at. The
+  documented rollback source is `.72:8088`. Its *exposure* is closed in the tree
+  as of the same pass (`127.0.0.1:8098` plus `clipbucket-sso`), so what remains
+  is a data question, not a door.
+- **`dns.internal.innotel.us`** (see above) — **the tree now takes the first of
+  the two ways out**: `technitium-sso` deploys with the console it fronts, from
+  `1-primary/cerulean/docker-compose.yml` under the `technitium` profile, so the
+  gateway no longer sits on another host from the loopback-bound console. What
+  is left is the deploy, and then the 502 is gone without the console ever
+  answering on the LAN.
+
+### The media host's last open doors (2026-09-16, same pass)
+
+Both tables above record the same three names on `.56` as reachable with no
+relying party — `media.innotel.us` / `media.magnate.innotel.us` (Jellyfin,
+`:8097`), `tube.innotel.us` (Clipbucket, `:8098`) and `tv.monarch.innotel.us`
+(the IPTV guide, `:3011`) — plus Requestrr's console on `:4545`, the one port
+that was not in either table because nothing in this repo knew its name. All
+four now have a gateway **and** a loopback bind, so the gateway is the only door
+rather than one of two:
+
+| Name | Gateway | Port (`.56`) | App |
+|---|---|---|---|
+| `media.innotel.us`, `media.magnate.innotel.us` | `jellyfin-sso` | `14010` | `jellyfin:8096` |
+| `tube.innotel.us` | `clipbucket-sso` | `14011` | `clipbucket:80` |
+| `tv.monarch.innotel.us` | `iptv-sso` | `14012` | `iptv:3000` |
+| `requestrr.monarch.innotel.us` | `requestrr-sso` | `14013` | `requestrr:4545` |
+
+**Deployed on 2026-09-17** (the forwards and the provider were changed and then
+verified by driving each name, not by reading config):
+
+| Name | Edge forward | Verified |
+|---|---|---|
+| `media.innotel.us`, `media.magnate.innotel.us` | `192.168.1.56:14010` (`jellyfin-sso`) | `302` → Authentik, `client_id=monarch-media`, correct `redirect_uri` (was `502`) |
+| `tube.innotel.us` | `192.168.1.56:14011` (`clipbucket-sso`) | `302` → Authentik (was `502`) |
+| `tv.monarch.innotel.us` | `192.168.1.56:14012` (`iptv-sso`) | `302` → Authentik |
+| `requestrr.monarch.innotel.us` | `192.168.1.56:14013` (`requestrr-sso`) | **proxy host created**, but the name does not resolve and the gateway is not deployed yet — see below |
+
+The provider `Monarch-media` (pk 37) now holds **16/16** redirect URIs; the one
+missing was `requestrr`'s. The zone script's own check agrees afterwards:
+`all 16 proxy hosts match npm-hosts.conf`.
+
+Two findings from that pass, both worth carrying:
+
+- **A proxy host's certificate is state, and `--hosts-only` used to clear it.**
+  The update body carried `certificate_id: 0`, which NPM writes as a value rather
+  than reading as "leave it alone": all sixteen hosts in the `monarch.innotel.us`
+  zone came back without the wildcard certificate and with `ssl_forced` off. The
+  values were restored from the 02:00 NPM backup (`proxy_host` table) within
+  minutes, and the script now (a) carries an existing host's certificate over when
+  a run resolves none and (b) reports `serves no TLS certificate` as drift unless
+  `--skip-ssl` says the zone is deliberately cert-less.
+- **`requestrr` still needs two things, and neither is the edge.** Its DNS record
+  was never created — the script's Technitium step could not reach
+  `192.168.1.46:5380` from where it ran, and unlike its neighbours the name has no
+  record at all — and the gateway `requestrr-sso` is not running on `.56`, so
+  `4545` is still the one app port in this stack answering off-host with its own
+  password. Deploy the compose on the media host (which publishes `127.0.0.1:4545`
+  and adds `14013`) and add the A record; the proxy host and the redirect URI are
+  already in place.
+
+Three things this leaves worth knowing, all of them easy to get wrong twice:
+
+- **The edge still owns three of the four forwards.** `media.*` and `tube.*` are
+  not `*.monarch.innotel.us`, so pointing them at the gateway rather than at the
+  app's own port is an NPM change on `.46` and not a line in the media repo —
+  the same division that let `tube.innotel.us` keep serving a dead `.46:8098`
+  for a day after the split. Only `requestrr` is a `npm-hosts.conf` row.
+  `scripts/verify-sso.py` in the media repo now drives all four names end to
+  end, so a forward left behind fails rather than looking configured.
+- **Registering the redirect URI is a second step, on a different host.** A
+  gateway derives `redirect_uri` from the request's Host, and a name missing
+  from the `monarch-media` provider dies at the callback with
+  `invalid_request: redirect_uri does not match` — no login form, no clue in the
+  app's own logs. The list is `MONARCH_SSO_REDIRECT_URIS` in
+  `3-media/monarch/.env.example`, and the `authentik-setup.py` invocation that
+  registers it is written beside the variable.
+- **Jellyfin's native clients were given back their door, with the page still
+  gated.** The first cut of this pass gated `jellyfin-sso` on every path, which
+  shuts out a TV or mobile client: those speak the Jellyfin API rather than
+  opening a sign-in page. The fix is the one `sign-in-posture.md` §5 named — a
+  skip-auth rule for the API instead of re-opening `8097` — and it is one line:
+  `OAUTH2_PROXY_SKIP_AUTH_ROUTES: "!=^/(web(/.*)?)?$"`, because oauth2-proxy
+  reads `!=` as "skip when the path does *not* match". Measured against that
+  image before it was written in: `/Users/…`, `/Items`, `/socket` and
+  `/emby/System/Info/Public` answer 200 (passed through, Jellyfin authenticates
+  the client's own token) while `/`, `/web/` and `/web/index.html` answer 403
+  with no session. The user's identity on the API path is still Cerulean's: the
+  token such a client holds came from signing in against the LDAP outpost.
+- **Two of these apps also keep a credential store of their own**, which the
+  gateway — a gate on the *name* — never touched: Seerr's email-and-password
+  sign-in (`main.localLogin`; Seerr has no OIDC support at all, measured) and any
+  account in Jellyfin's own database rather than the LDAP outpost. Both are now
+  scripted, unit-tested and run by `drift-check.sh`
+  (`3-media/monarch/scripts/seerr-login-methods.py`,
+  `jellyfin-login-methods.py`). The two things each leaves alone on purpose:
+  Seerr's Jellyfin sign-in (it is the Cerulean identity, and without it the
+  gateway authenticates nobody *into* Seerr), and Jellyfin's break-glass `admin`
+  (the one local account `jellyfin-admin-password.py` maintains; strays are
+  disabled, never deleted, so their history survives and the LDAP provider can
+  take the account back).
+
+### The gateway's own host split (2026-09-16, same pass)
+
+OmniRoute is declared by `2-voice/capstone`, and the migration moved capstone and
+zeus to `.30` — but the gateway's compose block keeps it on the Cerulean/trust host,
+so it stayed on `.46` while its SSO proxy left with olympus to `.50`. The two halves
+were then on different hosts, which forced a LAN binding on `20128`
+(`OMNIROUTE_LAN_BIND=192.168.1.46`) whose only gate was the dashboard's own password.
+That is exactly the configuration `5-dev/olympus/scripts/gateway-auth-mode.py` refuses:
+turning the password off makes reachability the whole control.
+
+Put back together, and published as asked on a `studio` name:
+
+- the gateway's LAN binding is **gone** (loopback + docker0 only, which is what the
+  compose's other two bindings were always for);
+- the proxy runs on the **gateway's host again** (`5-dev/olympus` on `.46`, upstream
+  `http://127.0.0.1:20128`), and `.50`'s copy was removed;
+- `requireLogin=false` is **live** — Authentik is the only gate, and the stored
+  password is kept as the recovery path;
+- `gateway.studio.innotel.us` is published (DNS CNAME, Let's Encrypt cert #49, NPM
+  host #178) with `/v1` refused at the edge, and the old
+  `gateway.olympus.innotel.us` is a second door to the same proxy — it began as a
+  `301`, which then sent the callback to the other name, so the proxy derives each
+  callback from the request's Host instead and both names log in on themselves;
+- consumers now dial the proxy: `.30`'s `N8N_INSTANCE_AI_MODEL_URL` and `OMNIROUTE_URL`
+  (they had been pointing at their *own* docker0 since the split — broken, not just
+  stale) and PLUTUS's `OMNIROUTE_BASE_URL`. The distro control plane keeps
+  `host.docker.internal:20128` on `.46`, and its `POST /api/auth/login` still answers
+  `200` with a cookie, which is what its tenant key provisioning depends on.
+
+Two defects in the guard had to be fixed first, both of which made it fail **open**:
+it rejected the host's own docker0 (so it refused on every deployment the estate
+actually runs), and it looked for a container named `g2-omniroute`, which matches
+nothing here — and an unreadable binding is a warning, not a refusal. Details and the
+verification list are in `5-dev/olympus/docs/gateway-sso.md`.
+
+### What the new door left behind (2026-09-16, same pass)
+
+Moving the door is not the same as moving every reference to the old one, and the
+references still taught the closed port. `ips/scripts/check-gateway-targets.py` is the
+guard: a target naming `<host>:20128` is wrong whatever the host, because that port
+answers on the gateway host's loopback and bridge alone, while the door is the SSO
+proxy on `:20129`, which exempts `/v1` for API clients. It found ten, across the
+templates and docs of every group:
+
+- `1-primary/atheniq`, `3-media/plutus`, `4-social/onyx`, `5-dev/atlas`,
+  `5-dev/olympus` — `.env.example` and compose defaults naming the mesh
+  (`10.10.2.1:20128`), or a compose service (`omniroute:20128`) this project does not
+  declare and can never resolve;
+- `2-voice/capstone/n8n-grader-workflow.json` — the committed grader workflow dialled
+  `host.docker.internal:20128`, the n8n **container's own** docker0;
+- `5-dev/olympus` — `setup.sh` and `scripts/docker-entrypoint.sh` *wrote* the mesh form,
+  so the templates were not the only source of it. `MESH_GATEWAY_HOST` goes with it.
+
+Fixed in the tree and pushed to the hosts that deploy them (`.30`'s capstone,
+`.50`'s olympus, `.56`'s plutus), the containers that carried the old value were
+recreated (`.50`'s `olympus`/`studio`, `.46`'s `onyx-ai`), and the operational docs in
+atheniq, atlas, onyx, rizzaura, capstone, distro, olympus and `ips` were re-taught.
+`ips/.github/workflows/ci.yml` runs the check on every push.
+
+Two things it cannot see, both found by hand:
+
+1. **A file that declares the gateway is exempt — per file, not per host.**
+   `2-voice/capstone/docker-compose.yml` declares it, so its
+   `host.docker.internal:20128` defaults were waved through: right on `.46`, dead on
+   `.30`, where that alias is n8n's own docker0. The same shape hides any compose
+   file that runs on two hosts.
+2. **Loopback is exempt, and loopback is right only on the gateway's host.** `.46`
+   exports `OMNIROUTE_BASE_URL=http://localhost:20128` from
+   `/etc/profile.d/omniroute.sh`, `/root/.bashrc` and `/root/.profile` — and a shell
+   export **beats** `.env` in compose interpolation, so it reached containers on `.46`.
+   That is how `onyx-ai` came to hold `localhost:20128`, which inside that container is
+   onyx-ai. `onyx`'s `.env` now names the door so a clean-environment deploy is correct;
+   the host exports themselves were left alone, being host files rather than repo files
+   and correct for the CLIs they were written for.
+
 ## Migration-side gaps (what the bundles left behind)
 
 Packing walks *containers*. A service the compose file declares but that never
@@ -258,4 +491,4 @@ until someone asks. Two consequences worth acting on:
 | 4 | Front the media apps: port the nine `*-sso` gateways and `monarch-init`/`monarch-seed` into 3-media, or the group-3 stack is both unconfigured and ungated | **done** — plus `whisparr`, `bazarr`, `iptv`, `authentik-ldap` and the appdata mount bridge they need |
 | 5 | Delete the stale `chef` from 5-dev (Atlas retired it) and add `convex-dashboard`, `certbot` | **done** |
 | 6 | Re-pack with the fixed `migrate-stack.py` before the next move — the old bundles cannot carry services that never had a container | **open** — `migrate-stack.py` records the declared set now; the bundles still have to be re-packed on the source host |
-| 7 | Re-check the group composes against the repos after the next repo-side service change — the drift this page records was invisible until someone ran both `config --services` sides | **open** — and it is the reason action 1 keeps its place |
+| 7 | Re-check the group composes against the repos after the next repo-side service change — the drift this page records was invisible until someone ran both `config --services` sides | **now a check, and it measures 52 findings** — `ips/scripts/check-group-compose-drift.py` compares each group compose with its member repos' service sets, reading *every* compose file a repo carries (`docker-compose.full.yml`, `compose.cerulean.yml`, the overlays) and pairing prefixed renames with the repo that owns them instead of calling them drift. Wired into this repo's CI. Its run over the estate on 2026-09-16: `4-social` **clean**; `1-primary` missing `app`, `backup-ui` (npm) and `client`, `mongo` (sign); `5-dev` missing `gateway-sso`, `gateway-sso-sessions` (the host-gateway overlay is newer than the group file); `3-media` missing `clipbucket`, `clipbucket-sso`, `homarr`, `iptv-sso`, `jellyfin-sso`, `monarch-health`, `monarch-recs`, `requestrr`, `requestrr-sso` and still declaring `monarch-api` no repo has; `2-voice` missing 35 — Capstone's 29 services and Zeus's `pbx`/`signoz` family — with `capstone-api` in no repo. It reports; closing it is action 1, and the reporting is what makes action 1 worth doing |

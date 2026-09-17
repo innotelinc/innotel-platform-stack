@@ -1,0 +1,100 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Extension: monitoring — STANDALONE per-host variant (no mesh, no Consul)
+# ══════════════════════════════════════════════════════════════════════════════
+# `docker-compose.ext.yml` in this directory is the mesh-attached version: it
+# registers with Consul and joins `innotel-mesh-net`, so it only comes up on a
+# host that has joined the mesh. This file is the same idea with none of that
+# wiring, for the hosts that run a product stack but no mesh — `.50` (Olympus)
+# and `.56` (Monarch).
+#
+# It is deliberately the small half of what Capstone runs: host-level metrics
+# (CPU, memory, disk, network) plus a metrics store and a dashboard. There is
+# no OTLP collector here because those stacks do not emit OTel yet; add the
+# `otel-collector` service from `2-voice/capstone/docker-compose.yml` (and point
+# the app's OTEL_EXPORTER_OTLP_ENDPOINT at it) on the day one does.
+#
+# Posture: every port is loopback-only, matching the rest of the platform. Reach
+# the UI over an SSH tunnel:
+#
+#   ssh -L 3301:127.0.0.1:3301 root@<host>      # then http://localhost:3301
+#
+# Deploy on a host:
+#
+#   cd /usr/src/projects/complete/ips/extensions/monitoring
+#   GRAFANA_PASSWORD=$(openssl rand -hex 16) docker compose -p innotel-metrics \
+#     -f docker-compose.host.yml --env-file .env.host up -d
+#
+# Check the host ports are free first — `.56` already runs sabnzbd on
+# 127.0.0.1:9090, so it sets PROMETHEUS_PORT=9095 instead.
+#
+# Copy `.env.host.example` to `.env.host` first; it is gitignored.
+
+services:
+  node-exporter:
+    image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.9.1}
+    container_name: metrics-node-exporter
+    restart: unless-stopped
+    mem_limit: 128m
+    memswap_limit: 128m
+    command:
+      - "--path.rootfs=/host"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    pid: host
+    volumes:
+      - "/:/host:ro,rslave"
+    networks: [metrics-net]
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.13.3}
+    container_name: metrics-prometheus
+    restart: unless-stopped
+    mem_limit: ${PROMETHEUS_MEM_LIMIT:-1g}
+    memswap_limit: ${PROMETHEUS_MEM_LIMIT:-1g}
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}"
+      - "--storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-1GB}"
+      - "--web.listen-address=0.0.0.0:9090"
+    ports:
+      # Host port is configurable because the obvious one can be taken: on `.56`
+      # the *arr stack publishes sabnzbd on 127.0.0.1:9090 already, so that host
+      # sets PROMETHEUS_PORT=9095.
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"   # loopback only
+    volumes:
+      - ./prometheus/prometheus.host.yml:/etc/prometheus/prometheus.yml:ro
+      - metrics_prometheus_data:/prometheus
+    depends_on:
+      - node-exporter
+    networks: [metrics-net]
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:13.2.2}
+    container_name: metrics-grafana
+    restart: unless-stopped
+    mem_limit: ${GRAFANA_MEM_LIMIT:-512m}
+    memswap_limit: ${GRAFANA_MEM_LIMIT:-512m}
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:?set GRAFANA_PASSWORD}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: "${GRAFANA_ROOT_URL:-http://localhost:3301}"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3301}:3000"   # loopback only; use an SSH tunnel
+    volumes:
+      - metrics_grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks: [metrics-net]
+
+volumes:
+  metrics_prometheus_data:
+  metrics_grafana_data:
+
+networks:
+  metrics-net:
+    name: innotel-metrics

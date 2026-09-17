@@ -249,7 +249,7 @@ LAN/mesh by address, never by a second copy):
 
 | Host | Group(s) | Also runs |
 |---|---|---|
-| `192.168.1.46` (primary + edge) | 1, 4 | Cerulean (Authentik + Vault), AthenIQ, Magnate, Signara, the NPM edge, Atlas, Distro, ONYX, Rizz Aura, zapit — and the **one** OmniRoute gateway on `:20128`, which every other box consumes by address |
+| `192.168.1.46` (primary + edge) | 1, 4 | Cerulean (Authentik + Vault), AthenIQ, Magnate, Signara, the NPM edge, Atlas, Distro, ONYX, Rizz Aura, zapit — and the **one** OmniRoute gateway on `:20128` (loopback + docker0 only) with its Authentik-fronted SSO proxy on `:20129`, which is the door every other box consumes by address |
 | `192.168.1.30` | 2 (voice) | Capstone (26 services) and Zeus (`docker-compose.full.yml`: FreePBX, portal, coturn) |
 | `192.168.1.50` | 5 (factory half) | Olympus + Studio + its gateway and sites; tenancy stays on Distro at `.46:20140` |
 | `192.168.1.56` | 3 (media) | Monarch (Jellyfin, *arr, downloaders, media SSO gateways) |

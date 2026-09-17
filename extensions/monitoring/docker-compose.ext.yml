@@ -30,7 +30,12 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
+      # The datasource half of provisioning only: the dashboards provider in
+      # `provisioning/dashboards/` and the JSON it loads belong to the standalone
+      # per-host variant (`docker-compose.host.yml`), which is the one that also
+      # mounts `grafana/dashboards` and scrapes node-exporter. Loading it here
+      # would point Grafana at a directory this compose does not mount.
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
     depends_on:
       - prometheus
     networks:

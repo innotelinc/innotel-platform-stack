@@ -1,8 +1,12 @@
 apiVersion: 1
+
 datasources:
   - name: Prometheus
+    # Pinned uid: the provisioned dashboards reference the datasource by uid, so
+    # a Grafana-generated one would break every panel.
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
-    editable: true
+    editable: false

@@ -142,7 +142,20 @@
     // platform, so the master dashboard is the only place a price is set.
     (function () {
       var SERVICE = "zapit";
-      var PORTAL_SIGNUP = "https://subscribe.innotel.us/signup";
+      // SIGNUP IS MAGNATE'S, and it is not on this portal.
+      //
+      // This used to be `https://subscribe.innotel.us/signup` — a `/signup` path on this
+      // portal — which does not exist. The portal is a static nginx whose only fallback
+      // is `try_files $uri /index.html`, so every "Subscribe" on every service
+      // page quietly returned the buyer to the apex grid: the page the button
+      // was on, one level up. Measured, not inferred — the button's own href
+      // resolved to the plans directory.
+      //
+      // Signup lives where the plans do: Magnate is the billing platform, and
+      // `/signup?plan=<slug>` is the page that takes the money. Magnate 404s it
+      // without a valid plan slug, which is the other half of why a link to
+      // /signup with no plan looked broken.
+      var SIGNUP = "https://app.magnate.innotel.us/signup";
       var plansEl = document.getElementById("plans");
       var emptyEl = document.getElementById("empty");
       function money(cents) {
@@ -161,7 +174,7 @@
           '<div class="price">$' + money(p.priceMonthlyCents) + "<small>/month</small></div>" +
           (p.priceYearlyCents ? '<div style="font-size:12px;color:var(--muted)">or $' + money(p.priceYearlyCents) + "/year</div>" : "") +
           "<ul>" + feats + "</ul>" +
-          '<a class="cta" href="' + PORTAL_SIGNUP + "?plan=" + encodeURIComponent(p.slug) + '">Subscribe</a>';
+          '<a class="cta" href="' + SIGNUP + "?plan=" + encodeURIComponent(p.slug) + '">Subscribe</a>';
         return el;
       }
       fetch("https://app.magnate.innotel.us/api/plans?service=" + encodeURIComponent(SERVICE))
@@ -174,7 +187,7 @@
         })
         .catch(function () {
           emptyEl.hidden = false;
-          emptyEl.innerHTML = 'Prices are temporarily unavailable — <a href="https://subscribe.innotel.us">open the billing portal</a>.';
+          emptyEl.innerHTML = 'Prices are temporarily unavailable — <a href="https://app.magnate.innotel.us">open the billing platform</a>.';
         });
     })();
   </script>
