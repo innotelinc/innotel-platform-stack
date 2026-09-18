@@ -176,6 +176,16 @@ lines) is rejected everywhere.
 3. **`guard-lib`** — `.githooks/guard-lib` is the single source of the policy patterns and is
    identical across repos (copy it verbatim; do not edit the patterns per repo).
 
+**Audit on demand — `scripts/audit-attribution.sh` (platform stack).** All three points above
+are gates: they judge what a *push* introduces, so a violation already in history is only
+re-examined when something makes the guard scan a wider range (a branch pushed for the first
+time scans the full history; an ordinary push scans only its own commits). Run the audit to
+check whole histories instead — `--org` for every repo that carries the guard, or a path for
+one checkout. It sources the audited repo's own `guard-lib`, so it cannot disagree with the
+hooks or CI, reports each offending commit with the guard's reason, and writes nothing.
+Fixing history is a separate, reviewed act (rewrite the message, then force-push with a
+lease), never something the audit does.
+
 **A conformant repo must have at least the CI workflow.** Having local hooks too is preferred
 (better UX — fail before push).
 

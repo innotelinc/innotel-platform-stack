@@ -26,7 +26,7 @@ and edge are platform services; everything else is a business function that cons
 | TLS/PKI managed per-platform | Cerulean issues certs and DNS; NPM Edge fronts public hosts only |
 | Revenue fragmentation | Magnate is the single billing plane; paid seats flow everywhere |
 | No release discipline | Every product repo has a `release.yml` that tags, builds GHCR images, and cuts a GitHub Release with artifacts |
-| Attribution sprawl | The attribution guard runs locally + in CI; only Darnel Hunter <dhunter@innotel.us> is credited |
+| Attribution sprawl | The attribution guard runs locally + in CI (every push, PR and branch); `scripts/audit-attribution.sh` audits whole histories on demand |
 | Docs/standard drift across repos | A single conformity standard (`docs/standard.md`) + `scripts/conform-project.sh` audit every product repo |
 
 > **About this repo** — the source of truth for the Innotel Platform Stack: who owns what,
@@ -113,6 +113,35 @@ Conventions encoded in the library (enforced portfolio-wide):
   DNS-01 against the shared BIND, attached to every proxy host in the zone.
 - **Idempotent provisioning** — every script GETs before it writes and only
   updates when state differs.
+
+## Attribution audit — `scripts/audit-attribution.sh`
+
+The [guard](docs/standard.md#5-attribution-guard--the-one-rule-every-repo-enforces) is a
+*gate*: it checks the commits and file lines a push introduces. That leaves one blind spot —
+a violation already in a repository's history is only re-examined when something makes the
+guard scan a wider range than the push itself (a branch pushed for the first time scans the
+full history; an ordinary push scans only its own commits). A trailer can therefore sit in a
+repo for months and then block a release branch.
+
+This script closes that gap. It audits history directly, with the policy the repository
+itself carries, and reports every offending commit with its hash, date and the guard's own
+reason. It never writes — fixing history is a reviewed act, not something an audit does.
+
+```bash
+scripts/audit-attribution.sh                       # the repo you are standing in
+scripts/audit-attribution.sh ../4-social/onyx      # any checkout
+scripts/audit-attribution.sh --org                 # every repo in the org carrying the guard
+scripts/audit-attribution.sh --org --since 2026-08-01 --content
+scripts/audit-attribution.sh --quiet               # one line per repo
+scripts/audit-attribution.sh --json                # for a dashboard
+scripts/audit-attribution.sh --selftest            # prove the audit still fires
+```
+
+It runs from this checkout against any path or the whole org, so **no mirror is needed** in
+the member repos (unlike `stack-lib.sh`, which they source at runtime). Exit code is 0 clean,
+1 violations, 2 usage error — usable as a scheduled job or a pre-release step. `--limit`
+truncates for speed and says so when it does, since a silent truncation would turn an audit
+into a false clean.
 
 ## Architecture principles
 
