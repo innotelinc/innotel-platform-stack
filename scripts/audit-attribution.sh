@@ -26,7 +26,8 @@
 #                     (default owner: this repo's git remote). Needs `gh`.
 #   --dir DIR         where --org keeps its clones (default: a temp dir)
 #   --since DATE      only commits after DATE (default: the whole history)
-#   --limit N         scan at most N commits per repo, newest first (default 500)
+#   --limit N         scan at most N commits per repo, newest first (default 500;
+#                     0 scans every commit — use it for a scheduled sweep)
 #   --content         also scan tracked file contents, not just messages
 #   --json            machine-readable report on stdout
 #   --quiet           one summary line per repository, nothing else
@@ -177,30 +178,74 @@ audit_repo() { # <repo-dir> [label]
   fi
   load_guard "$dir" "$ref" || die "could not load a guard policy for $label"
 
-  local -a rev_args=(rev-list --max-count="$LIMIT")
-  [ -n "$SINCE" ] && rev_args+=(--since="$SINCE")
+  # 0 means the whole history: a scheduled sweep should not be able to truncate
+  # itself into a clean-looking report.
+  local -a window=()
+  [ "$LIMIT" -gt 0 ] && window+=(--max-count="$LIMIT")
+  [ -n "$SINCE" ] && window+=(--since="$SINCE")
 
-  local sha msg reason sha_short date subject bad=0 repo_commits=0
-  while read -r sha; do
-    [ -n "$sha" ] || continue
-    COMMITS_SCANNED=$((COMMITS_SCANNED + 1))
-    repo_commits=$((repo_commits + 1))
-    msg="$(git -C "$dir" log -1 --format=%B "$sha" 2>/dev/null)" || continue
-    reason="$(guard_check_stream 2>&1 <<<"$msg")" && continue
-    bad=$((bad + 1))
-    VIOLATION_COMMITS=$((VIOLATION_COMMITS + 1))
-    [ "$QUIET" -eq 1 ] && continue
-    sha_short="${sha:0:9}"
-    date="$(git -C "$dir" log -1 --format=%ad --date=short "$sha")"
-    subject="$(git -C "$dir" log -1 --format=%s "$sha")"
-    if [ "$AS_JSON" -eq 1 ]; then
-      row "$(printf '{"repo":"%s","kind":"commit","sha":"%s","date":"%s","subject":"%s","reason":"%s"}' \
-        "$(json_escape "$label")" "$sha" "$date" "$(json_escape "$subject")" "$(json_escape "$reason")")"
-    else
-      say "  ✗ $sha_short  $date  $subject"
-      printf '%s\n' "$reason" | sed 's/^/      /'
-    fi
-  done < <(git -C "$dir" "${rev_args[@]}" "$ref" 2>/dev/null)
+  local bad=0 repo_commits total
+  repo_commits="$(git -C "$dir" rev-list --count "${window[@]}" "$ref" 2>/dev/null || printf '0')"
+  total="$(git -C "$dir" rev-list --count "$ref" 2>/dev/null || printf '%s' "$repo_commits")"
+  COMMITS_SCANNED=$((COMMITS_SCANNED + repo_commits))
+
+  # One pass over the window's messages. A clean repo — the common case for a
+  # scheduled sweep — is decided by a single run of the guard instead of one
+  # subprocess per commit (a 3,000-commit repo: about a second, not a minute).
+  # The messages are read into a file rather than piped so a git failure cannot
+  # look like an empty, clean stream.
+  #
+  # Only a guard that IS the canonical policy gets this shortcut. A drifted copy
+  # is an older or locally edited policy, and an older policy can be one that
+  # answers a large input wrongly (the 2026-09 guard failed open above a pipe
+  # buffer's worth of text, so a window would have read as clean). A drifted
+  # repo is already called out in the report; it is also the wrong place to
+  # economise, so it falls back to judging one message at a time.
+  local window_reason=""
+  local msg_file
+  msg_file="$(mktemp "${TMPDIR:-/tmp}/audit-messages.XXXXXX")"
+  if ! git -C "$dir" log --format=%B "${window[@]}" "$ref" >"$msg_file" 2>/dev/null; then
+    rm -f "$msg_file"
+    warn "${label}: could not read history"
+    return 0
+  fi
+  if [ "$guard_used" != "repo (DRIFTED)" ]; then
+    window_reason="$(guard_check_stream <"$msg_file" 2>&1)"
+  fi
+  rm -f "$msg_file"
+
+  # Only a repo that has something to report needs the per-commit walk that says
+  # *which* commit it was. Read the window once, with record separators, so the
+  # attribution costs one git process and not one per commit.
+  if [ -n "$window_reason" ] || [ "$guard_used" = "repo (DRIFTED)" ]; then
+    local sha msg reason sha_short date subject record
+    # `read` returns non-zero when the last record has no trailing separator, so
+    # the final record must be processed on that failure — otherwise the newest
+    # commit in every repository is skipped, which is exactly the one a push
+    # just added and the one a sweep most needs to judge.
+    while IFS= read -r -d $'\x1e' record || [ -n "$record" ]; do
+      [ -n "$record" ] || continue
+      sha="${record%%$'\n'*}"
+      msg="${record#*$'\n'}"
+      reason="$(guard_check_stream 2>&1 <<<"$msg")" && continue
+      bad=$((bad + 1))
+      VIOLATION_COMMITS=$((VIOLATION_COMMITS + 1))
+      [ "$QUIET" -eq 1 ] && continue
+      sha_short="${sha:0:9}"
+      date="$(git -C "$dir" log -1 --format=%ad --date=short "$sha" 2>/dev/null)"
+      subject="$(git -C "$dir" log -1 --format=%s "$sha" 2>/dev/null)"
+      if [ "$AS_JSON" -eq 1 ]; then
+        row "$(printf '{"repo":"%s","kind":"commit","sha":"%s","date":"%s","subject":"%s","reason":"%s"}' \
+          "$(json_escape "$label")" "$sha" "$date" "$(json_escape "$subject")" "$(json_escape "$reason")")"
+      else
+        say "  ✗ $sha_short  $date  $subject"
+        printf '%s\n' "$reason" | sed 's/^/      /'
+      fi
+      # The record separator comes *before* each entry, so a record is
+      # "<sha>\n<body>" and the first read is the empty string before the first
+      # separator — the loop skips it.
+    done < <(git -C "$dir" log --format='%x1e%H%n%B' "${window[@]}" "$ref" 2>/dev/null)
+  fi
 
   # ── file contents (opt-in: it is the slow half) ──────────────────────────
   local files_bad=0 path
@@ -228,10 +273,8 @@ audit_repo() { # <repo-dir> [label]
 
   # A limit that silently truncates would turn an audit into a false clean, so
   # say what was left unscanned, loudly, in every mode.
-  local total
-  total="$(git -C "$dir" rev-list --count "$ref" 2>/dev/null || printf '%s' "$repo_commits")"
   local scan_note=""
-  if [ "$repo_commits" -lt "$total" ]; then
+  if [ "$LIMIT" -gt 0 ] && [ "$repo_commits" -lt "$total" ]; then
     scan_note=" — scanned newest $repo_commits of $total; raise --limit or narrow with --since"
     TRUNCATED_REPOS+=" $label"
   fi
@@ -275,6 +318,13 @@ audit_org() {
     fi
     audit_repo "$dir" "$name"
   done < <(gh repo list "$OWNER" --limit 200 --json name --jq '.[].name' 2>/dev/null)
+
+  # An empty sweep is a failure, not a pass: the listing needs a token that can
+  # see the org, and "no repositories" reported as "clean" is the worst answer
+  # this tool could give.
+  if [ "$REPOS_SCANNED" -eq 0 ]; then
+    die "no repositories were audited — the org listing failed (token scope?) or no repo carries the guard"
+  fi
 }
 
 # ── selftest ───────────────────────────────────────────────────────────────
