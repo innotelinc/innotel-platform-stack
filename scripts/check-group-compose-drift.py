@@ -103,6 +103,13 @@ GROUP_OWNED = {
     # IMAP + web) rather than deploying its per-service compose, so the name has
     # no counterpart in the repo and is not drift.
     "oasis-mail",
+    # 1-primary carries the subscribe portal: this repo's own nginx
+    # (`web/subscribe/`), which the edge forwards every subscribe.<service>.<zone>
+    # host to. It is not a member repo's service, so no repo declares the name -
+    # and until it was declared in the group file, nothing started it at all
+    # (`web/subscribe/docker-compose.ext.yml` is neither a group member nor an
+    # extension), so a rebuilt host answered 502 on all 17 subscribe hosts.
+    "subscribe-portal",
 }
 
 # Families the group declares that belong to a project the member repos do not
