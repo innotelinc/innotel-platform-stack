@@ -222,7 +222,11 @@ ensure_env() {
 # (a checkout without the rest of the estate).
 compose() {
   local dir="$1"; shift
-  local generated="${STACK_DIR}/groups/$(basename "${dir}").yml"
+  # Declared and assigned on separate lines: a `local x="$(cmd)"` masks the
+  # command's exit status, which is what shellcheck's SC2155 is about, and CI
+  # runs shellcheck at warning severity.
+  local generated
+  generated="${STACK_DIR}/groups/$(basename "${dir}").yml"
   if [ -f "$generated" ]; then
     docker compose -f "$generated" "$@"
     return
