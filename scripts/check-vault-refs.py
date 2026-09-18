@@ -44,6 +44,13 @@ THE RULES
 5. **`infisical://` is not a fallback.** Infisical is retired; a leftover
    reference in that grammar is a credential that was never moved, and it fails
    rather than passing through.
+6. **The stored value is a value, not the placeholder.** A reference that
+   resolves to `change-me`, to a documented example name (`ak-ldap-outpost-2026`),
+   or to text carrying an inline comment is reported as `suspect`: it is
+   *present*, so every check that only asks "does the key exist" goes green, and
+   it is still not a credential. This is the one rule that reads values rather
+   than references — see §8 of `docs/sign-in-posture.md` for what it cost the
+   media stack to learn.
 
 WHAT IT REPORTS BUT CANNOT DECIDE
 ---------------------------------
@@ -101,7 +108,7 @@ class Finding:
     key: str
     ref: str
     product: str = ""
-    status: str = "ok"          # ok | missing | no-token | forbidden | denied
+    status: str = "ok"          # ok | missing | no-token | forbidden | denied | suspect
     detail: str = ""
     resolved_chars: int = 0
 
@@ -274,6 +281,53 @@ def vault_from_env(environ: dict[str, str] | None = None) -> Vault:
     )
 
 
+# A stored value that is *present* and still not a credential. Measured on
+# 2026-09-18: `cerulean/data/monarch` held `ak-ldap-outpost-2026    # outpost API
+# token (monarch stack)` for both LDAP keys — the placeholder text, quotes and
+# inline comment included — migrated into Vault from a `.env` whose lines carried
+# comments. Every consumer agreed on it, so nothing looked wrong from any single
+# file, and every LDAP login in the media stack answered HTTP 500.
+PLACEHOLDER_VALUES = re.compile(
+    r"^(change[-_]?me|changeme|placeholder|example|todo|x{3,}|\*{3,}|\.\.\.)$", re.I)
+PLACEHOLDER_HINT = re.compile(
+    r"(change[-_]?me|placeholder|your[-_ ]?[a-z]*[-_ ]?(key|secret|token|password)|<[a-z_-]+>)",
+    re.I)
+# `ak-ldap-outpost-2026` and friends: a *name* the deployment documented as an
+# example, kept as if it were the secret it stood in for.
+DEFAULTISH = re.compile(r"^(ak|sk|pk)-[a-z0-9-]+-(19|20)\d\d$", re.I)
+
+
+def judge_value(value: str) -> str | None:
+    """Why this stored value is not usable as a secret, or None if it is.
+
+    Deliberately narrow: it reports the shapes that are *known* to have been
+    stored in place of a credential — a comment that travelled inside the value,
+    the placeholder an env template ships, a documented example name — rather
+    than trying to score entropy, which would fire on legitimate short secrets.
+    """
+    text = value.strip()
+    if "#" in text:
+        return "carries a '#' — a comment travelled inside the value"
+    if text[:1] in "'\"" or text[-1:] in "'\"":
+        return "is wrapped in quotes, so a quoted placeholder was stored as the value"
+    stripped = text.strip("'\"")
+    if PLACEHOLDER_VALUES.match(stripped):
+        # The value is one of a fixed list, so naming it leaks nothing.
+        return f"is the placeholder {stripped!r}"
+    # The next two describe a *shape* and never echo the value: a real secret
+    # that happens to contain 'your-key' must not be printed into a log or CI
+    # job by the check that exists to protect it.
+    if PLACEHOLDER_HINT.search(stripped) and len(stripped) < 80:
+        return ("still reads as placeholder text (change-me / your-key / "
+                "<placeholder>), not a minted secret")
+    if DEFAULTISH.match(stripped):
+        return ("looks like a documented example name of the form "
+                "<prefix>-<name>-<year>, not a minted secret")
+    if text != stripped:
+        return "has surrounding whitespace, which a credential never has"
+    return None
+
+
 def resolve(findings: list[Finding], root: Path, tokens: dict[str, Path], vault: Vault,
             mount: str = DEFAULT_MOUNT) -> list[Finding]:
     """Ask Vault about every pending finding, in place."""
@@ -305,8 +359,17 @@ def resolve(findings: list[Finding], root: Path, tokens: dict[str, Path], vault:
             finding.status = "missing"
             finding.detail = f"path holds {sorted(data) or 'nothing'}"
         else:
-            finding.status = "ok"
-            finding.resolved_chars = len(str(data[key]))
+            value = str(data[key])
+            # Rule 6: present is not the same as usable. A value that carries a
+            # comment or a placeholder resolves here and fails at the consumer,
+            # which is exactly the wrong time to find out.
+            problem = judge_value(value)
+            if problem:
+                finding.status = "suspect"
+                finding.detail = f"the stored value {problem}"
+            else:
+                finding.status = "ok"
+            finding.resolved_chars = len(value)
     return findings
 
 
