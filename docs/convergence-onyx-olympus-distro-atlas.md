@@ -678,25 +678,51 @@ mechanical audit does not fail on:
     Authentik**, so it was emptied rather than migrated: a wrong value that
     looks like a working one is exactly what `vault-bootstrap.py` refuses to
     invent.
-  * **Atlas is not deployed anywhere.** No Gitea, Convex or act-runner
-    container runs on any host, though `atlas_gitea-data`, `atlas_gitea-db-data`
-    and `atlas_convex-data` exist on `.46`. The volumes and the placeholder
-    above are why it reads as "running on plaintext values today": it is not
-    running at all. CodeOps being down is a finding for the operator, not part
-    of this bullet.
+  * **Atlas was not deployed anywhere — and now is.** No Gitea, Convex or
+    act-runner container ran on any host, though `atlas_gitea-data`,
+    `atlas_gitea-db-data` and `atlas_convex-data` existed on `.46`; the volumes
+    and the placeholder above are why the file read as "running on plaintext
+    values today" — nothing was running at all, and **CodeOps was down**. It was
+    restored on `.46` the same day, where the volumes and the edge wiring
+    already were (`proxy_host` `git.innotel.us` and `convex.innotel.us` both
+    forward to `192.168.1.46`, and the migration record already placed Atlas on
+    the old server): `atlas-gitea` + `atlas-gitea-db` + `atlas-convex` +
+    `atlas-convex-dashboard` are up and healthy, the edge answers 200 on both
+    public names, and Gitea's log shows `PING DATABASE postgres` with the
+    Vault-sourced password — which is also the proof that the credential moved
+    into the store is the one the database actually accepts. Gitea is empty
+    (one `admin` account, no repositories): the repos' remotes are GitHub, so
+    nothing depended on it, and that is the state to fill in, not damage.
+  * **Atlas now signs in through Authentik like everything else.** The app
+    `atlas-gitea` and its OAuth2 provider (pk 43) were provisioned with
+    Cerulean's own `scripts/authentik-setup.py atlas-gitea` — the documented way
+    for "a product's own app" — with the redirect URI
+    `https://git.innotel.us/user/oauth2/authentik/callback`, and the provider
+    conforms (`issuer_mode=per_provider`, 38/38 unchanged). The issued secret was
+    stored in `cerulean/atlas`, materialized into `.env`, and registered in
+    Gitea as an OAuth2 source (`gitea admin auth add-oauth --name authentik`):
+    the login page offers *"Sign in with authentik"*, and
+    `/user/oauth2/authentik` answers **307** into Authentik's authorize with the
+    registered client. `DISABLE_REGISTRATION=true` stays, so the only accounts
+    are the admin's and the ones Authentik mints.
   * **`setup.sh` and the two `vault-*.py` scripts read the environment, not the
     `.env` `VAULT_*` block** — which is what the example's `export VAULT_ADDR=…`
     line says, and why a filled-in block is documentation until the variables
     are exported. A container that resolves at boot reads the block through
     `env_file` (Zeus does); Atlas resolves at setup, so its block is inert until
     `make vault-sync` runs with the variables set.
-  * **The pre-migration checkouts are still on `.46` and still hold secrets.**
-    `cerulean-dns-platform/`, `monarch-media-platform/`, `zeus-pbx-platform/`,
-    `capstone-voice-aiagent-platform/` and `rizzaura-platform/` each carry their
-    own `.env` beside the group dirs the migration moved everything into. Their
-    references resolve like any other (the check reads them, and says so), but
-    each is a second copy of a deployment's credentials outside its repo — worth
-    deleting once nothing points at them.
+  * **The pre-migration names were symlinks, not second checkouts — and they are
+    gone.** `cerulean-dns-platform/`, `monarch-media-platform/`,
+    `zeus-pbx-platform/`, `capstone-voice-aiagent-platform/` and
+    `rizzaura-platform/` on `.46` are symlinks into their group dirs, so the
+    `.env` the check read through them was the repo's own — no duplicate
+    credentials exist. What did point at them were four systemd units from
+    before the host split (`monarch.service`, `monarch-drift-check.service`,
+    `capstone.service`, `capstone-pbx-sync.service`), all disabled and inactive,
+    whose stacks run on `.56` and `.30`: enabling one would have started a
+    duplicate stack on the wrong host. The units were backed up to
+    `/root/systemd-unit-backup-<ts>/` and removed, the symlinks with them, and
+    the container count either side is the same 47.
 
   It is a **check** now, not a note: `ips/scripts/check-vault-refs.py` reads
   both sides — every `vault://` reference in the estate, resolved with the
