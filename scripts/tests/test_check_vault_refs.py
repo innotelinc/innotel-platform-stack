@@ -185,6 +185,64 @@ class Resolution(ScanCase):
         self.assertEqual(vault.asked[0][:2], ("cerulean", "x"))
 
 
+class StoredValues(ScanCase):
+    """Rule 6 — the value is a value, not the placeholder that stood in for it.
+
+    The case these encode was measured on 2026-09-18: `cerulean/data/monarch`
+    held `ak-ldap-outpost-2026    # outpost API token (monarch stack)` for both
+    LDAP keys, so `.env`, the store, the bind user and Jellyfin's plugin config
+    all agreed on a value no token had ever been minted from. Every reference
+    resolved; every LDAP login in the media stack answered HTTP 500.
+    """
+
+    def files(self):
+        return {
+            "1-primary/x/.env": "TOKEN=vault://cerulean/x#TOKEN\n",
+            "1-primary/x/data/vault/token/x.token": "s.x-token\n",
+        }
+
+    def status_for(self, value):
+        vault = FakeVault({("cerulean", "x"): ("ok", {"TOKEN": value})})
+        findings = self.scan(self.files(), vault)[0]
+        return findings[0]
+
+    def test_a_real_secret_is_ok(self):
+        finding = self.status_for("Zq8fJ2mQp_Lw4rT1vXy7bN0kA3dG6hSe")
+        self.assertEqual(finding.status, "ok")
+
+    def test_a_comment_inside_the_value_is_suspect(self):
+        finding = self.status_for(
+            "ak-ldap-outpost-2026    # outpost API token (monarch stack)")
+        self.assertEqual(finding.status, "suspect")
+        self.assertIn("#", finding.detail)
+
+    def test_a_quoted_placeholder_is_suspect(self):
+        self.assertEqual(self.status_for("'change-me'").status, "suspect")
+
+    def test_a_placeholders_name_is_suspect(self):
+        for value in ("change-me", "CHANGEME", "placeholder", "xxxxxxxxx"):
+            with self.subTest(value=value):
+                self.assertEqual(self.status_for(value).status, "suspect")
+
+    def test_a_documented_example_name_is_suspect(self):
+        self.assertEqual(self.status_for("ak-ldap-outpost-2026").status, "suspect")
+
+    def test_placeholder_text_inside_a_longer_value_is_suspect(self):
+        self.assertEqual(
+            self.status_for("your-secret-token-here").status, "suspect")
+
+    def test_a_suspect_value_is_never_echoed(self):
+        # The rule reports a shape, not the value: a check that protects secrets
+        # must not be the thing that prints one into a log.
+        finding = self.status_for("your-secret-token-here")
+        self.assertNotIn("your-secret-token-here", finding.render())
+        self.assertNotIn("your-secret-token-here", finding.detail)
+
+    def test_a_suspect_value_counts_as_a_violation(self):
+        vault = FakeVault({("cerulean", "x"): ("ok", {"TOKEN": "change-me"})})
+        self.assertEqual(len(self.violations(self.files(), vault)), 1)
+
+
 class LegacyStore(ScanCase):
     """Rule 5 — Infisical is retired, so a leftover reference fails."""
 

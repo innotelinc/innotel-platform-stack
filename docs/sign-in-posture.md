@@ -186,6 +186,13 @@ is a second sign-in.
 | `qbittorrent` · `sabnzbd` `.monarch.innotel.us` | `qbittorrent-sso`, `sabnzbd-sso` | `14007`, `14008` | `http://qbittorrent:8080`, `http://sabnzbd:8080` | `monarch-media` |
 | `req.monarch.innotel.us`, `req.innotel.us` | `jellyseerr-sso` | `14009` | `http://jellyseerr:5055` | `monarch-media` |
 | `media.innotel.us`, `media.magnate.innotel.us` | `jellyfin-sso` | `14010` (`.56`) | `http://jellyfin:8096` | `monarch-media` |
+
+> **Two of the rows above no longer gate their name** (2026-09-18). `jellyseerr-sso`
+> and `jellyfin-sso` still carry the traffic — the apps stay bound to loopback, so
+> those ports are the only door on `.56` — but they skip authentication for every
+> path (`OAUTH2_PROXY_SKIP_AUTH_ROUTES: "^/.*$"`), because they were asking for a
+> browser OIDC flow from clients that do not have one. See
+> [§3](#3-third-party-apps) and the dated note under §5.
 | `tube.innotel.us` | `clipbucket-sso` | `14011` (`.56`) | `http://clipbucket:80` | `monarch-media` |
 | `tv.monarch.innotel.us` | `iptv-sso` | `14012` (`.56`) | `http://iptv:3000` | `monarch-media` |
 | `requestrr.monarch.innotel.us` | `requestrr-sso` | `14013` (`.56`) | `http://requestrr:4545` | `monarch-media` |
@@ -292,11 +299,11 @@ configuration change.
 
 | App | Today | SSO posture |
 |---|---|---|
-| **Jellyfin** | Authentik **LDAP outpost** (`jellyfin-ldap`) — logins resolve against Cerulean users, `paid_users` gates access | ✅ **already SSO.** Disabling a user in Authentik blocks their media login |
+| **Jellyfin** | Authentik **LDAP outpost** (`jellyfin-ldap`) — logins resolve against Cerulean users, `paid_users` gates access; the login page also carries an **OIDC SSO button** (`Jellyfin.Plugin.OIDC`, same `monarch-media` client as the gateways) | ✅ **already SSO**, and since 2026-09-18 its login page is **published rather than gated** — the page is what native clients need, and the identity is enforced by the two paths above. Disabling a user in Authentik blocks their media login |
 | **Homarr** (Monarch dashboard) | `AUTH_PROVIDERS: "oidc"` with `AUTH_OIDC_*` set | ✅ **already OIDC-only** |
 | **Dograh** | Authentik application `dograh` (provider 28) | ✅ **already OIDC-only** |
 | **n8n · Grist · Grafana · Workflow Studio · FreePBX/AvantFax · Technitium** | own local login | **Fronted by an `oauth2-proxy` gateway** (`innotel-app-gateway`) — see §1. Authentik is the only door on the public name |
-| **The media stack** (Radarr, Sonarr, Lidarr, Whisparr, Bazarr, Prowlarr, qBittorrent, SABnzbd, Jellyseerr) | own local login | **Fronted by an `oauth2-proxy` gateway** (`monarch-media`); the apps run `AuthenticationMethod=External`, i.e. they trust the proxy and have no login of their own. **Two of them keep a second credential store the gateway cannot see**, so gating the name is not the whole job — see the note under the table |
+| **The media stack** (Radarr, Sonarr, Lidarr, Whisparr, Bazarr, Prowlarr, qBittorrent, SABnzbd) | own local login | **Fronted by an `oauth2-proxy` gateway** (`monarch-media`); the apps run `AuthenticationMethod=External`, i.e. they trust the proxy and have no login of their own. **(Seerr is the exception** — its gateway publishes the app's own sign-in page, because Seerr cannot hold an OIDC session and has no TV-less client to protect; see below.) |
 | **Jellyfin · Clipbucket · the IPTV guide · Requestrr** | own login (Jellyfin through the LDAP outpost, the other three their own forms) | **Fronted by a gateway since 2026-09-16** — the three names that answered with no gate at all (`media.*`, `tube.*`, `tv.monarch.*`) plus the Discord bot's console. Each app is bound to `127.0.0.1` on the media host, so its gateway is the only door, not one of two |
 | **OmniRoute gateway** | local dashboard password | Fronted by `olympus-gateway-sso` at `gateway.olympus.innotel.us` (see `5-dev/olympus/docs/gateway-sso.md`); OmniRoute's own OIDC cannot be enabled — it strips the trailing slash from the issuer and Authentik's `iss` always ends with one |
 | **MinIO** | access keys | Native OIDC exists (`MINIO_IDENTITY_OPENID_*`); object-store API keys are not a user login |
@@ -522,16 +529,26 @@ login form is reachable off its own host.** What that rests on, per surface:
 
 1. **Jellyfin** — its login form is the LDAP bind: the fields are Cerulean
    credentials and a disabled Authentik user cannot sign in, but the page itself
-   is still a form. **Taken the other way on 2026-09-16** (the call this section
-   said was the owner's): the public names are fronted by `jellyfin-sso` and the
-   app is bound to `127.0.0.1:8097`, so the form is no longer reachable off the
-   host, and a browser still lands on it *after* the gateway — two prompts, one
-   identity. The cost is the path the section warned about: **native TV/mobile
-   clients speak the Jellyfin API, not a browser OIDC flow**, so a client that
-   cannot open a sign-in page cannot reach Jellyfin by name any more. Bringing
-   them back is a skip-auth rule for their own tokens at the gateway
-   (`X-Emby-Token` / an API key), not re-opening `8097` — re-opening it
-   republishes exactly the form the gateway exists to remove.
+   is still a form. **Taken one way on 2026-09-16 and then back on 2026-09-18.**
+   The gated version fronted the public names with `jellyfin-sso` and bound the
+   app to `127.0.0.1:8097`, so the form was not reachable off the host — but the
+   page was gated while the API was passed through, which turned out to be the
+   wrong half. **Native TV/mobile clients speak the Jellyfin API, not a browser
+   OIDC flow**; a client that opens the login page in a webview (Android TV,
+   Fire TV) was sent to Authentik, a flow it cannot complete, and Quick Connect
+   had no page to enter its code on. The page is now published
+   (`jellyfin-sso` skips auth on every path) and the identity is enforced where
+   the app already enforces it: the login page carries the **Cerulean Authentik**
+   SSO button, and native clients bind against the LDAP outpost.
+   `scripts/verify-sso.py` asserts it both ways — the page answers `200` with
+   Jellyfin's own HTML and never redirects to the IdP, while the names that *are*
+   gated still do. Re-opening `8097` on the LAN is still not the fix; the app
+   stays loopback-bound, so the proxy remains the only door.
+
+   **Seerr is published for the same reason and a different one:** it has no OIDC
+   support at all (measured), so gating its name bought an Authentik prompt in
+   front of a page that then asked for the Jellyfin account anyway. Its own
+   sign-in is the only sign-in it has, and it resolves to a Cerulean identity.
 2. **FreePBX/AvantFax** — the GUI is already loopback-only and reachable only
    through `pbx-sso`. Its local admin login is the **only** recovery path when
    Authentik or the gateway is down (short of `fwconsole` over SSH); deleting it
@@ -594,7 +611,7 @@ where their gateways dial and refuses an unauthenticated `PING`.
 
 | Zone | Host | Result |
 | --- | --- | --- |
-| Media — 9 gateways, `req.innotel.us` and its alias | `.56` | **PASS**: every name issued `_innotel_sso` and opened, non-member refused `403`, app ports loopback-only, store answers and returns `NOAUTH` |
+| Media — 9 gated gateways, plus the 4 names that publish their app's own sign-in page | `.56` | **PASS**: every gated name issued `_innotel_sso` and opened, non-member refused `403`; the four published names answered `200` with the app's own page and never redirected to the IdP; app ports loopback-only, store answers and returns `NOAUTH` (re-run 2026-09-18 after the change) |
 | App — n8n, Grist, SigNoz, Workflow Studio, FreePBX/AvantFax, Technitium | `.30` | **5 of 6 PASS**; `dns.internal.innotel.us` answers **502** — see below |
 | Olympus — Studio on both its names | `.50` | **PASS**: both names drove a full PKCE flow, sealed `studio_session`, and returned the projects document |
 
@@ -778,3 +795,65 @@ Two things only a per-host run could show:
   (`docker-compose.yml` in both), so they were discarded in favour of the
   committed version and the checkouts fast-forwarded. Worth knowing before
   trusting `git status` on a host as a statement about the estate.
+
+## 8. The two published media names, and the login outage behind them (2026-09-18)
+
+Gating Jellyfin's *page* while passing its API through asked for a browser OIDC
+flow from clients that do not have one. A TV client opening `…/web/#/login` in a
+webview got Authentik rather than the form, and Quick Connect had no page to enter
+its code on. `media.innotel.us`, `media.magnate.innotel.us`, `req.innotel.us` and
+`req.monarch.innotel.us` therefore publish the app's own sign-in page again:
+`jellyseerr-sso` and `jellyfin-sso` keep carrying the traffic (the apps stay
+loopback-bound, so those ports are still the only door) with
+`OAUTH2_PROXY_SKIP_AUTH_ROUTES: "^/.*$"`.
+
+**This is not "no authentication", and the difference is asserted rather than
+claimed.** Cerulean Authentik is still the only credential store, by the apps'
+own wiring — the Jellyfin login page carries the **Cerulean Authentik** OIDC
+button (client `monarch-media`, the same application the gateways are clients
+of), native clients bind against the `jellyfin-ldap` outpost, and Seerr has no
+password of its own (`main.localLogin` off) so its sign-in *is* the Jellyfin
+account. `3-media/monarch/scripts/verify-sso.py` grew a second posture for those
+four names: `200` with the app's own page, no redirect to the IdP, while the
+names that *are* gated still `302`. It passes on `.56`.
+
+### What the same login path was hiding
+
+The reason it looked like "SSO broke Jellyfin" is that **three unrelated faults
+were stacked in the LDAP path**, and each one alone makes the login form answer
+`HTTP 500` for a correct password exactly as it does for a wrong one:
+
+1. **Two copies of the LDAP plugin.** `LDAP-Auth` (v23) and
+   `LDAP Authentication_24.0.0.0` (v24) both held `LDAP-Auth.dll`. Jellyfin loads
+   both, and the plugin's own configuration type is cast across two load
+   contexts — `InvalidCastException: [A]…PluginConfiguration cannot be cast to
+   [B]…PluginConfiguration` — so *every* authentication threw before any LDAP
+   conversation. The older folder is retired (`.superseded-2026-09-18`).
+2. **The outpost's token was refused.** `authentik-ldap` logged
+   `403 Forbidden (Token invalid/expired)` in a retry loop, never started its
+   LDAP listener, and Jellyfin's bind failed with `Connection refused`.
+3. **The store held placeholder text.** `cerulean/data/monarch` carried
+   `ak-ldap-outpost-2026    # outpost API token (monarch stack)` — quotes, inline
+   comment and all — for both `AUTHENTIK_LDAP_TOKEN` and
+   `AUTHENTIK_LDAP_BIND_TOKEN`. It had been migrated into Vault from a `.env`
+   whose lines carried comments, so `.env`, Vault, the bind user's password and
+   Jellyfin's `LDAP-Auth.xml` all agreed on a value no Authentik token had ever
+   been minted from. Comment-stripping cannot catch that one: the comment is
+   *inside* the value.
+
+Seerr's failure was the same failure one layer out — its Jellyfin sign-in passes
+Jellyfin's status straight through (`Something went wrong while authenticating
+with the Jellyfin server: Request failed with status code 500`), so it is
+`401` for a wrong password and `200` for a right one once Jellyfin is fixed.
+
+**Two checks came out of it, both wired into `3-media/monarch`'s drift check:**
+
+| Check | What it would have caught |
+| --- | --- |
+| `scripts/verify-ldap.py` (existed, was never run by anything) | Faults 1–3: it binds as the bind user and performs the very search the plugin performs |
+| duplicate-assembly count in `drift-check.sh` | Fault 1 — two folders holding the same auth plugin |
+| `ips/scripts/check-vault-refs.py`'s placeholder rule | Fault 3: a stored value that carries a comment or a placeholder is reported, not resolved |
+
+Worth stating plainly: the estate's own answer to "is the identity path real"
+was a script that nothing called, and a secret store whose *values* had never
+been inspected — only their references.
