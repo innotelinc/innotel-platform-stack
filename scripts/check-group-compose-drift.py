@@ -33,7 +33,23 @@ THE RULES
    have to be in the group file — Monarch's compose keeps `transmission`,
    `deluge` and `autobrr` behind profiles on purpose — so it is listed and not
    failed. The point of the list is that the *count* is visible.
-4. **A rename is reported, not decided.** The group files prefix what they
+4. **A group file may be a pointer, and the check follows it.** The hand-written
+   files re-declared the services; the group files here do not — they
+   `include:` the generated compose in the stack repo (`ips/groups/<group>.yml`,
+   from `gen-group-compose.py`), which is what a host actually deploys. So the
+   declared set is the group file *and everything it includes*, recursively. A
+   group file with no `include:` still works exactly as before, which is what
+   lets the cases in `tests/` stay small.
+5. **Only the files a group deploys are compared.** A repo can carry several
+   compose files and not all of them run: `zeus` has a standalone portal compose
+   and a full-stack one, `compose.observability.yml` beside both, and the voice
+   host runs the full stack. `gen-group-compose.py` records which files it read
+   in the generated file's `# Sources:` header, so that list is what this check
+   compares; the repo's other files are listed with their service counts and not
+   failed, the way profile-gated ones are. A group file with no such header is
+   read the old way — every compose file the repo carries — which is what keeps
+   the cases in `tests/` small.
+6. **A rename is reported, not decided.** The group files prefix what they
    re-declare (`plutus-backend` for plutus's `backend`) and rebundle it
    (`zeus-freepbx` for zeus's `pbx`), so a name-by-name comparison pairs a
    missing service with an extra one and calls it drift. Where a group name and
@@ -41,7 +57,7 @@ THE RULES
    printed as *renamed* and does not fail the check; what is left over is a real
    finding. Without that split the output is thirty lines of rename noise around
    the three services that are genuinely absent, and nobody reads it.
-5. **Anchors are not services.** `x-*` keys are compose extensions
+7. **Anchors are not services.** `x-*` keys are compose extensions
    (`x-common`, `x-sso-gateway`) and are ignored on both sides.
 
 Only the `services:` keys are read; nothing here starts, configures or reaches a
@@ -110,6 +126,15 @@ COMPOSE_GLOB = "*compose*.y*ml"
 
 # A top-level `services:` line.
 SERVICES = re.compile(r"^services:\s*$")
+# `include:` in its four shapes: a block of `- path.yml`, a block of
+# `- path: path.yml`, an inline `[a.yml, b.yml]`, and a bare `include: a.yml`.
+INCLUDE_BLOCK = re.compile(r"^include:\s*$")
+INCLUDE_INLINE = re.compile(r"^include:\s*\[(.*?)\]\s*$")
+INCLUDE_BARE = re.compile(r"^include:\s*(\S+)\s*$")
+INCLUDE_ITEM = re.compile(r"^\s+-\s*(?:path:\s*)?(\S+)\s*$")
+# A top-level key that is not `include` — the end of an include block.
+TOP_KEY = re.compile(r"^([A-Za-z0-9_.-]+):")
+
 # A service key: two spaces of indentation, then a name.
 SERVICE_KEY = re.compile(r"^  ([A-Za-z0-9][A-Za-z0-9_.-]*):\s*$")
 # `profiles: ["legacy"]`, `profiles:` + a list, or `profiles: [standalone]`.
@@ -187,13 +212,137 @@ def parse_services(path: Path) -> Compose:
     return compose
 
 
+# A line of the generated file's `# Sources:` header:
+#     #   2-voice/zeus/docker-compose.full.yml
+SOURCES_LINE = re.compile(r"^#\s+(\d+-[A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/(\S.*)$")
+
+
+def deployed_sources(path: Path) -> dict[str, list[str]]:
+    """repo -> the compose files it is deployed from, per the generated header.
+
+    `gen-group-compose.py` writes its own `SOURCES` table into the file it
+    generates, one line per repo, and that is the only place the answer exists: a
+    repo cannot say which of its compose files a group host runs. Returning an
+    empty mapping means the header is absent (a hand-written group file), and the
+    caller then reads every file the repo carries — this check's original rule.
+    """
+    table: dict[str, list[str]] = {}
+    for source in followed_files(path):
+        try:
+            lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        inside = False
+        for line in lines:
+            if line.strip() == "# Sources:":
+                inside = True
+                continue
+            if inside:
+                match = SOURCES_LINE.match(line)
+                if not match:
+                    break
+                files = [name.strip() for name in match.group(3).split(",") if name.strip()]
+                table.setdefault(match.group(2), []).extend(files)
+    return table
+
+
+def include_refs(path: Path) -> list[str]:
+    """The paths this compose file `include:`s, in the order it names them.
+
+    Read by indentation like everything else here, and deliberately tolerant: an
+    include whose path is a `${VAR}` or is missing is the generator's problem,
+    not this check's — what is returned is whatever the file literally says.
+    """
+    refs: list[str] = []
+    in_block = False
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return refs
+
+    for raw in lines:
+        code = raw.split("#", 1)[0].rstrip()
+        if INCLUDE_BLOCK.match(code):
+            in_block = True
+            continue
+        inline = INCLUDE_INLINE.match(code)
+        if inline:
+            refs.extend(part.strip().strip("'\"") for part in inline.group(1).split(",") if part.strip())
+            in_block = False
+            continue
+        bare = INCLUDE_BARE.match(code)
+        if bare:
+            refs.append(bare.group(1).strip("'\""))
+            continue
+        if in_block:
+            item = INCLUDE_ITEM.match(code)
+            if item:
+                refs.append(item.group(1).strip("'\""))
+                continue
+            if TOP_KEY.match(code) or (code.strip() and not code.startswith(" ")):
+                in_block = False
+    return refs
+
+
+def followed_files(path: Path, seen: set[Path] | None = None) -> list[Path]:
+    """`path`, then every file it includes, depth-first, each once.
+
+    A compose file that includes another is how the group files here stay
+    derived rather than hand-kept (rule 4 in the module docstring). Relative
+    paths resolve against the *including* file — that is compose's rule, and the
+    estate depends on it: `3-media/docker-compose.yml` points at
+    `../ips/groups/3-media.yml`, which resolves those paths one level down.
+
+    A cycle (or a file including itself) is dropped rather than followed, so a
+    mistake in the wiring can never turn into a hung check.
+    """
+    seen = set() if seen is None else seen
+    path = path.resolve()
+    if path in seen:
+        return []
+    seen.add(path)
+    files = [path]
+    for ref in include_refs(path):
+        if "$" in ref or "*" in ref:
+            continue  # not a literal path — cannot be followed, and not ours to
+        target = (path.parent / ref).resolve()
+        if target.is_file():
+            files.extend(followed_files(target, seen))
+    return files
+
+
+def effective_compose(path: Path) -> tuple[Compose, dict[str, Path], list[Path]]:
+    """A compose file's declared services, merged with everything it includes.
+
+    Returns the merged `Compose`, a map of service name to the file that
+    declares it, and the file list. Compose merges an include into the including
+    file, and a host deploys the merged result, so this — not the pointer — is
+    what has to be compared against the repos.
+    """
+    files = followed_files(path)
+    merged = Compose(path=path)
+    where: dict[str, Path] = {}
+    for source in files:
+        for name, gated in parse_services(source).services.items():
+            if name not in merged.services:
+                merged.services[name] = gated
+                where[name] = source
+            elif gated:
+                merged.services[name] = True
+    return merged, where, files
+
+
 def composes_in(directory: Path) -> list[Path]:
     """Every compose file in this directory, in a stable order."""
     return sorted(p for p in directory.glob(COMPOSE_GLOB) if p.is_file())
 
 
 def compose_in(directory: Path) -> Path | None:
-    """The group compose of a group directory — the default name, if present."""
+    """The group compose of a group directory — the default name, if present.
+
+    In the estate this is a *pointer* (`include: ../ips/groups/<group>.yml`);
+    `effective_compose` is what follows it through to the services.
+    """
     for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
         candidate = directory / name
         if candidate.is_file():
@@ -248,9 +397,14 @@ class GroupReport:
     members: dict[str, Compose] = field(default_factory=dict)
     group_owned: set[str] = field(default_factory=set)
     opt_in: dict[str, str] = field(default_factory=dict)  # service -> where
+    # Compose files a member repo carries but the group does not deploy
+    # (a variant or an opt-in overlay): listed, never compared.
+    variants: dict[str, int] = field(default_factory=dict)  # file -> services
     findings: list[Finding] = field(default_factory=list)
     # (repo service, group service) pairs that differ by a prefix or segment.
     renamed: list[tuple[str, str]] = field(default_factory=list)
+    # Files the group compose includes (the generated compose, in the estate).
+    included: list[str] = field(default_factory=list)
 
     @property
     def violations(self) -> list[Finding]:
@@ -270,24 +424,47 @@ def compare(group_dir: Path) -> GroupReport:
     assert group_file is not None
     report = GroupReport(group=group_dir.name, group_file=group_file)
 
+    deployed = deployed_sources(group_file)
     for child in sorted(group_dir.iterdir()):
         if not child.is_dir() or child.name.startswith("."):
             continue
         found = composes_in(child)
-        if found:
-            # One entry per repo, unioning its compose files: the repo's services
-            # are what it can run, whichever file declares each one.
-            member = parse_services(found[0])
-            for extra_file in found[1:]:
-                other = parse_services(extra_file)
-                for name, gated in other.services.items():
-                    member.services[name] = member.services.get(name, False) or gated
-            member.path = found[0]
-            report.members[child.name] = member
+        if not found:
+            continue
+        wanted = deployed.get(child.name)
+        if wanted:
+            # Only the files the group actually deploys. The rest are the repo's
+            # own variants — real files, no host running them — so they are
+            # counted and set aside rather than reported as missing services.
+            chosen = {name for name in wanted}
+            compared = [path for path in found if path.name in chosen]
+            for path in found:
+                if path.name not in chosen:
+                    report.variants[str(path)] = len(parse_services(path).services)
+        else:
+            compared = found
+        if not compared:
+            continue
+        # One entry per repo, unioning its compose files: the repo's services are
+        # what it can run, whichever of the deployed files declares each one.
+        member = parse_services(compared[0])
+        for extra_file in compared[1:]:
+            other = parse_services(extra_file)
+            for name, gated in other.services.items():
+                member.services[name] = member.services.get(name, False) or gated
+        member.path = compared[0]
+        report.members[child.name] = member
 
-    group = parse_services(group_file)
+    # The group's declared set is the group file plus everything it includes
+    # (compose merges them, and a host deploys the merged result). `where_of`
+    # keeps the file that actually declares each name, so a finding points at
+    # the generated file rather than at the pointer.
+    group, where_of, group_files = effective_compose(group_file)
+    report.included = [str(p) for p in group_files[1:]]
+
+    declaring_file = where_of.get(next(iter(group.always_on), ""), group_file)
     for name in group.opt_in:
-        report.opt_in[name] = f"{group_dir.name}/{group_file.name}"
+        report.opt_in[name] = str(declaring_file)
 
     declared = group.always_on
     for name, repo in sorted(report.repo_services().items()):
@@ -297,7 +474,7 @@ def compare(group_dir: Path) -> GroupReport:
     repo_names = set(report.repo_services())
     for name in sorted(declared - repo_names):
         report.findings.append(Finding(group_dir.name, "extra", name,
-                                       f"{group_dir.name}/{group_file.name}"))
+                                       str(where_of.get(name, group_file))))
 
     # Pair the two lists into renames before anything is called drift: a group
     # file that disagrees on a name is still declaring the service.
@@ -426,7 +603,9 @@ def main(argv: list[str] | None = None) -> int:
                     "group": report.group,
                     "file": str(report.group_file),
                     "members": sorted(report.members),
+                    "included": report.included,
                     "group_owned": sorted(report.group_owned),
+                    "variants": dict(sorted(report.variants.items())),
                     "opt_in": dict(sorted(report.opt_in.items())),
                     "renamed": [list(pair) for pair in report.renamed],
                     "findings": [f.__dict__ for f in report.findings],
@@ -443,7 +622,9 @@ def main(argv: list[str] | None = None) -> int:
         for report_member, compose in sorted(report.members.items()):
             print(f"    {report_member:<16} {len(compose.always_on):>3} service(s)"
                   + (f", {len(compose.opt_in)} opt-in" if compose.opt_in else ""))
-        print(f"  group file {len(parse_services(report.group_file).always_on):>3} service(s)")
+        merged, _, _ = effective_compose(report.group_file)
+        print(f"  group file {len(merged.always_on):>3} service(s)"
+              + (f", via {len(report.included)} include(s)" if report.included else ""))
         missing = [f for f in report.findings if f.kind == "missing"]
         stale = [f for f in report.findings
                  if f.kind == "extra" and f.is_violation]
@@ -467,6 +648,11 @@ def main(argv: list[str] | None = None) -> int:
         if report.opt_in:
             print(f"  opt-in (profiles), not compared: "
                   + ", ".join(sorted(report.opt_in)))
+        if report.variants:
+            print(f"  not deployed by this group ({len(report.variants)}) — a variant "
+                  "or an opt-in overlay, on no host:")
+            for path, count in sorted(report.variants.items()):
+                print(f"    {path}  ({count} service(s))")
 
     if violations:
         print(f"\nfailed: {len(violations)} drift finding(s) between the group composes "

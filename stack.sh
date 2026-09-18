@@ -37,9 +37,11 @@ ENV_FILE="${STACK_DIR}/.env"
 #   <root>/
 #     1-primary/  2-voice/  3-media/  4-social/  5-dev/   ips/
 #
-# Each group dir holds its own docker-compose.yml plus the repos that run on
-# that server (1-primary/cerulean, 2-voice/capstone, …). This repo orchestrates
-# them and no longer owns a groups/ dir of its own.
+# Each group dir holds the repos that run on that server (1-primary/cerulean,
+# 2-voice/capstone, …) plus a `docker-compose.yml` that *points at* this repo's
+# generated group compose; it declares no services of its own. This repo
+# orchestrates them, and `groups/` is where the group composes are built and
+# tracked — see `scripts/gen-group-compose.py`.
 ROOT_DIR="$(cd "${STACK_DIR}/.." && pwd)"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
@@ -207,8 +209,24 @@ ensure_env() {
   source "$ENV_FILE"
 }
 
+# The group's compose.
+#
+# It is generated from the member repos and tracked here (`groups/<group>.yml`,
+# built by `scripts/gen-group-compose.py`, which `scripts/check-group-compose-drift.py`
+# keeps honest) because the hand-written copy in each group dir re-declared the
+# same services and drifted from them. Prefer the generated file — it is the
+# complete one, it is what the drift check compares against the repos, and its
+# relative paths resolve from its own directory. A group dir's own
+# `docker-compose.yml` is a pointer to it, for anyone running a group from its
+# own directory; the fallback keeps that working if the generated file is absent
+# (a checkout without the rest of the estate).
 compose() {
   local dir="$1"; shift
+  local generated="${STACK_DIR}/groups/$(basename "${dir}").yml"
+  if [ -f "$generated" ]; then
+    docker compose -f "$generated" "$@"
+    return
+  fi
   docker compose -f "${dir}/docker-compose.yml" "$@"
 }
 

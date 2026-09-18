@@ -483,12 +483,86 @@ until someone asks. Two consequences worth acting on:
 
 ## Recommended next actions
 
+## How the group composes are produced (2026-09-18)
+
+`ips/scripts/gen-group-compose.py` builds `ips/groups/<group>.yml` from the
+member repos named in its `SOURCES` table, and `--check` fails when the
+checked-in file is stale. Both the drift check and `--check` are wired into
+CI (`.github/workflows/ci.yml`); each skips cleanly in a checkout that stands
+alone, so a host with the estate is where they do the real work. The hand-written files it replaces are gone: each group
+dir's `docker-compose.yml` is a pointer, and `stack.sh` runs the generated file.
+
+Four decisions in it are worth knowing, because each one was a measured call and
+not a preference:
+
+- **`SOURCES` is measured, not guessed.** A repo's own files do not say which of
+them a group host runs, so the answer was read off the hosts: the
+`com.docker.compose.project.config_files` label of every running container
+(`.30`, `.46`, `.50`, `.56`, 2026-09-18). That is what settled `zeus` — the voice
+host runs `docker-compose.full.yml` (`zeus-freepbx`, `zeus-portal`, `pbx-coturn`),
+not the standalone portal compose, which declares a second portal and a second
+gateway that no host runs.
+- **A repo's `container_name` is never rewritten.** The hand-written files
+invented `g<N>-` prefixes; no host has ever run a container with one. The hosts
+run `cerulean`, `jellyfin`, `zeus-portal`, `omniroute` — the repos' own names,
+which is also what every script, doc and Consul registration here names. The
+gateway's host-split section above records the cost of the guess: a guard that
+looked for a container named `g2-omniroute` matched nothing, so it warned where
+it should have refused.
+- **A repo deployed as two files is merged the way compose merges them.** Signara
+runs as `docker-compose.prod.yml` **plus** `docker-compose.override.prod.yml`;
+list keys append (`ports:`, `profiles:`), everything else replaces, and a
+mapping-valued key (`environment:`) is merged key by key so no YAML key is
+defined twice. Dropping the override described a stack nobody runs — its
+healthcheck fix and minio's public `9002` port were the parts that mattered.
+- **Paths are rewritten; a container path is not.** `build: .`, `context: .`,
+`env_file: .env` (and its `- .env` / `- path: .env` list forms) and every bind
+mount are prefixed with the declaring repo, because compose resolves them
+against the file that declares them. A `dockerfile:` stays as written (it is
+relative to its context), as does anything under `command:`/`entrypoint:`.
+All five files pass `docker compose config --no-interpolate`, and four of the
+five render fully (`config -q`, every profile on) against nothing but the member
+repos' own `.env`/`.env.example` files — every resolved build context and bind
+mount lands on a real path in the repos. The fifth was one variable:
+`1-primary` needs `TUTOR_MYSQL_ROOT_PASSWORD`, and no repo carries it, because
+Tutor's LMS compose is generated on the host (`tutor local`) and only the
+group-owned extras here reference it. It is in `ips/.env.example` now, under
+AthenIQ/Tutor. This is the class of gap the merge would have hidden: a
+`${VAR:?}` in a group-owned service is invisible to every repo's env template,
+so the group compose is what has to be rendered to find it.
+
+What the generator reports and cannot decide: two services publishing one host
+port. `1-primary` has one real case (`3000`: `cerulean`, `client`, `frontend`,
+`magnate` — from variable defaults, so the value a given host uses can differ);
+the rest are opt-in and reported as notes, not warnings. Two host-port pairs are
+newly visible (`9443` authentik, `8200` vault, `3478` coturn) and all three are
+behind profiles on at least one side.
+
+Two things it found that are not about generation:
+
+1. **`1-primary/sign` declares `env_file: .env.prod`, and no such file exists**
+   on the trust host (`.46`) or in the bundle — only `.env.example`. No OpenSign
+   container runs anywhere, so this is not a live outage, but a host rebuilt from
+   group 1 cannot start that service until someone writes the file.
+2. **`requestrr.monarch.innotel.us` has no DNS record** and
+   **`api.signara.innotel.us` answers 502 with no Signara container running** —
+   both recorded under the sign-in posture work, neither touched here.
+3. **One literal credential is now carried in two repos.** Monarch's clipbucket
+   service sets `MYSQL_PASSWORD: ClipDB!2026` in `docker-compose.yml` rather than
+   reading it from `.env`, so the generated `groups/3-media.yml` carries the same
+   literal. Both repos are private and in the same org, so this is not a new
+   exposure — but it is the one place where a *generated* file copies a secret
+   value instead of a `${VAR}` reference. The fix belongs in the source
+   (`${CLIPBUCKET_DB_PASSWORD}` + an `.env.example` entry), and until it is made,
+   this is what `grep` finds when someone asks "what literals did we duplicate".
+   It is the only such literal across all five generated files.
+
 | # | Action | Status |
 |---|---|---|
-| 1 | `include:` each member repo's compose in its group compose, or generate the group compose from the repos — then delete the duplicated service blocks | **open** — the porting pass below did the opposite (it added back to the hand-declared file), so this is now more valuable, not less |
-| 2 | Move the group composes into a tracked location (or a repo) so drift is reviewable | **open** |
+| 1 | `include:` each member repo's compose in its group compose, or generate the group compose from the repos — then delete the duplicated service blocks | **done** — `ips/scripts/gen-group-compose.py` derives every group compose from its member repos and writes it to `ips/groups/<group>.yml`; nothing is re-declared by hand. `2-voice` 39 services, `3-media` 82, `1-primary` 46, `4-social` 20, `5-dev` 21. See *How the group composes are produced* below |
+| 2 | Move the group composes into a tracked location (or a repo) so drift is reviewable | **done** — they are generated *in* this repo (`ips/groups/`), so they have history, review and a diff; `stack.sh` prefers them, and each group dir's `docker-compose.yml` is a pointer (`include: ../ips/groups/<group>.yml`) for anyone running a group from its own directory |
 | 3 | Until then, port the services the group *names* but does not start: Zeus's `pbx` (2-voice), PLUTUS (3-media), Olympus + `studio` (5-dev) | **done** — `zeus-freepbx`, the four PLUTUS services, `olympus` + `studio` + `autoheal` |
 | 4 | Front the media apps: port the nine `*-sso` gateways and `monarch-init`/`monarch-seed` into 3-media, or the group-3 stack is both unconfigured and ungated | **done** — plus `whisparr`, `bazarr`, `iptv`, `authentik-ldap` and the appdata mount bridge they need |
 | 5 | Delete the stale `chef` from 5-dev (Atlas retired it) and add `convex-dashboard`, `certbot` | **done** |
 | 6 | Re-pack with the fixed `migrate-stack.py` before the next move — the old bundles cannot carry services that never had a container | **open** — `migrate-stack.py` records the declared set now; the bundles still have to be re-packed on the source host |
-| 7 | Re-check the group composes against the repos after the next repo-side service change — the drift this page records was invisible until someone ran both `config --services` sides | **now a check, and it measures 52 findings** — `ips/scripts/check-group-compose-drift.py` compares each group compose with its member repos' service sets, reading *every* compose file a repo carries (`docker-compose.full.yml`, `compose.cerulean.yml`, the overlays) and pairing prefixed renames with the repo that owns them instead of calling them drift. Wired into this repo's CI. Its run over the estate on 2026-09-16: `4-social` **clean**; `1-primary` missing `app`, `backup-ui` (npm) and `client`, `mongo` (sign); `5-dev` missing `gateway-sso`, `gateway-sso-sessions` (the host-gateway overlay is newer than the group file); `3-media` missing `clipbucket`, `clipbucket-sso`, `homarr`, `iptv-sso`, `jellyfin-sso`, `monarch-health`, `monarch-recs`, `requestrr`, `requestrr-sso` and still declaring `monarch-api` no repo has; `2-voice` missing 35 — Capstone's 29 services and Zeus's `pbx`/`signoz` family — with `capstone-api` in no repo. It reports; closing it is action 1, and the reporting is what makes action 1 worth doing |
+| 7 | Re-check the group composes against the repos after the next repo-side service change — the drift this page records was invisible until someone ran both `config --services` sides | **now a check, and it measures 0 findings** — with the files generated (action 1) there is nothing left to drift, and the check now reads the group compose *through* its pointer, so it still fails the moment a repo adds a service the generated file does not declare. Before the generator: 52 findings, and `ips/scripts/check-group-compose-drift.py` compares each group compose with its member repos' service sets, reading *every* compose file a repo carries (`docker-compose.full.yml`, `compose.cerulean.yml`, the overlays) and pairing prefixed renames with the repo that owns them instead of calling them drift. Wired into this repo's CI. Its run over the estate on 2026-09-16: `4-social` **clean**; `1-primary` missing `app`, `backup-ui` (npm) and `client`, `mongo` (sign); `5-dev` missing `gateway-sso`, `gateway-sso-sessions` (the host-gateway overlay is newer than the group file); `3-media` missing `clipbucket`, `clipbucket-sso`, `homarr`, `iptv-sso`, `jellyfin-sso`, `monarch-health`, `monarch-recs`, `requestrr`, `requestrr-sso` and still declaring `monarch-api` no repo has; `2-voice` missing 35 — Capstone's 29 services and Zeus's `pbx`/`signoz` family — with `capstone-api` in no repo. It reports; closing it is action 1, and the reporting is what makes action 1 worth doing |

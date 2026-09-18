@@ -1,0 +1,42 @@
+# ══════════════════════════════════════════════════════════════════════════
+# Group 4 — the wiring this group owns, not a member repo's services.
+#
+# Read verbatim into `groups/4-social.yml` by `ips/scripts/gen-group-compose.py`.
+# Keep it to what no repo declares: the Consul registration, the mesh network,
+# and services whose compose lives outside the member repos (Tutor's LMS,
+# Oasis's single mail image). Paths are relative to `ips/groups/`, where the
+# generated file sits.
+# ══════════════════════════════════════════════════════════════════════════
+
+services:
+  consul-reg-g4:
+    image: curlimages/curl:latest
+    container_name: g4-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "rizz-api|${MESH_SERVER_IP:-10.10.4.1}|8000|social,leaderboard" \
+          "rizz-app|${MESH_SERVER_IP:-10.10.4.1}|3010|social,leaderboard" \
+          "onyx-api|${MESH_SERVER_IP:-10.10.4.1}|8080|storage,nas" \
+          "onyx-objectstore|${MESH_SERVER_IP:-10.10.4.1}|9001|storage,s3"; do
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g4] Registered $$NAME at $$ADDR:$$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+
+networks:
+  default:
+    name: g4-net
+  innotel-mesh-net:
+    external: true

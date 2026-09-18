@@ -1,0 +1,42 @@
+# ══════════════════════════════════════════════════════════════════════════
+# Group 2 — the wiring this group owns, not a member repo's services.
+#
+# Read verbatim into `groups/2-voice.yml` by `ips/scripts/gen-group-compose.py`.
+# Keep it to what no repo declares: the Consul registration, the mesh network,
+# and services whose compose lives outside the member repos (Tutor's LMS,
+# Oasis's single mail image). Paths are relative to `ips/groups/`, where the
+# generated file sits.
+# ══════════════════════════════════════════════════════════════════════════
+
+services:
+  consul-reg-g2:
+    image: curlimages/curl:latest
+    container_name: g2-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "capstone-api|${MESH_SERVER_IP:-10.10.2.1}|3000|voice,ai-agents" \
+          "zeus-freepbx|${MESH_SERVER_IP:-10.10.2.1}|8083|voice,pbx" \
+          "zeus-portal|${MESH_SERVER_IP:-10.10.2.1}|3001|voice,pbx,portal" \
+          "omniroute|${MESH_SERVER_IP:-10.10.2.1}|20128|llm,ai,gateway"; do
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g2] Registered $$NAME at $$ADDR:$$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+
+networks:
+  default:
+    name: g2-net
+  innotel-mesh-net:
+    external: true

@@ -102,5 +102,16 @@ jobs:
       - name: Group composes declare what their member repos run
         run: python3 scripts/check-group-compose-drift.py
 
+      # The group composes are generated *and tracked*, so they can be stale in
+      # two ways: a member repo added a service the file does not declare (the
+      # drift check above), or somebody edited a repo file in a way that should
+      # change the generated output — a comment, a rewritten path — and did not
+      # regenerate. `--check` writes nothing and fails on the second: it
+      # regenerates in memory and diffs. Like the two checks above it, it stands
+      # alone in this checkout and skips cleanly when the group dirs are absent;
+      # run it from a host that has the estate to actually catch staleness.
+      - name: Group composes are current with their member repos
+        run: python3 scripts/gen-group-compose.py --check
+
       - name: Python syntax
         run: python3 -m py_compile scripts/*.py scripts/tests/*.py

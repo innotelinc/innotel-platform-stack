@@ -46,6 +46,11 @@ def group_file(services: tuple[str, ...] = ("app", "db"),
     return f"name: innotel-group9\nservices:\n{body}\nvolumes:\n  db-data:\n"
 
 
+# The estate's group file is a pointer, not the compose: it includes the
+# generated file one level up in the stack repo. `POINTER` is that shape.
+POINTER = "name: innotel-group9\ninclude:\n  - ../groups/9-group.yml\n"
+
+
 def repo(*services: str, gated: tuple[str, ...] = ()) -> str:
     """A member repo's compose; services named in `gated` sit behind a profile."""
     body = ""
@@ -177,6 +182,69 @@ class RuleTests(DriftCase):
             "9-group/alpha/docker-compose.yml": repo("app", "db"),
         })
         self.assertNotIn("x-common", chk.parse_services(report.group_file).services)
+
+    def test_a_pointer_group_file_follows_its_include(self):
+        """The estate's group files no longer declare the services at all — they
+        include the generated compose in the stack repo, and a host deploys that.
+        Following the include is what keeps the check meaningful."""
+        code, out = self.run_check({
+            "9-group/docker-compose.yml": POINTER,
+            "groups/9-group.yml": group_file(),
+            "9-group/alpha/docker-compose.yml": repo("app"),
+            "9-group/beta/docker-compose.yml": repo("db"),
+        })
+        self.assertEqual(code, 0, out)
+        self.assertIn("via 1 include(s)", out)
+
+    def test_a_service_missing_behind_a_pointer_is_still_a_violation(self):
+        code, out = self.run_check({
+            "9-group/docker-compose.yml": POINTER,
+            "groups/9-group.yml": group_file(),
+            "9-group/alpha/docker-compose.yml": repo("app"),
+            "9-group/beta/docker-compose.yml": repo("db", "worker"),
+        })
+        self.assertEqual(code, 1)
+        self.assertIn("MISSING (1)", out)
+        self.assertIn("worker", out)
+
+    def test_a_stale_name_behind_a_pointer_points_at_the_included_file(self):
+        """The finding names the file that declares it, so a reader is sent to
+        the generated compose rather than to the pointer that includes it."""
+        code, out = self.run_check({
+            "9-group/docker-compose.yml": POINTER,
+            "groups/9-group.yml": group_file(extra=("chef",)),
+            "9-group/alpha/docker-compose.yml": repo("app", "db"),
+            "9-group/beta/docker-compose.yml": repo("app", "db"),
+        })
+        self.assertEqual(code, 1)
+        self.assertIn("EXTRA (1)", out)
+        self.assertIn("chef", out)
+        report = self.report_for({
+            "9-group/docker-compose.yml": POINTER,
+            "groups/9-group.yml": group_file(extra=("chef",)),
+            "9-group/alpha/docker-compose.yml": repo("app", "db"),
+        })
+        where = [f.where for f in report.findings if f.service == "chef"]
+        self.assertTrue(where and where[0].endswith("groups/9-group.yml"), where)
+
+    def test_an_include_cycle_is_not_followed(self):
+        """A wiring mistake must not turn the check into a hang."""
+        code, out = self.run_check({
+            "9-group/docker-compose.yml": POINTER,
+            "groups/9-group.yml": group_file() + "include:\n  - ../9-group/docker-compose.yml\n",
+            "9-group/alpha/docker-compose.yml": repo("app", "db"),
+        })
+        self.assertEqual(code, 0, out)
+
+    def test_an_include_that_does_not_exist_is_not_a_crash(self):
+        """`gen-group-compose.py` writes the include target; until it has, this
+        check reports the pointer as declaring nothing rather than dying."""
+        code, out = self.run_check({
+            "9-group/docker-compose.yml": POINTER,
+            "9-group/alpha/docker-compose.yml": repo("app"),
+        })
+        self.assertEqual(code, 1)
+        self.assertIn("MISSING (1)", out)
 
     def test_an_extra_overlay_names_its_services(self):
         """A repo's services are spread across files by design — npm keeps the

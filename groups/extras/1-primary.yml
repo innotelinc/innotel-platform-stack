@@ -1,0 +1,150 @@
+# ══════════════════════════════════════════════════════════════════════════
+# Group 1 — the wiring this group owns, not a member repo's services.
+#
+# Read verbatim into `groups/1-primary.yml` by `ips/scripts/gen-group-compose.py`.
+# Keep it to what no repo declares: the Consul registration, the mesh network,
+# and services whose compose lives outside the member repos (Tutor's LMS,
+# Oasis's single mail image). Paths are relative to `ips/groups/`, where the
+# generated file sits.
+# ══════════════════════════════════════════════════════════════════════════
+
+services:
+  tutor-mysql:
+    image: docker.io/mysql:8.4.11
+    container_name: g1-tutor-mysql
+    restart: unless-stopped
+    command: >
+      mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+      --binlog-expire-logs-seconds=259200 --mysql-native-password=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: ${TUTOR_MYSQL_ROOT_PASSWORD:?set in .env}
+    volumes:
+      - tutor-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+      - innotel-mesh-net
+
+  tutor-mongodb:
+    image: docker.io/mongo:7.0.39
+    container_name: g1-tutor-mongodb
+    restart: unless-stopped
+    command: mongod --storageEngine wiredTiger
+    user: "999:999"
+    volumes:
+      - tutor-mongodb:/data/db
+    networks:
+      - default
+
+  tutor-redis:
+    image: docker.io/redis:7.4.10
+    container_name: g1-tutor-redis
+    restart: unless-stopped
+    volumes:
+      - tutor-redis:/data
+    networks:
+      - default
+
+  # LMS/CMS publish their origin ports directly (18000/18001). Public hostnames
+  # (learn./studio.) terminate at the shared NPM edge — no local Caddy.
+
+  tutor-lms:
+    image: docker.io/overhangio/openedx:22.0.2
+    container_name: g1-tutor-lms
+    restart: unless-stopped
+    ports:
+      - "${OPENEDX_LMS_PORT:-18000}:18000"
+    command: ./lms.sh gunicorn -b 0.0.0.0:18000 -w 2 --timeout 120
+    environment:
+      SERVICE_VARIANT: lms
+      DJANGO_SETTINGS_MODULE: lms.envs.tutor.production
+    volumes:
+      - tutor-lms-data:/openedx/data
+    depends_on:
+      - tutor-mysql
+      - tutor-mongodb
+      - tutor-redis
+    networks:
+      - default
+      - innotel-mesh-net
+
+  tutor-cms:
+    image: docker.io/overhangio/openedx:22.0.2
+    container_name: g1-tutor-cms
+    restart: unless-stopped
+    ports:
+      - "${OPENEDX_CMS_PORT:-18001}:18001"
+    command: ./cms.sh gunicorn -b 0.0.0.0:18001 -w 2 --timeout 120
+    environment:
+      SERVICE_VARIANT: cms
+      DJANGO_SETTINGS_MODULE: cms.envs.tutor.production
+    volumes:
+      - tutor-cms-data:/openedx/data
+    depends_on:
+      - tutor-mysql
+      - tutor-mongodb
+      - tutor-redis
+    networks:
+      - default
+      - innotel-mesh-net
+
+  tutor-meilisearch:
+    image: docker.io/getmeili/meilisearch:v1.36.0
+    container_name: g1-tutor-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${TUTOR_MEILI_KEY:-miFS50LGWh0Uc75s5upoe3ER}
+    volumes:
+      - tutor-meilisearch:/meili_data
+    networks:
+      - default
+
+  # ═══ MAGNATE (Billing) ═══════════════════════════════════════════════════
+
+  consul-reg-g1:
+    image: curlimages/curl:latest
+    container_name: g1-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "cerulean|${MESH_SERVER_IP:-10.10.1.1}|3003|auth,primary" \
+          "authentik|${MESH_SERVER_IP:-10.10.1.1}|9000|auth,sso,oidc" \
+          "vault|${MESH_SERVER_IP:-10.10.1.1}|8200|secrets,vault" \
+          "lms|${MESH_SERVER_IP:-10.10.1.1}|18000|education,primary" \
+          "cms|${MESH_SERVER_IP:-10.10.1.1}|18001|education,cms" \
+          "magnate|${MESH_SERVER_IP:-10.10.1.1}|3010|billing,primary" \
+          "npm|${MESH_SERVER_IP:-10.10.1.1}|81|edge,proxy,tls" \
+          "signara|${MESH_SERVER_IP:-10.10.1.1}|8000|trust,docs,signing"; do
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g1] Registered $$NAME at $$ADDR:$$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+
+volumes:
+  tutor-cms-data:
+  tutor-lms-data:
+  tutor-meilisearch:
+  tutor-mongodb:
+  tutor-mysql:
+  tutor-redis:
+
+networks:
+  default:
+    name: g1-net
+  innotel-mesh-net:
+    external: true

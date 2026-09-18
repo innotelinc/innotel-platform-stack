@@ -102,9 +102,12 @@ GATEWAY_PORT = 20128
 PROXY_PORT = 20129
 
 # The names the gateway answers to inside its own project. `2-voice/capstone` declares
-# the service as `omniroute`; the group compose gives it `container_name: g2-omniroute`,
-# which compose makes a valid DNS name on that project's network. A different project
-# has neither.
+# the service as `omniroute` and names the container `omniroute`, which compose makes a
+# valid DNS name on that project's network. A different project has neither.
+# `g2-omniroute` is kept as an accepted spelling, not because anything owns it: it is
+# the group-prefixed name the hand-written group files used, and a file that still
+# dials it is stale the same way one that dials the loopback port is — the tolerant
+# name keeps this check reading as a *target* error, not a name error.
 GATEWAY_NAMES = {"omniroute", "g2-omniroute"}
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost", "0.0.0.0"}

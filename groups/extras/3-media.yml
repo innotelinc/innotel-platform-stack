@@ -1,0 +1,51 @@
+# ══════════════════════════════════════════════════════════════════════════
+# Group 3 — the wiring this group owns, not a member repo's services.
+#
+# Read verbatim into `groups/3-media.yml` by `ips/scripts/gen-group-compose.py`.
+# Keep it to what no repo declares: the Consul registration, the mesh network,
+# and services whose compose lives outside the member repos (Tutor's LMS,
+# Oasis's single mail image). Paths are relative to `ips/groups/`, where the
+# generated file sits.
+# ══════════════════════════════════════════════════════════════════════════
+
+services:
+  # ═══ Monarch Intelligence ═════════════════════════════════════════════════
+
+  consul-reg-g3:
+    image: curlimages/curl:latest
+    container_name: g3-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "jellyfin|${MESH_SERVER_IP:-10.10.3.1}|8096|media,streaming" \
+          "jellyseerr|${MESH_SERVER_IP:-10.10.3.1}|5055|media,requests" \
+          "sonarr|${MESH_SERVER_IP:-10.10.3.1}|8989|media,automation" \
+          "radarr|${MESH_SERVER_IP:-10.10.3.1}|7878|media,automation" \
+          "prowlarr|${MESH_SERVER_IP:-10.10.3.1}|9696|media,indexers" \
+          "qbittorrent|${MESH_SERVER_IP:-10.10.3.1}|8080|media,downloads" \
+          "whisparr|${MESH_SERVER_IP:-10.10.3.1}|6969|media,automation" \
+          "bazarr|${MESH_SERVER_IP:-10.10.3.1}|6767|media,subtitles" \
+          "monarch-api|${MESH_SERVER_IP:-10.10.3.1}|3100|media,intelligence" \
+          "plutus-backend|${MESH_SERVER_IP:-10.10.3.1}|3210|media,video,convex" \
+          "plutus-web|${MESH_SERVER_IP:-10.10.3.1}|3000|media,video,web"; do
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g3] Registered $$NAME at $$ADDR:$$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+
+networks:
+  default:
+    name: g3-net
+  innotel-mesh-net:
+    external: true
