@@ -5,6 +5,7 @@
 # Usage:
 #   ./scripts/conform-project.sh <repo-dir>                 # audit
 #   ./scripts/conform-project.sh --new <name> <classification>   # scaffold
+#   ./scripts/conform-project.sh --print-guard              # the guard policy it installs
 #
 # The standard lives in ips/docs/standard.md.
 
@@ -102,6 +103,22 @@ FORBIDDEN_PATTERNS=(
   "(credit|credits|thanks|acknowledg)[[:space:]]*:?[[:space:]]*(to[[:space:]]+)?(${TOOL_TOKEN})"
 )
 
+# NOTE on pipelines: every check below greps a here-string, never a `printf … |
+# grep`. Both callers run under `set -o pipefail` (commit-msg, pre-commit and
+# the CI job all set it), and a `printf` writing more than a pipe buffer into a
+# `grep -q` that quits at the first match dies of SIGPIPE — 141 from the
+# pipeline, which an `if …; then` reads as "no match". A large input (a big
+# staged diff, a merged message log, an audit window) therefore failed OPEN and
+# skipped the rule entirely. A here-string has no writer process to signal, so
+# the verdict cannot depend on the size of the input.
+
+# Escape ERE metacharacters in a literal so allowlisted identities such as
+# dependabot[bot] match literally instead of being read as a bracket
+# expression.
+guard_escape_ere() {
+  printf '%s' "$1" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g'
+}
+
 # Scan text on stdin; exit 0 if clean, 1 (printing a reason) if any
 # attribution is found. Reads stdin ONCE into a variable first — each grep in
 # FORBIDDEN_PATTERNS runs against that single in-memory copy.
@@ -109,24 +126,208 @@ guard_check_stream() {
   local input
   input="$(cat)"
 
-  # 1. Git-trailer credit lines must name an allowed attribution.
-  if printf '%s\n' "$input" | grep -Eiq "^(${TRAILER_PREFIXES})[[:space:]]*:"; then
-    local bad
-    bad="$(printf '%s\n' "$input" | grep -Eia "^(${TRAILER_PREFIXES})[[:space:]]*:[[:space:]]*[^${ALLOWED_ATTRIBUTIONS[0]}]" || true)"
+  # 1. Git-trailer credit lines must name an allowed attribution. A trailer
+  #    line is BAD unless its value is exactly one of the allowed identities —
+  #    never the reverse (a negated character class over the allowlist would
+  #    silently pass any foreign value sharing a letter with it).
+  if grep -Eiq "^(${TRAILER_PREFIXES})[[:space:]]*:" <<< "$input"; then
+    local bad="" line ok
+    while IFS= read -r line; do
+      case "$line" in *[A-Za-z0-9]*) ;; *) continue ;; esac
+      # Not a trailer line at all? Then rule 1 does not apply to it.
+      grep -Eqi "^(${TRAILER_PREFIXES})[[:space:]]*:" <<< "$line" || continue
+      # Trailer line: BAD unless the value is exactly an allowed identity.
+      ok=0
+      for allowed in "${ALLOWED_ATTRIBUTIONS[@]}"; do
+        if grep -Eqi "^(${TRAILER_PREFIXES})[[:space:]]*:[[:space:]]*$(guard_escape_ere "$allowed")[[:space:]]*$" \
+            <<< "$line"; then
+          ok=1
+          break
+        fi
+      done
+      if [ "$ok" -eq 0 ]; then
+        bad+="$line"$'\n'
+      fi
+    done <<< "$input"
     if [ -n "$bad" ]; then
-      printf '%s\n' "$bad" | sed 's/^/guard: bad trailer:/' >&2
+      printf '%s' "$bad" | sed 's/^/guard: bad trailer:/' >&2
       return 1
     fi
   fi
 
   # 2. AI-assistant attribution phrases are forbidden.
   for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
-    if printf '%s\n' "$input" | grep -Eiq -- "$pattern"; then
+    if grep -Eiq -- "$pattern" <<< "$input"; then
       printf 'guard: forbidden attribution pattern matched: %s\n' "$pattern" >&2
       return 1
     fi
   done
 
+  return 0
+}
+
+# Self-test: prove the guard actually fires. Every MUST_REJECT case must be
+# rejected and every MUST_ALLOW case must pass — a guard that never rejects
+# is worse than no guard, so the tests force the failure paths too.
+#
+#   guard_selftest                 exit 0 if every case behaves, 1 otherwise
+#   guard_selftest --self-commit   additionally prove the real pre-commit
+#                                  hook fires: a staged diff carrying a
+#                                  forbidden line must be blocked and a clean
+#                                  staged diff must pass. Runs against a
+#                                  temporary git dir + index, so the working
+#                                  tree and the real index are untouched.
+guard_selftest() {
+  local want_hooks=0
+  [ "${1:-}" = "--self-commit" ] && want_hooks=1
+
+  local fails=0
+
+  # Fixtures naming a tool are assembled at runtime from token variables so
+  # this file itself never contains a literal tool attribution (the guard
+  # scans its own source and must stay clean).
+  local tool_first tool_last ai
+  tool_first="${TOOL_TOKEN%%|*}"
+  tool_last="${TOOL_TOKEN##*|}"
+  ai=ai
+
+  local MUST_REJECT=(
+    'co-authored-by: Someone Else <else@example.com>'
+    'signed-off-by: Jane Roe <jane@example.com>'
+    'Co-authored-by: Bot [bot] <bot@example.com>'
+    "co-authored-by: an ${ai} assistant"
+    "credits: ${tool_first} wrote this line"
+    "generated with ${tool_first} over the weekend"
+    "built by ${tool_last}, honestly"
+  )
+  local MUST_ALLOW=(
+    "signed-off-by: Darnel Hunter <dhunter@innotel.us>"
+    'Co-Authored-By: dependabot[bot] <support@github.com>'
+    'Uses an OpenAI-compatible endpoint for inference.'
+    'Docs are generated by the release pipeline.'
+    'This line credits nobody in particular.'
+  )
+
+  local line reason
+  for line in "${MUST_REJECT[@]}"; do
+    if printf '%s\n' "$line" | guard_check_stream >/dev/null 2>&1; then
+      printf 'guard_selftest: FAIL — not rejected: %s\n' "$line" >&2
+      fails=$((fails + 1))
+    fi
+  done
+  for line in "${MUST_ALLOW[@]}"; do
+    if ! reason="$(printf '%s\n' "$line" | guard_check_stream 2>&1)"; then
+      printf 'guard_selftest: FAIL — wrongly rejected: %s (%s)\n' "$line" "$reason" >&2
+      fails=$((fails + 1))
+    fi
+  done
+
+  # A LARGE input must get the same verdict as a small one. The rules grep a
+  # here-string, so no check can die of SIGPIPE when its writer outlives a
+  # `grep -q` — the failure that once made big inputs pass (the pipeline
+  # returned 141, which `if …; then` reads as "no match"). Run these under
+  # pipefail so the regression is caught even from a shell that has it off.
+  local filler big_bad big_clean
+  filler="$(head -c 262144 /dev/zero | tr '\0' 'x' | fold -w 79 | sed 's/$/ context line/')"
+  big_bad="$(printf '%s\n' "${MUST_REJECT[0]}"; printf '%s\n' "$filler")"
+  big_clean="$(printf '%s\n' "$filler")"
+  if ( set -o pipefail; printf '%s\n' "$big_bad" | guard_check_stream >/dev/null 2>&1 ); then
+    printf 'guard_selftest: FAIL — a large input hid a foreign trailer (fail-open)\n' >&2
+    fails=$((fails + 1))
+  fi
+  if ! ( set -o pipefail; printf '%s\n' "$big_clean" | guard_check_stream >/dev/null 2>&1 ); then
+    printf 'guard_selftest: FAIL — a large clean input was wrongly rejected\n' >&2
+    fails=$((fails + 1))
+  fi
+
+  # A blank line before the trailer must not defeat the trailer check.
+  if printf 'Subject\n\nco-authored-by: Someone Else <else@example.com>\n' \
+      | guard_check_stream >/dev/null 2>&1; then
+    printf 'guard_selftest: FAIL — trailer after a blank body line was not rejected\n' >&2
+    fails=$((fails + 1))
+  fi
+
+  # The guard must never reject its own source file.
+  if ! guard_check_stream < "${BASH_SOURCE[0]}" >/dev/null 2>&1; then
+    printf 'guard_selftest: FAIL — guard-lib rejects its own source\n' >&2
+    fails=$((fails + 1))
+  fi
+
+  if [ "$want_hooks" -eq 1 ]; then
+    # ── Prove the real pre-commit hook fires ──────────────────────────────
+    # A bare temp git dir has no objects or refs of its own, so point it at
+    # this repo's object store via info/alternates and copy the HEAD ref.
+    # The index is a temp file: stage a modified blob that ADDS one forbidden
+    # line (a diff against HEAD must contain added lines for the hook to
+    # scan), require the hook to block it, then reset the index to HEAD and
+    # require the hook to pass. The working tree is never touched.
+    local repo_top git_dir_real tmp_git_dir tmp_index branch head_commit
+    repo_top="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+      printf 'guard_selftest: FAIL — --self-commit needs a git repository\n' >&2
+      return 1
+    }
+    git_dir_real="$(git rev-parse --absolute-git-dir 2>/dev/null || printf '%s/.git' "$repo_top")"
+    head_commit="$(git rev-parse HEAD 2>/dev/null)" || {
+      printf 'guard_selftest: FAIL — --self-commit needs at least one commit\n' >&2
+      return 1
+    }
+    branch="$(git symbolic-ref --short HEAD 2>/dev/null || printf 'main')"
+    tmp_git_dir="$(mktemp -d)"
+    tmp_index="$(mktemp)"
+    git init --bare -q "$tmp_git_dir" 2>/dev/null
+    printf '%s\n' "$git_dir_real/objects" > "$tmp_git_dir/objects/info/alternates"
+    env GIT_INDEX_FILE="$tmp_index" git --git-dir="$tmp_git_dir" update-ref "refs/heads/$branch" "$head_commit"
+    git --git-dir="$tmp_git_dir" symbolic-ref HEAD "refs/heads/$branch"
+
+    run_pre_commit() {
+      (cd "$repo_top" && GIT_DIR="$tmp_git_dir" GIT_WORK_TREE="$repo_top" \
+        GIT_INDEX_FILE="$tmp_index" bash "${BASH_SOURCE[0]%/*}/pre-commit")
+    }
+
+    if ! env GIT_INDEX_FILE="$tmp_index" git --git-dir="$tmp_git_dir" read-tree HEAD >/dev/null 2>&1; then
+      printf 'guard_selftest: FAIL — could not read HEAD into the test index\n' >&2
+      rm -rf "$tmp_git_dir" "$tmp_index"
+      return 1
+    fi
+
+    local path old_blob new_blob bad_line hook_err
+    path="$(git --git-dir="$tmp_git_dir" ls-tree -r --name-only HEAD | head -1)"
+    if [ -z "$path" ]; then
+      printf 'guard_selftest: FAIL — HEAD contains no files to stage\n' >&2
+      rm -rf "$tmp_git_dir" "$tmp_index"
+      return 1
+    fi
+    bad_line='co-authored-by: Someone Else <else@example.com>'
+    git --git-dir="$tmp_git_dir" hash-object -w --stdin >/dev/null 2>&1 < /dev/null # warm the object dir
+    old_blob="$(git --git-dir="$tmp_git_dir" cat-file blob "HEAD:$path")"
+    new_blob="$( { printf '%s\n' "$old_blob"; printf '%s\n' "$bad_line"; } \
+      | git --git-dir="$tmp_git_dir" hash-object -w --stdin)"
+    env GIT_INDEX_FILE="$tmp_index" git --git-dir="$tmp_git_dir" \
+      update-index --add --cacheinfo "100644,$new_blob,$path"
+
+    # The hook MUST block the diff that adds the forbidden line.
+    if hook_err="$(run_pre_commit 2>&1)"; then
+      printf 'guard_selftest: FAIL — pre-commit let a forbidden diff through\n' >&2
+      fails=$((fails + 1))
+    elif ! grep -q 'commit blocked' <<< "$hook_err"; then
+      printf 'guard_selftest: FAIL — pre-commit failed for the wrong reason: %s\n' "$hook_err" >&2
+      fails=$((fails + 1))
+    fi
+
+    # The hook MUST pass the clean diff (index reset to HEAD).
+    env GIT_INDEX_FILE="$tmp_index" git --git-dir="$tmp_git_dir" read-tree HEAD >/dev/null 2>&1
+    if ! run_pre_commit >/dev/null 2>&1; then
+      printf 'guard_selftest: FAIL — pre-commit blocked a clean diff\n' >&2
+      fails=$((fails + 1))
+    fi
+
+    rm -rf "$tmp_git_dir" "$tmp_index"
+  fi
+
+  if [ "$fails" -ne 0 ]; then
+    printf 'guard_selftest: %d case(s) failed\n' "$fails" >&2
+    return 1
+  fi
   return 0
 }
 GUARD_EOF
@@ -1551,10 +1752,20 @@ audit() {
     check_gt0 "$_c" "README has License section"
   fi
 
-  # attribution guard content
+  # attribution guard content. Having TOOL_TOKEN is not enough: the copy must BE
+  # the shared policy, because a stale copy is a weaker gate. The generator below
+  # is the source of truth, so compare against what it writes — the older copy it
+  # used to emit had a trailer rule that passed anything whose first character
+  # appeared in the allowlist, and answered a large input with "clean".
   if [ -f "$dir/.githooks/guard-lib" ]; then
     _c=$(grep -c 'TOOL_TOKEN=' "$dir/.githooks/guard-lib" || true)
     check_gt0 "$_c" "guard-lib is the shared policy (contains TOOL_TOKEN)"
+    _guard_ref="$(mktemp -d)"
+    mkdir -p "$_guard_ref/.githooks"
+    write_guard_lib "$_guard_ref"
+    check_eq "$(cksum <"$dir/.githooks/guard-lib")" "$(cksum <"$_guard_ref/.githooks/guard-lib")" \
+      "guard-lib is current (byte-identical to the policy this script writes)"
+    rm -rf "$_guard_ref"
   fi
 
   # .env.example posture
@@ -1887,7 +2098,16 @@ icon_char() {
 # ── main ───────────────────────────────────────────────────────────────────────
 
 main() {
-  if [ "${1:-}" = "--new" ]; then
+  if [ "${1:-}" = "--print-guard" ]; then
+    # The policy this script installs, on stdout: lets CI (and a human) diff the
+    # generated guard against the copy a repo carries, without scaffolding a repo.
+    local _d
+    _d="$(mktemp -d)"
+    mkdir -p "$_d/.githooks"
+    write_guard_lib "$_d"
+    cat "$_d/.githooks/guard-lib"
+    rm -rf "$_d"
+  elif [ "${1:-}" = "--new" ]; then
     [ -n "${2:-}" ] || die "usage: conform-project.sh --new <name> <classification>"
     [ -n "${3:-}" ] || die "usage: conform-project.sh --new <name> <classification>"
     scaffold "$2" "$3"

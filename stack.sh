@@ -19,6 +19,8 @@
 #                         Clone/update the component repos next to this checkout
 #   verify  [component|all] [--dir <path>]
 #                         Check the component checkouts before starting
+#   audit   [component|all] [--org] [options]
+#                         Audit attribution in git history (scripts/audit-attribution.sh)
 #   mesh                  Start only the mesh network
 #   discover <service>    Find a service across all groups
 #   register <service> <addr> <port> [tags]  Register a service manually
@@ -770,6 +772,113 @@ cmd_verify() {
   ok "All ${#selected[@]} component checkout(s) verified"
 }
 
+# ── Attribution audit ──────────────────────────────────────────────────────────
+# The guard (`.githooks/guard-lib`) is a gate: it judges the commits and file
+# lines a push introduces, and the PR text. This command is the sweep that finds
+# what is already *in* history — which the gate only re-examines when some later
+# push makes it look further back (a branch's first push scans everything; an
+# ordinary push scans only its own commits). Component names resolve to their
+# checkouts exactly as `verify`/`download` do; the policy and the reporting live
+# in scripts/audit-attribution.sh, so there is one implementation of each.
+
+cmd_audit_help() {
+  echo "Usage: ./stack.sh audit [component...|all] [--org] [options]"
+  echo ""
+  echo "  Audits attribution in git history with the policy the repos enforce in"
+  echo "  their local hooks and in CI, and reports every offending commit with its"
+  echo "  hash, date and reason. Reads only: fixing history is a reviewed act."
+  echo ""
+  echo "Options:"
+  echo "  --org              every repository in the org that carries the guard"
+  echo "  --dir <path>       Parent directory of the component checkouts"
+  echo "                     (default: \$(dirname \"\$STACK_DIR\") or STACK_COMPONENT_BASE)"
+  echo "  --since <date>     Only commits after a date, e.g. --since 2026-08-01"
+  echo "  --limit <n>        At most n commits per repo, newest first (0 = all; default 500)"
+  echo "  --content          Also scan tracked file contents, not just messages"
+  echo "  --quiet            One line per repository"
+  echo "  --json             Machine-readable report (for a dashboard or a job)"
+  echo ""
+  echo "  Exit: 0 clean, 1 violations, 2 usage error — usable in a scheduled job."
+  echo ""
+  echo "Examples:"
+  echo "  ./stack.sh audit                        # this checkout"
+  echo "  ./stack.sh audit all --limit 0          # every component, full history"
+  echo "  ./stack.sh audit onyx distro --content"
+  echo "  ./stack.sh audit --org --quiet          # the whole org, one line each"
+}
+
+cmd_audit() {
+  local audit_script="${STACK_DIR}/scripts/audit-attribution.sh"
+  if [ ! -f "$audit_script" ]; then
+    err "audit script not found: ${audit_script}"
+    exit 2
+  fi
+
+  local base="" org=0 rc=0 missing=0
+  local -a targets=() pass=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h|--help) cmd_audit_help; return 0 ;;
+      --org)     org=1 ;;
+      --dir)     base="${2:?--dir needs a path}"; shift ;;
+      --dir=*)   base="${1#--dir=}" ;;
+      --since)   pass+=(--since "${2:?--since needs a date}"); shift ;;
+      --limit)   pass+=(--limit "${2:?--limit needs a number}"); shift ;;
+      --since=*|--limit=*|--content|--quiet|--json) pass+=("$1") ;;
+      -*)        err "Unknown option: $1"; cmd_audit_help; exit 1 ;;
+      *)         targets+=("$1") ;;
+    esac
+    shift
+  done
+
+  # A local .env is optional; it can supply STACK_COMPONENT_BASE, as for verify.
+  if [ -f "$ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+  fi
+  [ -n "$base" ] || base="${STACK_COMPONENT_BASE:-$(dirname "$STACK_DIR")}"
+
+  if [ "$org" -eq 1 ]; then
+    info "Attribution audit — every repo in the org that carries the guard"
+    bash "$audit_script" ${pass[@]+"${pass[@]}"} --org || rc=$?
+    return "$rc"
+  fi
+
+  # No argument means this checkout, the same as running the script here.
+  if [ ${#targets[@]} -eq 0 ]; then
+    bash "$audit_script" ${pass[@]+"${pass[@]}"} "$STACK_DIR" || rc=$?
+    return "$rc"
+  fi
+
+  local selected_list
+  selected_list=$(select_components "${targets[@]}") || { cmd_list_components; exit 1; }
+
+  local -a dirs=() c target
+  while read -r c; do
+    [ -n "$c" ] || continue
+    target="${base}/$(component_field "$c" 2)"
+    if [ ! -d "${target}/.git" ]; then
+      warn "${c} — no git checkout at ${target} (fix: ./stack.sh download ${c})"
+      missing=$((missing + 1))
+      continue
+    fi
+    dirs+=("$target")
+  done <<<"$selected_list"
+
+  if [ ${#dirs[@]} -eq 0 ]; then
+    err "no component checkouts to audit under ${base}"
+    exit 1
+  fi
+
+  info "Attribution audit — ${#dirs[@]} component checkout(s) in ${base}"
+  bash "$audit_script" ${pass[@]+"${pass[@]}"} "${dirs[@]}" || rc=$?
+  if [ "$missing" -gt 0 ]; then
+    warn "${missing} selected component(s) were not checked out and were skipped"
+  fi
+  return "$rc"
+}
+
 cmd_download_help() {
   echo "Usage: ./stack.sh download <component...|all> [options]"
   echo ""
@@ -922,6 +1031,7 @@ case "$cmd" in
   list)     cmd_list ;;
   download|fetch) cmd_download "$@" ;;
   verify)   cmd_verify "$@" ;;
+  audit)    cmd_audit "$@" ;;
   mesh)     cmd_mesh ;;
   discover) cmd_discover "$@" ;;
   register) cmd_register "$@" ;;
@@ -947,6 +1057,9 @@ case "$cmd" in
     echo "               ./stack.sh download plutus olympus"
     echo "  verify  [component...|all]  Check component checkouts before starting"
     echo "                        e.g. ./stack.sh verify all"
+    echo "  audit   [component...|all] [--org]  Audit attribution in git history"
+    echo "                        e.g. ./stack.sh audit all --limit 0     (full history)"
+    echo "                             ./stack.sh audit --org            (whole org)"
     echo "  mesh                  Start mesh network only"
     echo "  discover <service>    Find a service across all groups"
     echo "  register <svc> <addr> <port> [tags]  Register a service"
