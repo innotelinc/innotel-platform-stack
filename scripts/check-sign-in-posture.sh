@@ -3,10 +3,18 @@
 #
 # Each repo carries its own `scripts/verify-sso.py` for the reasons in
 # docs/sign-in-posture.md: the checks are specific to that deployment (Cerulean's
-# edge and Vault, Capstone's six gateways, Monarch's nine media apps, Signara's
-# API, Olympus's Studio) and the person who changes one of them should not have to
-# reason about the others. What was missing is a single command that runs all of
-# them, which is this file — the estate-wide half, kept in the estate-wide repo.
+# edge and Vault, Capstone's six gateways, Monarch's thirteen media gateways,
+# Signara's API, Olympus's Studio, Distro's OIDC-native console) and the person
+# who changes one of them should not have to reason about the others. What was
+# missing is a single command that runs all of them, which is this file — the
+# estate-wide half, kept in the estate-wide repo.
+#
+# ONE CAVEAT, because it reads as a zone failure and is not one: a zone's script
+# asserts things about the host that runs that zone (that the apps answer on
+# loopback, that the store answers where its gateways dial). Running it from
+# another host reports those host-local checks as failures. Run a zone's script
+# on that zone's own host when you want its full result; use this runner for the
+# fleet-wide picture.
 #
 # It is a runner, not a re-implementation: each zone's script owns its assertions
 # and its own exit codes, and this only reports what they said.
@@ -33,6 +41,10 @@ ZONES=(
   "capstone|2-voice/capstone"
   "monarch|3-media/monarch"
   "olympus|5-dev/olympus"
+  # Distro joined when its console was made Authentik-only; it is OIDC-native
+  # (no oauth2-proxy gateway), so its test asserts the issuer handshake and a
+  # real code flow rather than the gateway hop the six above do.
+  "distro|5-dev/distro"
 )
 
 SCRIPT="scripts/verify-sso.py"
