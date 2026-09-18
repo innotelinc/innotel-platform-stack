@@ -1,6 +1,34 @@
 # Capstone ↔ Zeus Convergence
 
-**Status: in progress** · updated September 15, 2026
+**Status: in progress** · updated September 17, 2026
+
+## 0. Decision record — direction of convergence (2026-09-17)
+
+**Decision: Capstone converges onto Zeus ("Capstone → Zeus"). Zeus does not
+converge into Capstone.** The question was re-examined against the live estate
+rather than the plan alone; three independent lines of evidence agree:
+
+1. **The shared PBX is already Zeus's, in production.** On `.30` the only
+   Asterisk running is `zeus-freepbx` (healthy). Capstone's bundled FreePBX and
+   its ARI configuration are **not running**. The converged `[dograh]` ARI user
+   lives in Zeus's `/etc/asterisk/ari_additional_custom.conf` (written by
+   `asterisk_converge.py`), and Dograh — Capstone's agent engine — dials it.
+   The converge already happened *on Zeus's side of the wall*.
+2. **The contract surface is published on the Zeus side.** `docs/portal-api.md`
+   (messages/fax/voicemail/transfer-resolve), the AMI exposure, and number
+   provisioning are Zeus surfaces Capstone consumes. The reverse surface —
+   agent behavior APIs Zeus would call — does not exist and should not: Zeus
+   never hosts agents (§2 rule).
+3. **Capstone already ships the consumer config.** `ZEUS_*` env contract,
+   `scripts/zeus_client.py` (unit-tested), and `CAPSTONE_PBX=standalone|zeus`
+   compose profiles implement the consumer side. Zeus ships nothing
+   Capstone-shaped, by design.
+
+The single-responsibility rule decides any future dispute the same way:
+**one PBX (Zeus's), one agent engine (Capstone's).** "Zeus → Capstone" would
+make Zeus a consumer of an ops UI and an agent runtime it does not need and
+duplicates the PBX; it is rejected. Remaining work is only the Phase 2 tail
+listed in §4 (agent tool wiring, one-click agent registration, G5/G6).
 
 > **Living tracker:** the Capstone repo's `docs/zeus-integration.md` is the
 > authoritative, current status for the shared-PBX integration (gaps G1–G4
@@ -243,3 +271,11 @@ Original questions (with the recommendations that were adopted):
    since it already owns the ops UI.)
 4. Zeal for the ISO/offline path in Zeus — same offline-first commitment as
    Capstone, or compose-only for now?
+---
+
+## 7. Follow-on notes (2026-09-18)
+
+- **Media gate follows the same pattern**: Jellyfin's LDAP plugin filters on
+  `cn=paid_users` on `.56`, and `req.magnate.innotel.us` (the Jellyseerr door)
+  is now an SSO-gated Cerulean hostname — Magnate's group webhook is the only
+  thing that has to change for access to follow billing.
