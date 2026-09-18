@@ -113,5 +113,17 @@ jobs:
       - name: Group composes are current with their member repos
         run: python3 scripts/gen-group-compose.py --check
 
+      # A `vault://` reference is only better than a plaintext secret if it
+      # resolves, and an unresolvable one looks configured in every review: the
+      # conversion plan's Phase 2 pass found Atlas's Vault path holding one of
+      # the two keys its repo declares, and a `change-me` placeholder still in
+      # place for the Authentik-issued secret. Neither is visible from the
+      # reference side. This reads both sides — every reference in the estate,
+      # resolved with the product's own scoped token. In this checkout there is
+      # no estate, so it skips cleanly; a host that holds the .env files and the
+      # tokens is where it does the work.
+      - name: Every vault:// reference resolves with its product's token
+        run: python3 scripts/check-vault-refs.py
+
       - name: Python syntax
         run: python3 -m py_compile scripts/*.py scripts/tests/*.py

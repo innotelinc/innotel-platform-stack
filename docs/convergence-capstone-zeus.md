@@ -188,7 +188,13 @@ to Capstone's structural bar so the two projects feel like one platform.
       contract as Cerulean/Onyx; landed 2026-09-07 — `docker-entrypoint.sh`
       resolves refs at boot via `scripts/vault-env.mjs`, docs/stack.md). Moved
       off the retired Infisical store on 2026-09-15: `vault-env.mjs` replaced
-      `infisical-env.mjs` and a leftover `infisical://` value is refused
+      `infisical-env.mjs` and a leftover `infisical://` value is refused.
+      **Verified end-to-end 2026-09-18** on `.30`: the portal logs `resolved 2
+      secret reference(s) from cerulean: SESSION_SECRET, VOIPMS_SIP_PASS` at
+      boot (so the values reach the process, not just the file), and the
+      path-scoped token is answered **403** on a sibling's path
+      (`cerulean/atlas`) — the per-product policy is real rather than nominal.
+      `ips/scripts/check-vault-refs.py` now keeps both halves true estate-wide.
 
 > Ansible (`zeus-ari.yml`) and the offline/live-USB ISO are the remaining
 > bare-metal parity gaps — **both deferred** per the §6.4 Q4 resolution
