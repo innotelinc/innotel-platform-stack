@@ -624,3 +624,25 @@ to be recreated — the checkout had simply been behind the deployment. The less
 is the one the generator's section repeats: a stale working copy is not inert —
 it silently
 withholds every later commit from the host that has it.
+
+### The subscribe portal was in no group compose, so nothing started it (2026-09-18)
+
+`web/subscribe/docker-compose.ext.yml` is this repo's own service — a small
+nginx that picks a service's page by Host header and is what every
+`subscribe.*.innotel.us` host forwards to (`192.168.1.46:3040`, the file's own
+header). It was **not** a member of any group compose and not an
+extension (`stack.sh` only enables `extensions/<name>/`), so on a rebuilt host
+nothing created it: the 17 `subscribe.*` proxy hosts and the `Subscribe` tile on
+the Homarr board all answered **502** while the portal itself was one command
+away. Started here, and it is `restart: unless-stopped`, so it survives reboots:
+
+```
+docker compose -f web/subscribe/docker-compose.ext.yml up -d
+```
+
+The gap is the service's *placement*, not its definition: it belongs in
+`groups/extras/1-primary.yml` (the group that owns the edge, where the Tutor and
+Oasis services already live), and until it is there a rebuilt `.46` comes up with
+every subscribe page missing. `scripts/subscribe-hosts.py` reconciles the hosts
+and `scripts/sync-subscribe-pages.py` regenerates the pages, so only the
+container is unaccounted for.
