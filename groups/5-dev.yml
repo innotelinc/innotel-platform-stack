@@ -78,8 +78,12 @@ services:
   # target for apps the builder produces (convergence §2: Atlas keeps CodeOps,
   # and Convex with it, while the *building* happens in Olympus). SQLite
   # storage on a named volume by default.
-  # Publish ports to 127.0.0.1; the edge (NPM) fronts them publicly and
-  # Cerulean attaches TLS. See docs/Deployment.md for Postgres/S3 options.
+  # The edge (NPM, on this host) fronts `convex.innotel.us` and Cerulean
+  # attaches TLS; the ports are published on the host's own addresses rather
+  # than loopback so that edge can reach them (`proxy_host` forwards to
+  # 192.168.1.46:3210, and a `127.0.0.1:` binding is invisible to a container).
+  # Admin access still needs `CONVEX_SELF_HOSTED_ADMIN_KEY`. See
+  # docs/Deployment.md for Postgres/S3 options.
   # ------------------------------------------------------------------
 
   convex:   # from atlas

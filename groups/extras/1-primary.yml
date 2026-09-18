@@ -103,6 +103,34 @@ services:
     networks:
       - default
 
+  # ═══ SUBSCRIBE PORTAL (this repo's own service) ═══════════════════════════
+  # One nginx serving a page per service by Host header
+  # (`web/subscribe/pages/<service>.html`), which every subscribe.<service>.<zone>
+  # host in the edge forwards to. It is group-owned, not a member repo's: it
+  # lived only in `web/subscribe/docker-compose.ext.yml`, which is neither a
+  # group member nor an extension (`stack.sh` only enables `extensions/<name>/`),
+  # so a rebuilt host created nothing and all 17 subscribe hosts answered 502.
+  # The compose file is kept for running it standalone; this is the declaration
+  # that a group deployment starts.
+  subscribe-portal:
+    image: docker.io/nginx:alpine
+    container_name: subscribe-portal
+    restart: unless-stopped
+    ports:
+      - "3040:80"
+    volumes:
+      - ../web/subscribe/pages:/usr/share/nginx/html/pages:ro
+      - ../web/subscribe/pages/index.html:/usr/share/nginx/html/index.html:ro
+      - ../web/subscribe/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+      - innotel-mesh-net
+
   # ═══ MAGNATE (Billing) ═══════════════════════════════════════════════════
 
   consul-reg-g1:

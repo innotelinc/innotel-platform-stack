@@ -640,9 +640,19 @@ away. Started here, and it is `restart: unless-stopped`, so it survives reboots:
 docker compose -f web/subscribe/docker-compose.ext.yml up -d
 ```
 
-The gap is the service's *placement*, not its definition: it belongs in
-`groups/extras/1-primary.yml` (the group that owns the edge, where the Tutor and
-Oasis services already live), and until it is there a rebuilt `.46` comes up with
-every subscribe page missing. `scripts/subscribe-hosts.py` reconciles the hosts
-and `scripts/sync-subscribe-pages.py` regenerates the pages, so only the
-container is unaccounted for.
+The gap was the service's *placement*, not its definition: it now lives in
+`groups/extras/1-primary.yml` (the group that owns the edge, beside the Tutor
+services) and is registered as group-owned in
+`scripts/check-group-compose-drift.py`, so `stack.sh up 1` starts it rather than
+reporting it as an extra. `scripts/subscribe-hosts.py` reconciles the hosts and
+`scripts/sync-subscribe-pages.py` regenerates the pages — the container is the
+part that had no owner.
+
+Regenerating for this also picked up the repos' newer comments and the
+`MONARCH_SSO_*`/`MONARCH_SEERR_OWNER` environment in `3-media` (monarch had moved
+on since the files were written), which is the drift the generator exists to
+close. One finding is still open and not from this change: `5-dev`'s member repo
+`ontrak` declares 5 services (`gateway`, `guacamole`, `guacd`, `lab-setup`,
+`portal`) that `gen-group-compose.py`'s `SOURCES` does not list, so the drift
+check reports them MISSING — adding the repo to `SOURCES` is what closes it, and
+that changes what a rebuilt `5-dev` host deploys.
