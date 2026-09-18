@@ -61,6 +61,12 @@ say()  { printf '%s\n' "$*"; }
 warn() { printf 'audit-attribution: %s\n' "$*" >&2; }
 die()  { printf 'audit-attribution: error: %s\n' "$*" >&2; exit 2; }
 
+# Options are read wherever they appear, and targets are collected as they are
+# met. Parsing used to stop at the first path, so `audit ../repo --limit 0`
+# silently ignored the limit, treated `--limit` and `0` as repo paths, and
+# reported a partial sweep as if it were the one that was asked for.
+TARGETS=()
+BAD_PATHS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --org)
@@ -68,19 +74,25 @@ while [ $# -gt 0 ]; do
       # Optional owner: `--org innotelinc`, or a bare `--org`.
       if [ $# -gt 1 ] && [ "${2#-}" = "$2" ]; then OWNER="$2"; shift; fi
       ;;
-    --dir)      WORK_DIR="${2:-}"; shift ;;
-    --since)    SINCE="${2:-}"; shift ;;
-    --limit)    LIMIT="${2:-}"; shift ;;
+    --dir)      [ -n "${2:-}" ] || die "--dir needs a path"; WORK_DIR="$2"; shift ;;
+    --since)    [ -n "${2:-}" ] || die "--since needs a date"; SINCE="$2"; shift ;;
+    --limit)    [ -n "${2:-}" ] || die "--limit needs a number"; LIMIT="$2"; shift ;;
     --content)  SCAN_CONTENT=1 ;;
     --json)     AS_JSON=1 ;;
     --quiet)    QUIET=1 ;;
     --selftest) MODE="selftest" ;;
     -h|--help)  usage; exit 0 ;;
     -*)         die "unknown option: $1 (try --help)" ;;
-    *)          break ;;
+    *)          TARGETS+=("$1") ;;
   esac
   shift
 done
+
+# A limit that is not a count has to fail rather than reach an arithmetic test.
+case "$LIMIT" in
+  ''|*[!0-9]*) die "--limit takes a whole number of commits (0 = all): got '$LIMIT'" ;;
+esac
+set -- "${TARGETS[@]+"${TARGETS[@]}"}"
 
 # ── policy ─────────────────────────────────────────────────────────────────
 # The audited repository's own guard is preferable: it is the policy that repo
@@ -159,7 +171,9 @@ row() { # append a JSON object to the report
 # ── the audit itself ───────────────────────────────────────────────────────
 audit_repo() { # <repo-dir> [label]
   local dir="$1" label="${2:-}" ref
-  [ -d "$dir/.git" ] || { warn "not a git checkout: $dir"; return 0; }
+  # Not a checkout is an error the caller must see in the exit status: a
+  # mistyped or moved path that reports "clean" is the worst answer available.
+  [ -d "$dir/.git" ] || { warn "not a git checkout: $dir"; BAD_PATHS=$((BAD_PATHS + 1)); return 0; }
   label="${label:-$(basename "$dir")}"
 
   if ! ref="$(default_ref "$dir")"; then
@@ -414,7 +428,7 @@ if [ -n "$TRUNCATED_REPOS" ] && [ "$AS_JSON" -eq 0 ]; then
   say "  older commits in those repos were not examined — a clean result here is partial"
 fi
 
-if [ "$VIOLATION_COMMITS" -eq 0 ] && [ "$VIOLATION_FILES" -eq 0 ]; then
+if [ "$VIOLATION_COMMITS" -eq 0 ] && [ "$VIOLATION_FILES" -eq 0 ] && [ "$BAD_PATHS" -eq 0 ]; then
   if [ "$AS_JSON" -eq 0 ]; then
     say "attribution audit: clean — $COMMITS_SCANNED commit(s) across $REPOS_SCANNED repo(s)$([ "$SCAN_CONTENT" -eq 1 ] && printf ', %s file(s)' "$FILES_SCANNED")"
   fi
@@ -423,7 +437,12 @@ fi
 
 if [ "$AS_JSON" -eq 0 ]; then
   say ""
-  say "attribution audit: $VIOLATION_COMMITS commit(s)$([ "$VIOLATION_FILES" -gt 0 ] && printf ' and %s file(s)' "$VIOLATION_FILES") to fix — only Darnel Hunter <dhunter@innotel.us> may be credited"
-  say "these are already in history: the hooks and CI stop new ones, they do not remove these"
+  if [ "$VIOLATION_COMMITS" -gt 0 ] || [ "$VIOLATION_FILES" -gt 0 ]; then
+    say "attribution audit: $VIOLATION_COMMITS commit(s)$([ "$VIOLATION_FILES" -gt 0 ] && printf ' and %s file(s)' "$VIOLATION_FILES") to fix — only Darnel Hunter <dhunter@innotel.us> may be credited"
+    say "these are already in history: the hooks and CI stop new ones, they do not remove these"
+  fi
+  if [ "$BAD_PATHS" -gt 0 ]; then
+    say "attribution audit: $BAD_PATHS path(s) were not git checkouts — nothing was scanned there"
+  fi
 fi
 exit 1
