@@ -160,9 +160,7 @@ def is_placeholder(value: str) -> bool:
         return True
     if any(token in value for token in INTERPOLATION_CHARS):
         return True
-    if any(token in value for token in REGEX_HINTS):
-        return True
-    return False
+    return any(token in value for token in REGEX_HINTS)
 
 
 def scan_text(label: str, text: str) -> list[Finding]:
