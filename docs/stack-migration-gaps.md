@@ -566,3 +566,36 @@ Two things it found that are not about generation:
 | 5 | Delete the stale `chef` from 5-dev (Atlas retired it) and add `convex-dashboard`, `certbot` | **done** |
 | 6 | Re-pack with the fixed `migrate-stack.py` before the next move — the old bundles cannot carry services that never had a container | **open** — `migrate-stack.py` records the declared set now; the bundles still have to be re-packed on the source host |
 | 7 | Re-check the group composes against the repos after the next repo-side service change — the drift this page records was invisible until someone ran both `config --services` sides | **now a check, and it measures 0 findings** — with the files generated (action 1) there is nothing left to drift, and the check now reads the group compose *through* its pointer, so it still fails the moment a repo adds a service the generated file does not declare. Before the generator: 52 findings, and `ips/scripts/check-group-compose-drift.py` compares each group compose with its member repos' service sets, reading *every* compose file a repo carries (`docker-compose.full.yml`, `compose.cerulean.yml`, the overlays) and pairing prefixed renames with the repo that owns them instead of calling them drift. Wired into this repo's CI. Its run over the estate on 2026-09-16: `4-social` **clean**; `1-primary` missing `app`, `backup-ui` (npm) and `client`, `mongo` (sign); `5-dev` missing `gateway-sso`, `gateway-sso-sessions` (the host-gateway overlay is newer than the group file); `3-media` missing `clipbucket`, `clipbucket-sso`, `homarr`, `iptv-sso`, `jellyfin-sso`, `monarch-health`, `monarch-recs`, `requestrr`, `requestrr-sso` and still declaring `monarch-api` no repo has; `2-voice` missing 35 — Capstone's 29 services and Zeus's `pbx`/`signoz` family — with `capstone-api` in no repo. It reports; closing it is action 1, and the reporting is what makes action 1 worth doing |
+
+### `.56`'s checkout could not fast-forward, and what that hid (2026-09-18)
+
+The media host's `ips` checkout sat 10 commits behind with a dirty tree, so
+nothing new could be run *from there* — `scripts/check-vault-refs.py` (the check
+the secrets pass added) could only be run from `.46`, i.e. not on the host whose
+`.env` files it partly exists to read.
+
+Nothing on that host was unique. Measured file by file against this repo's
+history, rather than by eye:
+
+- **Eleven paths held content that is already upstream**, byte for byte — they
+  were older copies of files this repo has since moved past (`git hash-object`
+  plus `git log --find-object` matched each blob to a commit). Among them the
+  whole `scripts/tests/` directory, `scripts/dbcheck.py`, the grafana/prometheus
+  extension and `groups/*.yml`, which the previous pull had never delivered
+  because the untracked copies blocked it.
+- **Two held older drafts of documents rewritten here since** —
+  `docs/stack-migration-gaps.md` itself (its copy still said the gateway's key
+  store was empty and autoheal was stopped) and the monitoring
+  `.env.host.example` (missing the port block). Superseded, not lost: the whole
+  local state was tarred off-host before anything was removed.
+- **One file was genuinely host-local and was kept**:
+  `extensions/monitoring/.env.host` (that host's own ports and Grafana password,
+  mode 0600). Its sha256 is unchanged across the pull, and it stops showing as
+  untracked because `.gitignore` gains `.env.host` in the commits that were
+  pulled.
+
+With those gone the pull was a fast-forward to `7cdf781`, the tree is clean, and
+`python3 scripts/check-vault-refs.py` runs from that host (`ok: no vault://
+references in the estate`, for what is checked out there). The lesson is the one
+the generator's section repeats: a stale working copy is not inert — it silently
+withholds every later commit from the host that has it.
