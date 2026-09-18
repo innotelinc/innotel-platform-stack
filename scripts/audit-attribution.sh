@@ -363,7 +363,18 @@ selftest() {
   done
   git -C "$clean" add -A && git -C "$clean" commit -qm "Add the readme"
   git -C "$bad" add -A
-  git -C "$bad" commit -qm "$(printf 'Add the readme\n\nGenerated with %s\n%s\n' "${tool^}" "$trailer")"
+  # The violation sits in a 300 KB message on purpose. A policy that judged only
+  # small inputs — the `printf … | grep -q` pipeline that died of SIGPIPE under
+  # `pipefail` and read as "no match" — would call this commit clean, and this
+  # selftest is the place that has to notice, because the audit's verdict comes
+  # from that policy. It goes in as a file: a single argument is capped at
+  # 128 KB on Linux, so `commit -m` cannot carry it.
+  local bad_msg="$tmp/bad-message"
+  {
+    printf 'Add the readme\n\nGenerated with %s\n%s\n' "${tool^}" "$trailer"
+    head -c 300000 /dev/zero | tr '\0' 'x' | fold -w 79
+  } >"$bad_msg"
+  git -C "$bad" commit -q -F "$bad_msg"
 
   local failures=0 mark
   mark="$VIOLATION_COMMITS"
