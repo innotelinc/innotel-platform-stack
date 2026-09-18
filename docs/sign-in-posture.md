@@ -54,6 +54,7 @@ what `authentik-conform-providers.py` writes; the fifth is what it verifies.
 | **`Innotel OAuth Mapping: OpenID 'groups'`** | group gates read `groups`. Without it, `OAUTH2_PROXY_ALLOWED_GROUPS`, Distro's entitlements and Jellyfin's `paid_users` filter authorize **nobody** — or, worse, restrict nothing |
 | an RSA signing key | Authentik falls back to HS256 keyed on the client secret, and a client verifying against the published JWKS rejects every token |
 | **`issuer_mode: per_provider`** | see below — this is the one that fails most quietly |
+| **every public name the provider serves, as a `strict` redirect URI** (`https://<name>/oauth2/callback`) | Authentik refuses the request **before** the user sees anything: `GET /application/o/authorize/` answers **HTTP 400** and the gateway never gets a code. A gateway can be perfectly configured — right issuer, right gateway, answering 302 — and still be unreachable because its name was added to DNS and NPM but not to the provider. Measured on `grafana.capstone.innotel.us`, whose row was missing while its four sibling gateways worked |
 
 **`issuer_mode` is not a preference.** Authentik has two modes, and they put
 different values in the id_token's `iss`:
@@ -111,7 +112,11 @@ that runs the store. A gateway that cannot reach the store does not degrade: it
 
 1. **Pick the pattern** — OIDC-native or a gateway, never both for one app.
 2. **Register one provider per stack**, then conform it with the command above.
-3. **Bind the app to loopback** so its gateway is the only door.
+3. **Bind the app to loopback** so its gateway is the only door, and **register
+   `<public name>/oauth2/callback` as a `strict` redirect URI** on the provider
+   the gateway signs in as — a new name is DNS **+** NPM host **+** redirect URI.
+   Prune the callback when the name is retired, or the list becomes a map of
+   names that no longer exist.
 4. **Point `SSO_SESSION_REDIS_HOST` at the store's routable address.**
 5. **Turn the app's own login off**, or reduce it to an identity map (Jellyfin).
 6. **Prove it with a real login**, not a config diff: anonymous must be redirected
@@ -662,9 +667,9 @@ single broken app.
 | Zone | Host | Result |
 | --- | --- | --- |
 | Cerulean — four edge admin names, Vault, Technitium, the closed password path | `.46` | **PASS** |
-| Media — 15 names across 13 gateways, non-member refused `403`, app ports loopback-only, store guarded | `.56` | **PASS** (`requestrr.monarch.innotel.us` does not resolve — a DNS gap, **open**) |
+| Media — 15 names across 13 gateways, non-member refused `403`, app ports loopback-only, store guarded | `.56` | **PASS** (`requestrr.monarch.innotel.us` had no DNS record — **closed**, see §7) |
 | Distro — password path closed, issuer match, real flow to `/api/me`, public origin identical | `.46` | **PASS** |
-| App — n8n, Grist, Grafana, Workflow Studio, FreePBX | `.30` | gateways recreated on the conformed issuer; the zone's own script still needs a token on `.30` (**open**) |
+| App — n8n, Grist, Grafana, Workflow Studio, FreePBX | `.30` | **PASS** (26 checks) once Grafana's name and redirect URI existed — see §7 |
 
 **Two things this closed besides the outage.** Seerr's *own* email/password login
 was still enabled (`main.localLogin: true`) — the drift check caught it, and
@@ -673,7 +678,10 @@ is now the only way in. And Monarch's `.env` carried an expired
 `AUTHENTIK_BOOTSTRAP_TOKEN`, which made its regression test fail for a reason that
 had nothing to do with the zone; it now carries the live one.
 
-**Still open.** `requestrr.monarch.innotel.us` has no DNS record. Jellyfin's
+**Closed since (see §7):** `requestrr.monarch.innotel.us` now has its DNS record,
+and every zone's test has been run **on the host that owns it**.
+
+**Still open.** Jellyfin's
 `dhunter` account still holds a password in Jellyfin's own store, and the two
 obvious ways to close it do not work — both measured, not assumed:
 
@@ -709,3 +717,64 @@ live — resynced, and `jellyfin-admin-password.py --check` is green again.
 `jellyfin-login-methods.py` had been reporting *any* 401/403 as "the admin API key
 was rejected", which sent an operator to re-mint a working key; it now reports a
 403's reason and only blames the key for a 401.
+
+## 7. Run on each host, and the two names it found (2026-09-18)
+
+The estate runner takes an optional zone filter and can be run wherever a zone's
+checkout lives — which is the only place its checks mean anything, because half of
+them are about what *that* stack can reach:
+
+```bash
+ips/scripts/check-sign-in-posture.sh --list
+ips/scripts/check-sign-in-posture.sh --only cerulean magnate signara distro   # on .46
+ips/scripts/check-sign-in-posture.sh --only capstone                          # on .30
+ips/scripts/check-sign-in-posture.sh --only olympus                           # on .50
+ips/scripts/check-sign-in-posture.sh --only monarch                           # on .56
+```
+
+| Host | Zone(s) | Result |
+| --- | --- | --- |
+| `.46` | cerulean **27**, magnate **18**, signara **12**, distro **8** | all **PASS** |
+| `.30` | capstone **26** | **PASS** |
+| `.50` | olympus **24** | **PASS** |
+| `.56` | monarch **62** | **PASS** |
+
+Two things only a per-host run could show:
+
+- **`requestrr.monarch.innotel.us` had no DNS record.** Its proxy host and its
+  gateway were both in place, so it looked configured; the name itself did not
+  exist. Added as an `A` record to the edge (the same target as every other
+  `*.monarch` name). Its callback was already registered on `monarch-media`.
+- **`grafana.capstone.innotel.us` had no DNS record, no proxy host, and no
+  redirect URI** — three gaps on one name, while its gateway (`grafana-sso`,
+  `14012`) was up the whole time. The zone's own `npm-proxy-hosts.py` map
+  declares the name (and, in the same comment, that Grafana *took* SigNoz's port
+  and gateway), so the fix followed the repo rather than inventing anything:
+  the `A` record, a proxy host mirroring its four siblings, and
+  `https://grafana.capstone.innotel.us/oauth2/callback` registered on
+  `innotel-app-gateway`.
+
+  **`signoz.capstone.innotel.us` was retired at the same time.** No SigNoz
+  container runs on any host, the name resolved through a `CNAME` to the apex,
+  and its proxy host pointed at `14012` — Grafana's gateway — so it served
+  Grafana under a dead product's name. Its NPM host, its `CNAME`, and its
+  redirect URI are gone; `*-sso` gateway names follow the apps that exist, not
+  the ones that used to.
+
+**Two findings that are decisions, not repairs**, both left as they are:
+
+- **The Capstone proxy-host sync cannot be run as-is.** `npm-proxy-hosts.py
+  --check` reports 16 hosts out of sync on `.30`, and 15 of those are
+  "no Let's Encrypt certificate for `<name>`" — but every one of those names
+  carries the **uploaded wildcard** (certificate id 46) and is served correctly
+  today. The tool only recognises per-host HTTP-01 certificates unless it is
+  given `--wildcard` plus a DNS provider credential. Running it unqualified
+  would try to issue fifteen redundant certificates against the public CA. The
+  one real finding in that report was Grafana, and it is closed above.
+- **The hosts' own checkouts carry the same fixes as uncommitted local edits.**
+  `.30` and `.56` had local modifications to the very lines later committed in
+  the repos; they were byte-identical (`.30`'s `verify-sso.py`, `.56`'s
+  `jellyfin-login-methods.py` / `verify-sso.py`) or comment-only
+  (`docker-compose.yml` in both), so they were discarded in favour of the
+  committed version and the checkouts fast-forwarded. Worth knowing before
+  trusting `git status` on a host as a statement about the estate.
