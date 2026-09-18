@@ -206,7 +206,13 @@ lease), never something the audit does.
   message log or an audit window therefore passed with a foreign credit line in it, while the
   same content passed one line at a time was caught. Checks grep a here-string instead, and
   `guard_selftest` runs both a large rejecting and a large clean case under `pipefail`.
-- Before a guard is trusted over a large input, prove it on one: `bash -o pipefail -c 'source
+- The invariant is *proved* in two places that do not depend on the guard's own test suite, so a
+  future guard (or a trimmed selftest) that regresses cannot pass quietly:
+  `scripts/conform-project.sh` runs the repo's guard over a 300 KB stream containing a foreign
+  trailer and reports `guard judges a 300 KB input`, in every repo's conformity CI; and
+  `scripts/audit-attribution.sh --selftest` builds its violating fixture with a 300 KB commit
+  message, so the audit fails loudly if the policy it trusts is size-dependent.
+- Before trusting a guard over a large input by hand: `bash -o pipefail -c 'source
   .githooks/guard-lib; guard_selftest'` in any repo.
 
 ---

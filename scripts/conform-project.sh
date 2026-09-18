@@ -333,6 +333,47 @@ guard_selftest() {
 GUARD_EOF
 }
 
+# guard_verdict_is_size_independent <guard-file>
+#
+# Proves a policy judges by content and not by size — that a large input cannot
+# slip a foreign credit line through. This probe lives here, in the stack's
+# script, and deliberately does NOT call the guard's own `guard_selftest`: the
+# guard's suite covers the cases it happens to contain, so the interesting
+# failure is a future guard (or a trimmed selftest) where they are gone. The
+# foreign line is assembled from the guard's own trailer prefixes, and the bulk
+# of the payload follows it, because that is the shape that defeated a
+# `printf … | grep -q` pipeline under `set -o pipefail`: the writer outlives
+# `grep -q`, dies of SIGPIPE, and 141 reads as "no match".
+guard_verdict_is_size_independent() {
+  local guard="$1"
+  (
+    set -o pipefail
+    # shellcheck source=/dev/null
+    source "$guard" 2>/dev/null || exit 1
+    command -v guard_check_stream >/dev/null 2>&1 || exit 1
+
+    local prefix foreign payload clean
+    prefix="$(printf '%s' "${TRAILER_PREFIXES:-co-authored-by}" | cut -d'|' -f1)"
+    foreign="$(printf '%s: %s\n' "$prefix" 'Someone Else <else@example.com>')"
+
+    # One stream, in one variable: the trailer first (so a `grep -q` gate quits
+    # early and the writer is still writing — the fail-open), the bulk behind
+    # it, the trailer again at the end so a policy that reads only a trailer
+    # block is judged fairly too.
+    payload="$(printf '%s\n' "$foreign"
+               head -c 300000 /dev/zero | tr '\0' 'x' | fold -w 79
+               printf '%s\n' "$foreign")"
+
+    # 1. That must be rejected.
+    printf '%s\n' "$payload" | guard_check_stream >/dev/null 2>&1 && exit 1
+
+    # 2. A large stream with nothing in it must still pass: rejecting
+    #    everything is not size-independence either.
+    clean="$(head -c 300000 /dev/zero | tr '\0' 'y' | fold -w 79)"
+    printf '%s\n' "$clean" | guard_check_stream >/dev/null 2>&1
+  )
+}
+
 write_commit_msg_hook() {
   cat > "$1/.githooks/commit-msg" <<'COMMIT_MSG_EOF'
 #!/usr/bin/env bash
@@ -1766,6 +1807,14 @@ audit() {
     check_eq "$(cksum <"$dir/.githooks/guard-lib")" "$(cksum <"$_guard_ref/.githooks/guard-lib")" \
       "guard-lib is current (byte-identical to the policy this script writes)"
     rm -rf "$_guard_ref"
+
+    # Carrying the policy is not the same as it working: prove it on the input
+    # shape it used to fail open on.
+    if guard_verdict_is_size_independent "$dir/.githooks/guard-lib"; then
+      check "guard judges a 300 KB input (a foreign trailer cannot hide in one)" true
+    else
+      check "guard judges a 300 KB input (a foreign trailer cannot hide in one)" false
+    fi
   fi
 
   # .env.example posture
