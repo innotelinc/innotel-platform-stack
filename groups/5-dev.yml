@@ -1,0 +1,927 @@
+# ══════════════════════════════════════════════════════════════════════════
+# Group 5 — DEV
+# GENERATED — do not edit. `ips/scripts/gen-group-compose.py` builds this
+# file from its member repos; edit those, or the group's own wiring in
+# `ips/groups/extras/5-dev.yml`, and regenerate.
+# `scripts/gen-group-compose.py --check` runs in CI.
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Sources:
+#   5-dev/atlas/docker-compose.yml
+#   5-dev/distro/docker-compose.yml, compose.vault.yml
+#   5-dev/oasis/docker-compose.yml
+#   5-dev/olympus/docker-compose.yml, compose.gateway-sso.yml, compose.vault.yml
+
+name: innotel-group5
+
+x-authentik-environment: &authentik-environment
+
+
+services:
+  gitea:   # from atlas
+    # Memory posture (docs/service-audit.md): git server with Actions CI;
+    # cap moderately (measured steady well under 1 GiB).
+    mem_limit: 2g
+    memswap_limit: 2g
+    image: gitea/gitea:${GITEA_VERSION:-1.27.2}
+    container_name: atlas-gitea
+    restart: unless-stopped
+    environment:
+      GITEA__server__DOMAIN: ${GIT_HOST:-git.innotel.us}
+      GITEA__server__SSH_DOMAIN: ${GIT_HOST:-git.innotel.us}
+      GITEA__server__ROOT_URL: ${GITEA_ROOT_URL:-https://git.innotel.us/}
+      GITEA__server__HTTP_PORT: "3000"
+      GITEA__server__SSH_PORT: ${GITEA_SSH_PORT:-22}
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: gitea-db:5432
+      GITEA__database__NAME: ${GITEA_DB_NAME:-gitea}
+      GITEA__database__USER: ${GITEA_DB_USER:-gitea}
+      GITEA__database__PASSWD: ${GITEA_DB_PASSWORD:-change-me-gitea-db-password}
+      # No open signups: accounts come from Authentik SSO or the admin.
+      GITEA__service__DISABLE_REGISTRATION: ${GITEA_DISABLE_REGISTRATION:-true}
+      GITEA__service__REQUIRE_SIGNIN_VIEW: "true"
+      GITEA__session__COOKIE_SECURE: "true"
+      GITEA__openid__ENABLE_OPENID_SIGNIN: "false"
+    ports:
+      - "${GITEA_HTTP_PORT:-3000}:3000"
+      - "${GITEA_SSH_PORT:-22}:22"
+    volumes:
+      - gitea-data:/data
+    depends_on:
+      gitea-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+
+
+  gitea-db:   # from atlas
+    image: postgres:${POSTGRES_VERSION:-16}-alpine
+    container_name: atlas-gitea-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${GITEA_DB_NAME:-gitea}
+      POSTGRES_USER: ${GITEA_DB_USER:-gitea}
+      POSTGRES_PASSWORD: ${GITEA_DB_PASSWORD:-change-me-gitea-db-password}
+    volumes:
+      - gitea-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${GITEA_DB_USER:-gitea} -d ${GITEA_DB_NAME:-gitea}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  # ------------------------------------------------------------------
+  # Convex backend — self-hosted reactive database & compute, and a deploy
+  # target for apps the builder produces (convergence §2: Atlas keeps CodeOps,
+  # and Convex with it, while the *building* happens in Olympus). SQLite
+  # storage on a named volume by default.
+  # Publish ports to 127.0.0.1; the edge (NPM) fronts them publicly and
+  # Cerulean attaches TLS. See docs/Deployment.md for Postgres/S3 options.
+  # ------------------------------------------------------------------
+
+  convex:   # from atlas
+    image: ghcr.io/get-convex/convex-backend:${CONVEX_VERSION:-latest}
+    container_name: atlas-convex
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    restart: unless-stopped
+    ports:
+      - "${CONVEX_BACKEND_PORT:-3210}:3210"
+      - "${CONVEX_SITE_PORT:-3211}:3211"
+    volumes:
+      - convex-data:/convex/data
+    environment:
+      INSTANCE_NAME: ${INSTANCE_NAME:-atlas-convex}
+      INSTANCE_SECRET: ${CONVEX_INSTANCE_SECRET:-}
+      CONVEX_CLOUD_ORIGIN: http://127.0.0.1:${CONVEX_BACKEND_PORT:-3210}
+      CONVEX_SITE_ORIGIN: http://127.0.0.1:${CONVEX_SITE_PORT:-3211}
+      DO_NOT_REQUIRE_SSL: "1"
+      DISABLE_BEACON: "1"
+      RUST_LOG: ${RUST_LOG:-info}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3210/version"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # ------------------------------------------------------------------
+  # Convex dashboard — admin UI for the self-hosted backend.
+  # Generate admin keys with `make convex-key`.
+  # ------------------------------------------------------------------
+
+  convex-dashboard:   # from atlas
+    image: ghcr.io/get-convex/convex-dashboard:${CONVEX_VERSION:-latest}
+    container_name: atlas-convex-dashboard
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CONVEX_DASHBOARD_PORT:-6791}:6791"
+    environment:
+      NEXT_PUBLIC_DEPLOYMENT_URL: http://127.0.0.1:${CONVEX_BACKEND_PORT:-3210}
+      NEXT_PUBLIC_LOAD_MONACO_INTERNALLY: ${NEXT_PUBLIC_LOAD_MONACO_INTERNALLY:-false}
+    depends_on:
+      convex:
+        condition: service_healthy
+
+  # ------------------------------------------------------------------
+  # Chef — RETIRED AS A BUILDER (build-plane convergence plan §2/§8).
+  #
+  # It used to be here as a `chef` profile (chef + chef-provisioner +
+  # chef-sites), building apps onto this stack's Convex backend. The plan
+  # settled on *one* builder — Olympus's engine (project_plan → runner →
+  # package-app/website → app-runtime) — because it is the only one of the
+  # three that ends with a running, named application. Two app-builder front
+  # doors were two ways to do one job, and Chef's output was bound to Convex.
+  #
+  # Nothing was deleted from the tree: `chef-provisioner/` and
+  # docs/chef-auth-fork.md stay as the record of that work (their headers say
+  # so). What changed is that Atlas no longer *runs* a builder, and the
+  # profile cannot be brought up from this file.
+  #
+  # What Atlas keeps from it is Convex. It stays a first-class deploy target
+  # for apps the builder produces — a realtime backend is a real product that
+  # the container runtime does not replace. Wiring it as a target the plan may
+  # pick lives in Studio (see the convergence doc §10.3 for the open question
+  # on when the Convex packaging path lands).
+  #
+  # Re-adding it is a decision, not an oversight: the services are in git
+  # history at the commit before this comment.
+  # ------------------------------------------------------------------
+
+
+  control-plane:   # from distro
+    build:
+      context: ../../5-dev/distro/apps/control-plane
+    image: distro-control-plane:local
+    container_name: distro-control-plane
+    restart: unless-stopped
+    env_file: ../../5-dev/distro/.env
+    environment:
+      # Gateway address is resolved at runtime: GATEWAY_DASHBOARD_URL /
+      # GATEWAY_API_URL env overrides → Consul (CONTROL_CONSUL_URL).
+      - GATEWAY_ADMIN_PASSWORD=${INITIAL_PASSWORD}
+      - ADMIN_EMAILS=${CONTROL_ADMIN_EMAILS:-}
+    volumes:
+      - control-data:/data
+    extra_hosts:
+      # Lets CONTROL_ALERT_WEBHOOK_URL point at a receiver on the host, e.g.
+      # http://host.docker.internal:8080/hook
+      - 'host.docker.internal:host-gateway'
+    ports:
+      # Browser-facing (the admin console at /admin; Studio and the builder
+      # surface call the same API). Bind LAN via 0.0.0.0, loopback via
+      # CONTROL_BIND_HOST=127.0.0.1. Protect with CONTROL_CORS_ORIGIN.
+      - '${CONTROL_BIND_HOST:-0.0.0.0}:20140:20140'
+
+
+  distro-vault:   # from distro (profiles: "vault")
+    image: hashicorp/vault:1.17
+    container_name: distro-vault
+    profiles: ["vault"]
+    restart: unless-stopped
+    # Vault wants to mlock memory so keys are never swapped to disk.
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID:-distro-dev-root}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://127.0.0.1:8200
+    ports:
+      - "${VAULT_PORT:-8200}:8200"
+    healthcheck:
+      # `vault status` exits non-zero while sealed, so it is a real liveness
+      # signal rather than a bare port check. Unauthenticated, hence no token.
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  postgres:   # from oasis
+    # Memory posture (docs/service-audit.md): mail state store; cap shared
+    # buffers indirectly via the container limit.
+    mem_limit: 1g
+    memswap_limit: 1g
+    image: postgres:16.4-alpine
+    container_name: oasis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-authentik}
+      POSTGRES_USER: ${POSTGRES_USER:-authentik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [oasis-backend]
+
+
+  redis:   # from oasis
+    image: redis:7.4-alpine
+    container_name: oasis-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    networks: [oasis-backend]
+
+
+
+
+  reverse-proxy-local:   # from oasis (profiles: local)
+    profiles: [local]
+    image: nginx:1.27.3-alpine
+    container_name: oasis-reverse-proxy-local
+    restart: unless-stopped
+    ports:
+      - "${HTTP_BIND:-8080}:80"
+    volumes:
+      - ../../5-dev/oasis/config/nginx/oasis-local.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [oasis-proxy]
+
+
+  reverse-proxy:   # from oasis (profiles: production)
+    profiles: [production]
+    image: nginx:1.27.3-alpine
+    container_name: oasis-reverse-proxy
+    restart: unless-stopped
+    ports:
+      - "${HTTP_BIND:-80}:80"
+      - "${HTTPS_BIND:-443}:443"
+    volumes:
+      - ../../5-dev/oasis/config/nginx/oasis.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot-webroot:/var/www/certbot:ro
+      - certbot-etc:/etc/letsencrypt:ro
+    networks: [oasis-proxy]
+
+
+  certbot:   # from oasis (profiles: production)
+    profiles: [production]
+    image: certbot/certbot:v3.1.0
+    container_name: oasis-certbot
+    restart: unless-stopped
+    entrypoint: /bin/sh
+    command: -c 'trap exit TERM; while :; do certbot renew --webroot --webroot-path /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    volumes:
+      - certbot-webroot:/var/www/certbot
+      - certbot-etc:/etc/letsencrypt
+    networks: [oasis-proxy]
+
+
+  zimbra-builder:   # from oasis (profiles: builder)
+    profiles: [builder]
+    build:
+      context: ../../5-dev/oasis
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: "${BASE_IMAGE:-ubuntu:22.04}"
+        ZIMBRA_VERSION: "${ZIMBRA_VERSION:-latest}"
+        BUILD_UID: "${BUILD_UID:-1000}"
+        BUILD_GID: "${BUILD_GID:-1000}"
+        TZ: "${TZ:-Etc/UTC}"
+    image: "oasis/zimbra-builder:local-${ZIMBRA_VERSION:-latest}"
+    container_name: oasis-zimbra-builder
+    environment:
+      ZIMBRA_VERSION: ${ZIMBRA_VERSION:-latest}
+      FORCE_REBUILD: ${FORCE_REBUILD:-false}
+    volumes:
+      - ../../5-dev/oasis/builds:/home/build/installer-build/BUILDS:rw
+    dns:
+      - ${DOCKER_DNS1:-8.8.8.8}
+      - ${DOCKER_DNS2:-1.1.1.1}
+    command: ["--build"]
+
+
+  olympus:   # from olympus
+    build:
+      context: ../../5-dev/olympus
+      dockerfile: Dockerfile
+    image: ghcr.io/innotelinc/olympus:local
+    container_name: olympus
+    restart: unless-stopped
+    # Autoheal restarts any container carrying this label when its healthcheck
+    # reports unhealthy. Requires a healthcheck to exist (see below).
+    labels:
+      - "autoheal=true"
+    env_file:
+      # Optional, because a render has to work without one: `make check-compose`
+      # validates these files against `.env.example` in a checkout that has no
+      # `.env`, and a missing env_file is an error rather than a warning. A
+      # deployment has one, and it is loaded exactly as before.
+      - path: ../../5-dev/olympus/.env
+        required: false
+    environment:
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20129/v1}
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      SPEC: ${SPEC:-}
+      OPENAI_API_KEY: ${OMNIROUTE_API_KEY:-${OPENAI_API_KEY:-}}
+    volumes:
+      - olympus-builds:/app/builds
+      - ../../5-dev/olympus/build-requests:/app/build-requests:ro
+      # Persist the factory token across restarts when using env_file .env
+      - ../../5-dev/olympus/.factory-env:/app/.factory-env
+    # NO PUBLISHED PORT, deliberately, and this is a fix rather than an omission.
+    # This service used to publish ${OLYMPUS_PORT:-20128}:20128 — the same host port
+    # the gateway service below owns — because the image can start a *bundled*
+    # gateway. It only ever worked because this container runs host-networked here
+    # (its ports are discarded); on a bridge run the two services fight for 20128,
+    # and if this one wins, the build runner and the SSO proxy reach an empty
+    # gateway with no provider connections. Nothing outside talks to this container:
+    # `make docker-app` uses `docker compose exec`, not the network. One OmniRoute.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      # The gateway has no /health route (it answers 404), so doctor.py is the signal.
+      # Match the status line exactly — a bare `grep -i ok` would match the per-check
+      # '[ ok ]' rows and could never fail.
+      test: ["CMD-SHELL", "python3 factory/doctor.py 2>/dev/null | grep -q 'Status: READY' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  # Studio — the vibe-coding web UI (web/studio). Talks to the gateway
+  # server-side; the key never reaches the browser. Build context is the app
+  # directory so the image carries no host node_modules.
+
+  studio:   # from olympus
+    build:
+      context: ../../5-dev/olympus/web/studio
+      dockerfile: Dockerfile
+    image: ghcr.io/innotelinc/olympus-studio:local
+    container_name: olympus-studio
+    restart: unless-stopped
+    labels:
+      - "autoheal=true"
+    env_file:
+      # Optional, because a render has to work without one: `make check-compose`
+      # validates these files against `.env.example` in a checkout that has no
+      # `.env`, and a missing env_file is an error rather than a warning. A
+      # deployment has one, and it is loaded exactly as before.
+      - path: ../../5-dev/olympus/.env
+        required: false
+    # See the OmniRoute caveat at the top of this file before changing the base URL.
+    environment:
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20129/v1}
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
+      OMNIROUTE_MODEL: ${OMNIROUTE_MODEL:-auto/coding}
+      STUDIO_ACCESS_TOKEN: ${STUDIO_ACCESS_TOKEN:-}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
+      # Group allow-list. Empty = any authenticated user; set = members of a
+      # listed group only, everyone else gets 403.
+      OIDC_ALLOWED_GROUPS: ${OIDC_ALLOWED_GROUPS:-}
+      STUDIO_SESSION_SECRET: ${STUDIO_SESSION_SECRET:-}
+      # Tenancy (Distro's control plane — convergence §5.2). With these set, a
+      # turn is spent on the signed-in user's own gateway key, quota is checked
+      # before it and usage recorded after it; with them empty Studio falls back
+      # to the single shared OMNIROUTE_API_KEY above, exactly as before.
+      CONTROL_PLANE_INTERNAL_URL: ${CONTROL_PLANE_INTERNAL_URL:-}
+      CONTROL_INTERNAL_TOKEN: ${CONTROL_INTERNAL_TOKEN:-}
+      # Saved-app library. Without this volume the store lives in the container
+      # and every app disappears on the next image build.
+      STUDIO_DATA_DIR: ${STUDIO_DATA_DIR:-/app/data/studio}
+      # Where "Build it" writes a request for the host-side runner. Studio cannot
+      # run `make app` itself — this image carries no Archon CLI, no Codex CLI and
+      # no checkout — so it drops a small request file here and the runner
+      # (scripts/build-runner.py, olympus-build-runner.service) picks it up where
+      # the toolchain actually is. The runner re-validates every field.
+      STUDIO_BUILD_QUEUE_DIR: ${STUDIO_BUILD_QUEUE_DIR:-/app/build-queue}
+      # Where packaged website builds land (`builds/<slug>/site.zip`, written by
+      # scripts/package-website.py). Read-only and optional: with it mounted, the
+      # download button serves the exact archive the publish step staged; without
+      # it, Studio falls back to zipping the saved source itself.
+      STUDIO_BUILDS_DIR: ${STUDIO_BUILDS_DIR:-/app/builds}
+      # The port Studio listens on, and the ONLY place it is decided. The image
+      # carries PORT=3001 for a bare `docker run`, so without this the knob below
+      # would set the *published* port while the app stayed on 3001 — invisible on
+      # the bridge network, where the mapping bridges the two, and a silent 502
+      # under `compose.host-gateway.yml`, which discards published ports and so
+      # leaves nothing listening on STUDIO_PORT at all (measured on .50: Studio
+      # answered 3050 nowhere, while the edge forwarded there and every page
+      # 502'd). `make studio-dev` already reads STUDIO_PORT this way, so both
+      # modes now agree on what the number means.
+      PORT: ${STUDIO_PORT:-3001}
+    volumes:
+      - studio-data:/app/data
+      # The packaged builds, read-only. Only the archive route reads this.
+      - ../../5-dev/olympus/builds:/app/builds:ro
+      # The factory handoff. "Export to factory" writes a spec into this
+      # directory, which is the repo's build-requests/ — the same place
+      # `make app SPEC=…` reads and the CI builder watches on push. Studio runs
+      # as uid 1001 (the image drops privileges), so the host directory has to
+      # be writable by that uid: `chown 1001:1001 build-requests` once. If it is
+      # not, the export fails with a message naming the fix rather than a 500.
+      - ../../5-dev/olympus/build-requests:/app/build-requests
+      # The build queue the runner watches. Root-owned here means Studio can
+      # neither queue nor see a heartbeat; `make studio-build-queue-dir` (or
+      # scripts/studio-export-dir.sh) settles it for uid 1001.
+      - ../../5-dev/olympus/.factory/build-queue:/app/build-queue
+    # Not published on every interface. Studio was on 0.0.0.0, so anyone on the
+    # LAN could reach the app directly and skip the edge — and with it the
+    # sign-in the edge performs (docs/gateway-sso.md). The edge is a container on
+    # its own bridge, so it cannot reach a loopback-only port; it dials the
+    # docker0 gateway instead, which is the same pattern the DNS console uses.
+    # STUDIO_EDGE_HOST is the address the NPM proxy hosts must point at.
+    ports:
+      - "127.0.0.1:${STUDIO_PORT:-3001}:${STUDIO_PORT:-3001}"
+      - "${STUDIO_EDGE_HOST:-172.17.0.1}:${STUDIO_PORT:-3001}:${STUDIO_PORT:-3001}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      # Liveness only: assert Studio answers its own root and never follow the
+      # redirect. Following it walks straight into the OIDC login chain, so the
+      # check would then depend on Authentik being up AND on the loopback
+      # callback URI being registered in the provider — neither of which should
+      # decide whether this container is healthy. It did report unhealthy for
+      # exactly that reason once Studio began deriving the callback per host.
+      # 2xx = running with auth disabled; 3xx = running, redirecting to login.
+      test:
+        - CMD-SHELL
+        - node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/',{redirect:'manual'}).then(r=>process.exit(r.status>=200&&r.status<400?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Static sites — what Studio's "Build & publish" serves (opt-in, profile `sites`).
+  #
+  # `scripts/package-website.py --publish` stages a built site under
+  # `OLYMPUS_SITES_ROOT` (default /var/lib/olympus/sites); this serves that tree so
+  # the staged copy is reachable without anyone installing a web server by hand.
+  #
+  # Host networking for the same reason the SSO proxy uses it: the NPM edge lives
+  # on another host (192.168.1.46) and has to reach back to a LAN address, and
+  # `network_mode: host` is what makes that address exist. It binds ONE port —
+  # ${SITE_PORT:-20130} — on every interface, so a site staged here is readable by
+  # anything that can route to this host. That is the intent: a published site is
+  # meant to be public. Nothing else about this container is exposed; it has no
+  # shell access to the repo and the sites tree is mounted read-only.
+  #
+  # The site is chosen by HOSTNAME (`<slug>.<SITE_HOST_SUFFIX>`) and, for direct
+  # address access, by path (`/<slug>/`). See deploy/nginx-sites.conf.template.
+  #
+  # This is a plain static file server with no auth. Sites published here are open
+  # to the LAN on purpose, and the name they answer on is what makes them public.
+  # If a site needs to be private, do not publish it — Studio's zip download is the
+  # delivery path for that.
+
+  sites:   # from olympus (profiles: "sites")
+    image: nginx:1.27-alpine
+    container_name: olympus-sites
+    profiles: ["sites"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      # One substitution only — see the header of the template. Without the filter,
+      # envsubst would blank nginx's own `$uri` in try_files.
+      SITE_PORT: ${SITE_PORT:-20130}
+      # The leftmost label of a published name is the site's directory, so the
+      # template needs this too. Both are in the filter and nothing else is —
+      # an unfiltered envsubst would blank nginx's own `$uri` and `$site`.
+      SITE_HOST_SUFFIX: ${SITE_HOST_SUFFIX:-studio.olympus.innotel.us}
+      NGINX_ENVSUBST_FILTER: SITE_PORT|SITE_HOST_SUFFIX
+    volumes:
+      - ${OLYMPUS_SITES_ROOT:-/var/lib/olympus/sites}:/srv/sites:ro
+      # One generated `server` block per running application, written here by
+      # scripts/app-runtime.py and included from the template below.
+      #
+      # This is how an app gets a name without the edge config growing: the block's
+      # `server_name` is exact, and nginx prefers an exact name over the template's
+      # regex, so `<slug>.<suffix>` reaches the app's container while everything
+      # else still falls through to the static tree. `nginx -s reload` picks up a new
+      # file; nothing else has to change.
+      - ${OLYMPUS_APPS_ROOT:-/var/lib/olympus/apps}/nginx:/etc/nginx/app-conf.d:ro
+      # Named `default.conf.template` on purpose: the image's entrypoint renders
+      # templates to /etc/nginx/conf.d/<same name>, so this replaces the stock
+      # default.conf instead of sitting beside it. Laid down under any other name
+      # nginx would keep serving :80 as well.
+      - ../../5-dev/olympus/deploy/nginx-sites.conf.template:/etc/nginx/templates/default.conf.template:ro
+
+  # The OmniRoute gateway is NOT here. It is the shared platform service in
+  # Group 2 (`2-voice/`), one provider pool for every platform; the `omniroute`
+  # service and the `omniroute-data` volume that used to sit at this point were
+  # removed in ips/docs/convergence-onyx-olympus-distro-atlas.md §4.4.
+  #
+  # The gateway's STATE (provider connections, settings, the dashboard password
+  # hash, and `server.env`, whose STORAGE_ENCRYPTION_KEY decrypts them) is one
+  # volume on the gateway's host. `make gateway-vault-backup` / `-check` /
+  # `-restore` copy it to Cerulean Vault and must be run THERE, not here —
+  # scripts/omniroute-vault-backup.py asks Docker for the container's own mount,
+  # so it needs a Docker that can see the gateway (`--container omniroute`).
+  # `make gateway-sso-up` / `gateway-edge` / `gateway-auth-mode` belong on that
+  # host too: the SSO proxy forwards to the gateway's loopback binding, so the
+  # dashboard gate has to run beside the dashboard. See docs/gateway-sso.md.
+
+  # Autoheal — restarts containers whose healthcheck reports "unhealthy".
+  #
+  # Only containers labelled `autoheal=true` are touched. A container in another
+  # compose project is out of reach here — this stack cannot label containers it
+  # does not own — so the label and an autoheal service must be added to THAT
+  # project instead. (Done for the external OmniRoute gateway this stack
+  # defaults to: it now carries the label and its own autoheal service.)
+  #
+  # Mounting the Docker socket grants this container control over the daemon.
+  # That is inherent to autoheal; scope it by keeping the socket read-mostly and
+  # the label explicit rather than relying on defaults.
+  # Pinned by digest because it holds the Docker socket — a silent upstream
+  # retag would swap code that can restart anything on this host.
+  # Tag at time of pinning: willfarrell/autoheal:latest
+
+  autoheal:   # from olympus
+    image: willfarrell/autoheal@sha256:a75fcda3176f6b3b70b75cc72fb1979ed86183fc45daacf1a2647902dc44916a
+    container_name: olympus-autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "15"
+      AUTOHEAL_START_PERIOD: "60"
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "20"
+      DOCKER_SOCK: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+
+  gateway-sso:   # from olympus
+    # Pinned by tag, not digest: unlike the autoheal container this one holds no
+    # Docker socket, so a bad upstream release cannot restart anything — it can
+    # only fail closed behind the edge.
+    #
+    # The `-alpine` variant specifically: the default tag is distroless and has no
+    # shell, which makes the healthcheck below impossible to express (a `wget`
+    # healthcheck on it reports the container unhealthy forever — measured). A
+    # shell in the image is the price of a liveness signal; the container is the
+    # only thing on 20129 and it never runs the shell itself.
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine
+    container_name: olympus-gateway-sso
+    restart: unless-stopped
+    network_mode: host
+    ports: !override []
+    # The gateway's own network is not this stack's, so there is nothing to join
+    # and nothing to add it to.
+    networks: !override []
+    env_file:
+      # Optional, because a render has to work without one: `make check-compose`
+      # validates this file against `.env.example` in a checkout that has no `.env`,
+      # and a missing env_file is an error rather than a warning. A deployment has
+      # one, and it is loaded exactly as before.
+      - path: ../../5-dev/olympus/.env
+        required: false
+    environment:
+      # oauth2-proxy reads OAUTH2_PROXY_* from the environment. The repo-idiomatic
+      # GATEWAY_* names stay in .env; this block is the only place the two
+      # vocabularies meet, so the credentials are never repeated in `command`
+      # where `docker inspect` would show them alongside everything else.
+      OAUTH2_PROXY_CLIENT_ID: ${GATEWAY_OIDC_CLIENT_ID}
+      OAUTH2_PROXY_CLIENT_SECRET: ${GATEWAY_OIDC_CLIENT_SECRET}
+      OAUTH2_PROXY_COOKIE_SECRET: ${GATEWAY_SSO_COOKIE_SECRET}
+      # The session store's address and password in one value, in the environment
+      # rather than in `command` for the same reason as the three above it. See
+      # the `--session-store-type` note further down for why this is not a cookie.
+      OAUTH2_PROXY_REDIS_CONNECTION_URL: redis://:${GATEWAY_SSO_REDIS_PASSWORD:-}@127.0.0.1:${GATEWAY_SSO_REDIS_PORT:-16379}/0
+    command:
+      - --provider=oidc
+      # Trailing slash included, because that is the issuer Authentik publishes
+      # in the discovery document. (This is exactly the value OmniRoute mishandles.)
+      - --oidc-issuer-url=${GATEWAY_OIDC_ISSUER_URL}
+      - --oidc-groups-claim=groups
+      - --scope=openid email profile
+      # Authentik advertises S256; oauth2-proxy leaves PKCE off unless asked, and
+      # it says so on every start. A public-Redirect-URI code flow should use it.
+      - --code-challenge-method=S256
+      - --upstream=${GATEWAY_SSO_UPSTREAM:-http://127.0.0.1:20128}
+      # 0.0.0.0 because the edge is on another host and reaches this over the LAN.
+      - --http-address=0.0.0.0:${GATEWAY_SSO_PORT:-20129}
+      # THE LAN PATH FOR API CLIENTS, and the reason this listener is on 0.0.0.0
+      # rather than loopback. The gateway itself stays on 127.0.0.1, so the only
+      # way in from another machine is through here — which means one door, and it
+      # has to be the right one for each kind of caller:
+      #
+      #   /v1/*      inference, and FOR LAN CLIENTS ONLY. Putting an interactive
+      #              OIDC login in front of an API would not add a check, it would
+      #              break every client — Codex, the CLIs, a browser fetch — because
+      #              they send a key, not a session cookie. So it is exempted here,
+      #              and this listener's LAN address is the door for it.
+      #
+      #              NOT THE PUBLIC NAME, and that distinction is load-bearing. The
+      #              comment above used to say the bearer key authenticated this
+      #              route. Measured on this deployment, nothing authenticates it:
+      #              `make gateway-auth-mode` leaves the gateway with no gate of its
+      #              own (requireLogin=false — see its docstring: the loopback
+      #              binding is then the entire control) and this OmniRoute build
+      #              answers 200 to /v1 with no key, a bogus key and the real one, and
+      #              returns a completion to an unauthenticated POST. With this
+      #              exemption, publishing the name therefore published the provider
+      #              credentials behind it.
+      #
+      #              `make gateway-edge --deny-path /v1` closes it at the edge, where
+      #              the public name and the LAN door can be told apart (they are the
+      #              same listener, so nothing here can). `make gateway-edge-check`
+      #              asserts both halves. Do not remove this line to "close /v1":
+      #              that would break the LAN clients and change nothing about the
+      #              public name's exposure — the rule that matters is at the edge.
+      #   /healthz   liveness. Answers 200 with no body and no secrets.
+      #   everything else, INCLUDING the dashboard, still requires the Authentik
+      #   session and the group. The dashboard is the thing worth protecting here:
+      #   it can read and write provider credentials.
+      #
+      # So "reachable on the LAN" and "the dashboard is not exposed" are both true,
+      # and neither is achieved by widening the gateway's own binding.
+      #
+      # NOT skipped, and this one is deliberate: `/api/auth/login` is the dashboard's
+      # OWN login. It is a no-op today — `make gateway-auth-mode` sets
+      # `requireLogin=false`, so the gateway does not gate itself and this route has
+      # nothing to hand out; there is exactly one gate, and it is Authentik. It stays
+      # unexempted because it costs nothing and because a future release that
+      # reintroduces a password check must not find it sitting outside the SSO door.
+      # Verified rather than assumed: with a session, `/dashboard` answers 200 and
+      # never reaches OmniRoute's `/login`; without one, the public name is a 302 to
+      # Authentik.
+      - --skip-auth-route=^/v1/
+      - --skip-auth-route=^/healthz$
+      # NO --redirect-url, AND THAT IS THE FEATURE. With it pinned, this proxy
+      # completes every login on ONE name: a request that arrives on a second name
+      # is sent to Authentik with the first name's `redirect_uri`, so the callback
+      # lands there and the second name has no session — which is why
+      # `gateway.olympus.innotel.us` had to be a 301 instead of a door. Left unset,
+      # oauth2-proxy derives the callback from the request's Host (`--reverse-proxy`
+      # is what makes that Host the public one), so each served name logs in on
+      # itself. Measured on this deployment before changing it: a probe on a spare
+      # port with these flags and no `--redirect-url` answered
+      # `redirect_uri=https://gateway.studio.innotel.us/oauth2/callback` for a
+      # studio Host and `…gateway.olympus.innotel.us…` for an olympus Host.
+      #
+      # A DERIVED CALLBACK IS ONLY AS GOOD AS THIS LIST — it is what turns
+      # "whatever Host header arrived" into a decided set, so a name left out here
+      # gets `redirect_uri` refused by Authentik (whose matching is strict per
+      # provider) rather than silently redirected somewhere unexpected.
+      - --whitelist-domain=${GATEWAY_SSO_WHITELIST_DOMAIN:-.innotel.us}
+      # The edge terminates TLS, so the session cookie is only ever sent over
+      # HTTPS even though this listener speaks plain HTTP.
+      #
+      # Each served name gets its OWN host-scoped `_oauth2_proxy` cookie, so the
+      # two names log in independently. Adding --cookie-domain=${SSO_COOKIE_DOMAIN:-.innotel.us}
+      # here (the line the other SSO gateways in this estate carry) makes one login
+      # cover every served name — trade a second login for a session cookie sent to
+      # every *.innotel.us host. Deliberately not the default: it widens the blast
+      # radius of an XSS anywhere in the domain to a dashboard that can read every
+      # provider credential, and neither name is worse off without it.
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      # Honours X-Forwarded-Proto/Host, which is how the session cookie stays
+      # `Secure` and the OAuth redirects come back on the public name instead of
+      # on the LAN address.
+      #
+      # `--trusted-ip` was tried here and REMOVED: oauth2-proxy warns on every
+      # request that mixing it with `--reverse-proxy` is unsafe, and it is right —
+      # with reverse-proxy on, the client IP is read from X-Forwarded-For, so a
+      # caller who can reach 20129 spoofs the trusted address and is believed.
+      # It hardens nothing. The real control is who can reach the port: the
+      # listener is on 0.0.0.0 so the edge can, which means the port should be
+      # firewalled to the edge's address — see docs/gateway-sso.md.
+      - --reverse-proxy=true
+      # Any verified email may pass the OIDC step; the group below is the actual
+      # door. OmniRoute's own allow-list cannot express this at all — it takes
+      # subjects and emails, so "anyone in cerulean-platform" is not a sentence it
+      # can say.
+      - --email-domain=*
+      - --allowed-group=${GATEWAY_SSO_ALLOWED_GROUP:-cerulean-platform}
+      - --skip-provider-button=true
+      # Authentik's OWN `email` scope mapping sets `email_verified: false` — a
+      # deliberate change in Authentik 2025.10, because it has no authoritative
+      # source for whether an address is verified. oauth2-proxy refuses such a
+      # token by default ("email in id_token … isn't verified"), so this flag is
+      # what makes the handshake finish.
+      #
+      # It is not a weak spot here: the door is `--allowed-group`, and
+      # `--email-domain=*` means the address grants nothing on its own. The
+      # alternative — a custom scope mapping asserting `email_verified: true` for
+      # this provider — was rejected because that asserts something Authentik
+      # explicitly decided it cannot know, on the platform's behalf.
+      - --insecure-oidc-allow-unverified-email
+      # SERVER-SIDE SESSIONS, AND THIS IS LOAD-BEARING. The cookie store puts the
+      # whole session in the browser: the email, the ID token, and every group the
+      # identity claims. An account in a few dozen Authentik groups — `dhunter` is
+      # in thirty — exceeds the 4KB a cookie can hold, so oauth2-proxy splits the
+      # session across several cookies and says so on every login:
+      #
+      #   WARNING: Multiple cookies are required for this session as it exceeds
+      #   the 4kb cookie limit. Please use server side session storage (eg. Redis).
+      #
+      # Those several `Set-Cookie` headers make the callback's response header
+      # larger than the edge's `proxy_buffer_size`, and nginx answers the request
+      # that would have completed the login with `502 Bad Gateway` —
+      # "upstream sent too big header while reading response header from upstream".
+      # The login fails, and it fails in the one place that looks like the gateway
+      # being down rather than like a cookie being large. Measured on the edge
+      # (proxy host #198) before this flag changed; see docs/gateway-sso.md.
+      #
+      # Moving the session out of the cookie also removes the ceiling entirely:
+      # it does not matter how many groups are added to it later.
+      - --session-store-type=redis
+      # That is the whole configuration here: `OAUTH2_PROXY_REDIS_CONNECTION_URL`
+      # in `environment` above carries the address and the password, so there is
+      # no second copy of either to drift from it.
+      # Pass the identity on to the dashboard so its logs name a person rather
+      # than an anonymous session.
+      - --set-xauthrequest=true
+      - --pass-user-headers=true
+      # Trim what a dashboard never needs to see.
+      - --pass-access-token=false
+      - --pass-authorization-header=false
+      - --silence-ping-logging=true
+    healthcheck:
+      # /ping is oauth2-proxy's own unauthenticated liveness route. Probing the
+      # dashboard instead would make this container's health depend on the
+      # gateway being up, which is how a healthy proxy gets restarted for
+      # somebody else's outage.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${GATEWAY_SSO_PORT:-20129}/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # Deliberately NOT labelled `autoheal`. Autoheal acts on a failing
+    # healthcheck, and this container's job is to refuse traffic — a restart
+    # loop would turn every closed door into something that looks like a crash.
+
+  # The session store. Neither the browser nor the edge ever sees this: the proxy
+  # writes the session here and hands the browser a single opaque id, which is what
+  # keeps the callback's response header small enough for the edge to pass — the
+  # thing `--session-store-type=redis` above exists to fix. Sessions are the only
+  # thing in it, and losing them costs a re-login and nothing else, so there is no
+  # volume and no persistence: `--save "" --appendonly no`.
+  #
+  # Loopback only. The proxy is host-networked and reaches it at 127.0.0.1; nothing
+  # on the LAN can, which is the same posture as the gateway itself.
+
+  gateway-sso-sessions:   # from olympus
+    image: redis:7-alpine
+    container_name: olympus-gateway-sso-sessions
+    restart: unless-stopped
+    labels:
+      # Unlike the proxy, this one CAN be restarted usefully: it holds no state a
+      # restart would discard, and a wedged store fails every login.
+      - "autoheal=true"
+    environment:
+      GATEWAY_SSO_REDIS_PASSWORD: ${GATEWAY_SSO_REDIS_PASSWORD:-}
+    # The password reaches redis through this container's environment rather than
+    # through its command line, so `docker inspect` does not carry it. Verified
+    # rather than assumed: the shell inside expands it, and there is no
+    # `${VAR:?}` here because `make check-compose` renders every overlay against
+    # `.env.example` — where this is empty — and a required-variable syntax would
+    # turn that into a failure of the repository's own validation instead of a
+    # safeguard. The refusal belongs at start-up, which is what this does.
+    command:
+      - sh
+      - -c
+      - |
+        if [ -z "$$GATEWAY_SSO_REDIS_PASSWORD" ]; then
+          echo "gateway-sso-sessions: GATEWAY_SSO_REDIS_PASSWORD is empty; refusing to start a session store with no password." >&2
+          echo "Add one with:  printf 'GATEWAY_SSO_REDIS_PASSWORD=%s\n' \$$(openssl rand -hex 32) >> .env" >&2
+          exit 2
+        fi
+        exec redis-server \
+          --requirepass "$$GATEWAY_SSO_REDIS_PASSWORD" \
+          --save "" \
+          --appendonly no \
+          --maxmemory-policy noeviction
+    # `--maxmemory-policy noeviction` on purpose: an LRU policy on a session store
+    # would silently log people out under memory pressure, which is worse than
+    # failing to write at all.
+    ports:
+      - "127.0.0.1:${GATEWAY_SSO_REDIS_PORT:-16379}:6379"
+    healthcheck:
+      # `$$` so compose passes the literal `$` through and the container's shell
+      # expands GATEWAY_SSO_REDIS_PASSWORD from its own environment. `-a` with a
+      # value from the environment rather than inlined here, so the healthcheck
+      # command itself carries no secret.
+      test: ["CMD-SHELL", "redis-cli -a \"$$GATEWAY_SSO_REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  olympus-vault:   # from olympus (profiles: "vault")
+    image: hashicorp/vault:1.17
+    container_name: olympus-vault
+    profiles: ["vault"]
+    restart: unless-stopped
+    # Vault wants to mlock memory so keys are never swapped to disk.
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID:-olympus-dev-root}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://127.0.0.1:8200
+    ports:
+      - "${VAULT_PORT:-8200}:8200"
+    healthcheck:
+      # `vault status` exits non-zero while sealed, so it is a real liveness
+      # signal rather than a bare port check. Unauthenticated, hence no token.
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    labels:
+      # Inert unless a container labelled autoheal=true exists in THIS stack;
+      # the platform's autoheal will pick it up if the label is present.
+      - "autoheal=true"
+
+  oasis-mail:   # group-owned (extras/5-dev.yml)
+    build:
+      context: ../../5-dev/oasis   # relative to ips/groups/, where this is read
+    container_name: g5-oasis-mail
+    restart: unless-stopped
+    ports:
+      - "${OASIS_SMTP_PORT:-587}:587"
+      - "${OASIS_IMAP_PORT:-993}:993"
+      - "${OASIS_WEB_PORT:-8443}:443"
+    environment:
+      DATABASE_URL: postgresql://oasis:${OASIS_PG_PASSWORD}@postgres:5432/oasis
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      AUTHENTIK_BASE_URL: https://auth.cerulean.innotel.us
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - default
+      - innotel-mesh-net
+
+  # ═══ DISTRO (BuilderOps — in-browser AI app builder) ══════════════════════════
+  # Distro's own compose (control plane + web). The AI plane is the shared
+  # Group-2 OmniRoute on the mesh — no bundled gateway, so nothing here binds
+  # 20128/20129/20132. Distro env comes from the root .env (see .env.example,
+  # "Distro (Group 5)"), plus the MESH_GATEWAY_HOST default below.
+  # docs/convergence-onyx-olympus-distro-atlas.md §4.2.
+
+
+  consul-reg-g5:   # group-owned (extras/5-dev.yml)
+    image: curlimages/curl:latest
+    container_name: g5-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "gitea|${MESH_SERVER_IP:-10.10.5.1}|3000|dev,git,code" \
+          "olympus-studio|${MESH_SERVER_IP:-10.10.5.1}|3001|dev,build,studio" \
+          "convex|${MESH_SERVER_IP:-10.10.5.1}|3210|dev,build,convex" \
+          "oasis-mail|${MESH_SERVER_IP:-10.10.5.1}|587|mail,smtp" \
+          "distro-control-plane|${MESH_SERVER_IP:-10.10.5.1}|20140|dev,accounts,quota"; do
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g5] Registered $$NAME at $$ADDR:$$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+
+
+volumes:
+  gitea-data:
+  gitea-db-data:
+  convex-data:
+  control-data:
+  postgres-data:
+  redis-data:
+  certbot-webroot:
+  certbot-etc:
+  olympus-builds:
+  # Studio's saved apps — per Authentik identity, one JSON file each.
+  studio-data:
+
+networks:
+  default:
+    name: g5-net
+  innotel-mesh-net:
+    external: true
+  oasis-backend:
+    internal: true
+  oasis-proxy:

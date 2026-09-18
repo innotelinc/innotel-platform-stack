@@ -1,0 +1,484 @@
+# ══════════════════════════════════════════════════════════════════════════
+# Group 4 — SOCIAL
+# GENERATED — do not edit. `ips/scripts/gen-group-compose.py` builds this
+# file from its member repos; edit those, or the group's own wiring in
+# `ips/groups/extras/4-social.yml`, and regenerate.
+# `scripts/gen-group-compose.py --check` runs in CI.
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Sources:
+#   4-social/onyx/docker-compose.yml
+#   4-social/rizzaura/docker-compose.yml
+
+name: innotel-group4
+
+x-onyx-sockets: &onyx-sockets
+  volumes:
+    - onyx-sockets:/run/onyx
+
+
+services:
+  onyx-privd:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/onyx-privd.Dockerfile
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-privd:${IMAGE_TAG:-latest}
+    # The single privilege boundary (docs/design/07): root, host devices, the
+    # data pool, and the daemon-config dir. Everything else is unprivileged.
+    privileged: true
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-config:/etc/onyx/conf.d
+      - /dev:/dev
+      # shared propagation so mounts made inside privd reach storaged and the host
+      - /mnt/onyx:/mnt/onyx:shared
+    restart: unless-stopped
+
+
+  onyx-storaged:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/onyx-storaged.Dockerfile
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-storaged:${IMAGE_TAG:-latest}
+    # privileged: uevent netlink watcher + block-device access
+    privileged: true
+    volumes:
+      - onyx-sockets:/run/onyx
+      - /dev:/dev
+      - /mnt/onyx:/mnt/onyx:shared
+    command: ["--mount-root", "/mnt/onyx"]
+    restart: unless-stopped
+
+
+  onyx-shared:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-shared }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-shared:${IMAGE_TAG:-latest}
+    <<: *onyx-sockets
+    restart: unless-stopped
+
+
+  onyx-core:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-core }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-core:${IMAGE_TAG:-latest}
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-core-state:/var/lib/onyx/core
+    command: ["--device-mount-root", "/mnt/onyx"]
+    restart: unless-stopped
+
+
+  onyx-api:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-api }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-api:${IMAGE_TAG:-latest}
+    # Memory posture (docs/service-audit.md): Go daemons are small; cap each.
+    mem_limit: 512m
+    memswap_limit: 512m
+    # LAN ingress for the shared Nginx Proxy Manager (192.168.1.46): api/admin
+    # surfaces publish on the host so NPM can forward to them. 2081 is free on
+    # the shared host (8080 belongs to signara there).
+    ports:
+      - "${ONYX_API_PORT:-2081}:8080"
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-api-state:/var/lib/onyx/api
+      # Read-write: the Shares page's cloud/remote storage setup writes the
+      # remote catalog here (rclone config create), and onyx-backupd reads the
+      # same file for remote backup targets. setup.sh makes the directory
+      # writable by the container user (uid 100) before the stack starts.
+      - ${RCLONE_CONFIG_DIR:-../../4-social/onyx/data/rclone}:/etc/rclone
+      # The file explorer and safe mutations operate on the same host storage
+      # root as storaged; without this bind mount /mnt/onyx is absent in the API
+      # container even while the data plane can see it.
+      - /mnt/onyx:/mnt/onyx:shared
+      # This product's Vault token, read-only. Cerulean's Vault bootstrap mints
+      # it (VAULT_PRODUCT_TOKENS=onyx there) and renews it in place; the stack
+      # only ever reads it. See data/vault/token/ (gitignored).
+      - ${ONYX_VAULT_TOKEN_DIR:-../../4-social/onyx/data/vault/token}:/vault/token:ro
+    # Vault is published on the host, not on this compose network, so the
+    # containers reach it through the bridge gateway alias.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # Device trust (docs/design/11 §10.3): drives GET /api/v1/devices/trust.
+      DEVICE_TRUST: ${DEVICE_TRUST:-off}
+      CERULEAN_API_URL: ${CERULEAN_API_URL:-}
+      CERULEAN_API_TOKEN: ${CERULEAN_API_TOKEN:-}
+      FLEET_ID: ${FLEET_ID:-}
+      # SecretOps (docs/design/11 §6.9): CERULEAN_API_TOKEN may be a
+      # `vault://<mount>/<path>#<key>` reference resolved at startup against
+      # Cerulean Vault — the platform's only secret store. Report health on
+      # GET /api/v1/system/status as `vault:`.
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_TOKEN: ${VAULT_TOKEN:-}
+      VAULT_TOKEN_FILE: ${VAULT_TOKEN_FILE:-}
+      VAULT_PREFIX: ${VAULT_PREFIX:-cerulean}
+      VAULT_PATH: ${VAULT_PATH:-onyx}
+      VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
+      VAULT_SKIP_VERIFY: ${VAULT_SKIP_VERIFY:-}
+      VAULT_CACERT: ${VAULT_CACERT:-}
+    command: ["--listen", "0.0.0.0:8080"]
+    restart: unless-stopped
+
+
+  onyx-snapd:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-snapd }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-snapd:${IMAGE_TAG:-latest}
+    <<: *onyx-sockets
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-snapd-state:/var/lib/onyx/snapd
+    restart: unless-stopped
+
+
+  onyx-backupd:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-backupd }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-backupd:${IMAGE_TAG:-latest}
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-backupd-state:/var/lib/onyx/backupd
+      - ${RCLONE_CONFIG_DIR:-../../4-social/onyx/data/rclone}:/etc/rclone:ro
+      # Backupd needs to read mounted source folders and write future pool
+      # restore destinations; the API still owns path validation.
+      - /mnt/onyx:/mnt/onyx
+    command: ["--http-listen", "0.0.0.0:8084"]
+    # LAN ingress for the shared NPM: backup surface (2084 is free on the host).
+    ports:
+      - "${ONYX_BACKUPD_PORT:-2084}:8084"
+    restart: unless-stopped
+
+
+  onyx-vmm:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-vmm }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-vmm:${IMAGE_TAG:-latest}
+    <<: *onyx-sockets
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-vmm-state:/var/lib/onyx/vmm
+    restart: unless-stopped
+
+
+  onyx-appd:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-appd }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-appd:${IMAGE_TAG:-latest}
+    <<: *onyx-sockets
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-appd-state:/var/lib/onyx/appd
+    restart: unless-stopped
+
+
+  onyx-ai:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-ai }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-ai:${IMAGE_TAG:-latest}
+    <<: *onyx-sockets
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-ai-state:/var/lib/onyx/ai
+      - ${ONYX_VAULT_TOKEN_DIR:-../../4-social/onyx/data/vault/token}:/vault/token:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # The AI plane (docs/design/11 §6.5): ONYX consumes the platform's single
+      # OmniRoute rather than shipping an upstream provider key. OMNIROUTE_API_KEY
+      # may be a `vault://<mount>/<path>#<key>` reference, resolved at startup by
+      # the same Cerulean Vault client onyx-objectstore uses; an unresolvable
+      # reference stops the service instead of becoming an empty credential.
+      # The door is the proxy in front of the gateway (:20129), not the
+      # gateway's own port: Cerulean SSO is the gateway's only gate, so 20128
+      # answers on the gateway host's loopback and bridge alone. What matters
+      # here is that it is a routable address: the image's own default is
+      # `http://localhost:20128`, which inside this container is itself.
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20129/v1}
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
+      OMNIROUTE_MODEL: ${OMNIROUTE_MODEL:-}
+      # Documented BYO-key escape hatch (local-first; docs/design/07). The
+      # gateway wins when both are set.
+      AI_PROVIDER: ${AI_PROVIDER:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_TOKEN: ${VAULT_TOKEN:-}
+      VAULT_TOKEN_FILE: ${VAULT_TOKEN_FILE:-}
+      VAULT_PREFIX: ${VAULT_PREFIX:-cerulean}
+      VAULT_PATH: ${VAULT_PATH:-onyx}
+      VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
+      VAULT_SKIP_VERIFY: ${VAULT_SKIP_VERIFY:-}
+      VAULT_CACERT: ${VAULT_CACERT:-}
+    restart: unless-stopped
+
+
+  onyx-objectstore:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/go-service.Dockerfile
+      args: { SERVICE: onyx-objectstore }
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-objectstore:${IMAGE_TAG:-latest}
+    volumes:
+      - onyx-sockets:/run/onyx
+      - onyx-objectstore-state:/var/lib/onyx/objectstore
+      - ${ONYX_VAULT_TOKEN_DIR:-../../4-social/onyx/data/vault/token}:/vault/token:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      HYBRID_CLOUD_ENDPOINT: ${HYBRID_CLOUD_ENDPOINT:-}
+      # SecretOps (docs/design/11 §6.9): S3_* are `vault://<mount>/<path>#<key>`
+      # references resolved at startup through Cerulean Vault. A reference that
+      # cannot be resolved stops the service rather than becoming an empty
+      # credential — an object store with no key is worse than one that refuses
+      # to start.
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_TOKEN: ${VAULT_TOKEN:-}
+      VAULT_TOKEN_FILE: ${VAULT_TOKEN_FILE:-}
+      VAULT_PREFIX: ${VAULT_PREFIX:-cerulean}
+      VAULT_PATH: ${VAULT_PATH:-onyx}
+      VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
+      VAULT_SKIP_VERIFY: ${VAULT_SKIP_VERIFY:-}
+      VAULT_CACERT: ${VAULT_CACERT:-}
+    command: ["--http-listen", "0.0.0.0:9000"]
+    # Memory posture: object store buffers uploads; cap moderately.
+    mem_limit: 1g
+    memswap_limit: 1g
+    # LAN ingress for the shared NPM: storage surface (2090 is free on the
+    # host — 9000 belongs to prefect there).
+    ports:
+      - "${ONYX_OBJECTSTORE_PORT:-2090}:9000"
+    restart: unless-stopped
+
+
+  onyx-web:   # from onyx
+    build:
+      context: ../../4-social/onyx
+      dockerfile: docker/onyx-web/Dockerfile
+    image: ghcr.io/innotelinc/onyx-oss-platform/onyx-web:${IMAGE_TAG:-latest}
+    # LAN ingress for the shared NPM: app surface (2080 is free on the host —
+    # 80 belongs to zeus-freepbx there).
+    ports:
+      - "${ONYX_WEB_PORT:-2080}:80"
+    restart: unless-stopped
+
+
+
+  # ---- Ingress: Nginx Proxy Manager ----------------------------------------
+
+
+  nginx-proxy-manager:   # from onyx (profiles: "npm")
+    profiles: ["npm"]
+    image: jc21/nginx-proxy-manager:latest
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"
+    environment:
+      DISABLE_IPV6: "true"
+    volumes:
+      - npm-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+      # Device trust (docs/design/11 §10): the ONYX device CA, generated on the
+      # host by scripts/provision-device-trust.sh, read by ssl_verify_client in
+      # the gated proxy hosts' advanced config.
+      - ${ONYX_PKI_DIR:-/etc/onyx/pki}:/etc/letsencrypt/onyx-device-ca:ro
+    depends_on:
+      - onyx-api
+      - onyx-web
+      - onyx-backupd
+      - onyx-objectstore
+    restart: unless-stopped
+
+
+  api:   # from rizzaura
+    build:
+      context: ../../4-social/rizzaura
+      dockerfile: api/Dockerfile
+    container_name: rizz-api
+    restart: unless-stopped
+    # Memory posture (docs/service-audit.md): rankings/community API; cap so
+    # fan-out bursts never crowd the box.
+    mem_limit: 1g
+    memswap_limit: 1g
+    ports:
+      - "3020:8000" # NPM proxy target (api.<domain>) — host 3020, 8000 is signara's API
+    environment:
+      PORT: "8000"
+      BASE_DOMAIN: "${BASE_DOMAIN:-rizzaura.net}"
+      APP_URL: "${APP_URL:-https://app.${BASE_DOMAIN:-rizzaura.net}}"
+      API_URL: "${API_URL:-https://api.${BASE_DOMAIN:-rizzaura.net}}"
+      APP_ORIGINS: "${APP_ORIGINS:-https://app.${BASE_DOMAIN:-rizzaura.net},https://rankings.${BASE_DOMAIN:-rizzaura.net},https://community.${BASE_DOMAIN:-rizzaura.net},https://admin.${BASE_DOMAIN:-rizzaura.net}}"
+      SESSION_SECRET: "${SESSION_SECRET:-change-me}"
+      # Authentik SSO (auth.<domain>)
+      AUTHENTIK_ISSUER: "${AUTHENTIK_ISSUER:-https://auth.${BASE_DOMAIN:-rizzaura.net}}"
+      AUTHENTIK_CLIENT_ID: "${AUTHENTIK_CLIENT_ID:-}"
+      AUTHENTIK_CLIENT_SECRET: "${AUTHENTIK_CLIENT_SECRET:-}"
+      AUTHENTIK_ADMIN_GROUP: "${AUTHENTIK_ADMIN_GROUP:-rizz-aura-admins}"
+      # Cash Shop — Magnate (RevenueOps) owns billing; Rizz Aura holds no
+      # Stripe keys. MAGNATE_API_TOKEN must equal Magnate's
+      # ENTITLEMENTS_API_TOKEN when Magnate gates its APIs.
+      MAGNATE_PUBLIC_URL: "${MAGNATE_PUBLIC_URL:-https://app.magnate.innotel.us}"
+      MAGNATE_API_TOKEN: "${MAGNATE_API_TOKEN:-}"
+      MAGNATE_FULFILLMENT_SECRET: "${MAGNATE_FULFILLMENT_SECRET:-}"
+      # AI achievement recommendations — OmniRoute (OpenAI-compatible LLM API
+      # proxy, profile "ai" below) by default; any OpenAI-compatible endpoint
+      # works (OpenAI, Groq, Together, Ollama, ...).
+      AI_BASE_URL: "${AI_BASE_URL:-https://api.openai.com/v1}"
+      AI_API_KEY: "${AI_API_KEY:-}"
+      AI_MODEL: "${AI_MODEL:-gpt-4o-mini}"
+    volumes:
+      - rizz-data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:8000/api/state'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [rizz-net]
+
+  # ── Frontend services (each its own SPA + nginx container) ────────────────
+
+  app:   # from rizzaura
+    build:
+      context: ../../4-social/rizzaura
+      dockerfile: apps/app/Dockerfile
+      args:
+        VITE_API_BASE: "${VITE_API_BASE:-https://api.${BASE_DOMAIN:-rizzaura.net}}"
+        VITE_BASE_DOMAIN: "${BASE_DOMAIN:-rizzaura.net}"
+    container_name: rizz-app
+    restart: unless-stopped
+    ports:
+      - "3021:3010"  # 3010 is capstone's dograh-ui on the shared box (/usr/src/projects/complete)
+    depends_on: [api]
+    networks: [rizz-net]
+
+
+  rankings:   # from rizzaura
+    build:
+      context: ../../4-social/rizzaura
+      dockerfile: apps/rankings/Dockerfile
+      args:
+        VITE_API_BASE: "${VITE_API_BASE:-https://api.${BASE_DOMAIN:-rizzaura.net}}"
+        VITE_BASE_DOMAIN: "${BASE_DOMAIN:-rizzaura.net}"
+    container_name: rizz-rankings
+    restart: unless-stopped
+    ports:
+      - "3022:3011"  # 3011 is iptv's port on the shared box
+    depends_on: [api]
+    networks: [rizz-net]
+
+
+  community:   # from rizzaura
+    build:
+      context: ../../4-social/rizzaura
+      dockerfile: apps/community/Dockerfile
+      args:
+        VITE_API_BASE: "${VITE_API_BASE:-https://api.${BASE_DOMAIN:-rizzaura.net}}"
+        VITE_BASE_DOMAIN: "${BASE_DOMAIN:-rizzaura.net}"
+    container_name: rizz-community
+    restart: unless-stopped
+    ports:
+      - "3012:3012"
+    depends_on: [api]
+    networks: [rizz-net]
+
+
+  admin:   # from rizzaura
+    build:
+      context: ../../4-social/rizzaura
+      dockerfile: apps/admin/Dockerfile
+      args:
+        VITE_API_BASE: "${VITE_API_BASE:-https://api.${BASE_DOMAIN:-rizzaura.net}}"
+        VITE_BASE_DOMAIN: "${BASE_DOMAIN:-rizzaura.net}"
+    container_name: rizz-admin
+    restart: unless-stopped
+    ports:
+      - "3013:3013"
+    depends_on: [api]
+    networks: [rizz-net]
+
+  # ── OmniRoute — NOT here ──────────────────────────────────────────────────
+  # The LLM API proxy behind the AI recommendations is the platform's one
+  # gateway (Group 2, `2-voice`), on its own host; this project declares no
+  # service for it, so `omniroute` never resolves on rizz-net. AI_BASE_URL points
+  # at the SSO proxy in front of that gateway (:20129).
+
+  # ── Authentik — identity provider + SSO (auth.<domain>) ───────────────────
+
+
+
+
+  consul-reg-g4:   # group-owned (extras/4-social.yml)
+    image: curlimages/curl:latest
+    container_name: g4-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "rizz-api|${MESH_SERVER_IP:-10.10.4.1}|8000|social,leaderboard" \
+          "rizz-app|${MESH_SERVER_IP:-10.10.4.1}|3010|social,leaderboard" \
+          "onyx-api|${MESH_SERVER_IP:-10.10.4.1}|8080|storage,nas" \
+          "onyx-objectstore|${MESH_SERVER_IP:-10.10.4.1}|9001|storage,s3"; do
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g4] Registered $$NAME at $$ADDR:$$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+
+
+volumes:
+  onyx-sockets:
+  onyx-config:
+  onyx-core-state:
+  onyx-api-state:
+  onyx-snapd-state:
+  onyx-backupd-state:
+  onyx-vmm-state:
+  onyx-appd-state:
+  onyx-ai-state:
+  onyx-objectstore-state:
+  npm-data:
+  npm-letsencrypt:
+  rizz-data:
+
+networks:
+  default:
+    name: g4-net
+  innotel-mesh-net:
+    external: true
+  rizz-net:
+    driver: bridge

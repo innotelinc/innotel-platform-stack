@@ -1,0 +1,1389 @@
+# ══════════════════════════════════════════════════════════════════════════
+# Group 1 — PRIMARY
+# GENERATED — do not edit. `ips/scripts/gen-group-compose.py` builds this
+# file from its member repos; edit those, or the group's own wiring in
+# `ips/groups/extras/1-primary.yml`, and regenerate.
+# `scripts/gen-group-compose.py --check` runs in CI.
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Sources:
+#   1-primary/cerulean/docker-compose.yml
+#   1-primary/npm/compose.cerulean.yml, docker-compose.yml
+#   1-primary/magnate/docker-compose.yml
+#   1-primary/sign/docker-compose.yml
+#   1-primary/signara/docker-compose.prod.yml, docker-compose.override.prod.yml
+
+name: innotel-group1
+
+x-logging-default: &logging-default
+  driver: json-file
+  options:
+    max-size: '50m'
+    max-file: '10'
+
+
+services:
+  cerulean:   # from cerulean
+    build: ../../1-primary/cerulean
+    container_name: cerulean
+    restart: unless-stopped
+    mem_limit: 768m
+    memswap_limit: 768m
+    env_file: ../../1-primary/cerulean/.env
+    # Technitium runs on the host network (port 53/67/5380), so the app
+    # reaches it via the host gateway rather than 127.0.0.1 (which would be
+    # the app container itself). TECHNITIUM_URL should be
+    # http://172.17.0.1:5380 — the docker0 gateway, which is the address the
+    # console actually listens on (see DNS_SERVER_WEB_SERVICE_LOCAL_ADDRESSES
+    # below). `host.docker.internal` resolves to *this* bridge's gateway
+    # instead, which the console does not bind.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${CERULEAN_PORT:-3000}:${CERULEAN_PORT:-3000}"
+    volumes:
+      - ../../1-primary/cerulean/data:/app/data
+      # Scoped Vault token, minted by the vault profile into ./data/vault/token
+      # (read .env's VAULT_TOKEN_FILE). Read-only, and only that directory — the
+      # unseal key and root token stay in ./data/vault/init, which only the vault
+      # container mounts.
+      - ../../1-primary/cerulean/data/vault/token:/vault/token:ro
+    depends_on:
+      cerulean-technitium:
+        condition: service_healthy
+        required: false
+      vault:
+        condition: service_healthy
+        required: false
+
+  # ── Bundled Technitium DNS Server (OPT-IN: docker compose --profile technitium up -d) ──
+  # Authoritative + recursive DNS, DHCP, and ad-blocking in one container.
+  # Cerulean is the master orchestrator: it drives Technitium via HTTP API
+  # (/api/zones/*, /api/dhcp/*, /api/blocked/*, /api/settings/*).
+  #   • Auto-creates zones from Domains + the server apex <serverId>.lab.innotel.us
+  #   • ACME DNS-01 TXT records via /api/zones/records/add (replaces RFC2136/nsupdate)
+  #   • DHCP scopes & leases via /api/dhcp/scopes/*
+  #   • Ad-blocking via /api/settings + /api/blocked/* + block lists
+  # The web console is at http://<host>:5380 (admin / TECHNITIUM_ADMIN_PASSWORD).
+  # Port 53 is published so the LAN can use this host as DNS; 67/udp for DHCP.
+
+  cerulean-technitium:   # from cerulean (profiles: "technitium")
+    image: technitium/dns-server:latest
+    container_name: cerulean-technitium
+    profiles: ["technitium"]
+    restart: unless-stopped
+    # Host networking: Technitium binds :53 (DNS), :67 (DHCP broadcasts), and
+    # :5380 (console) directly on the host — required for DHCP to hear client
+    # broadcasts. The cerulean app reaches it through the host gateway at
+    # http://host.docker.internal:5380 (never 127.0.0.1 — that would be the
+    # app container itself).
+    # (Requires port 53 to be free on the host: scripts/setup.sh disables
+    # systemd-resolved's stub listener automatically.)
+    network_mode: host
+    # Optional DNS-over-TLS/HTTPS extra listeners are configured in Technitium.
+    # When network_mode: host is used, no port mappings are needed:
+    #   TECHNITIUM_DNS_UDP_PORT / TECHNITIUM_DNS_TCP_PORT / TECHNITIUM_WEB_PORT /
+    #   TECHNITIUM_DHCP_PORT are retained only for documentation.
+    environment:
+      DNS_SERVER_DOMAIN: ${TECHNITIUM_DOMAIN:-${CERULEAN_SERVER_ID:-cerulean}.lab.innotel.us}
+      DNS_SERVER_ADMIN_PASSWORD: ${TECHNITIUM_ADMIN_PASSWORD:-${TECHNITIUM_PASSWORD:-}}
+      DNS_SERVER_PREFER_IPV6: "${DNS_SERVER_PREFER_IPV6:-false}"
+      DNS_SERVER_WEB_SERVICE_HTTP_PORT: "5380"
+      # The web console is the DNS/DHCP admin plane, so it must not answer on
+      # the LAN: it listens on loopback plus the docker0 gateway only. That
+      # keeps every container path working (they dial http://172.17.0.1:5380)
+      # while 192.168.1.x:5380 is refused, and the public door stays
+      # dns.<domain> through its oauth2-proxy gateway. Ignored once the config
+      # in ./data/technitium exists — the live value is set through
+      # /api/settings/set (scripts/technitium-console-bind.sh applies it).
+      DNS_SERVER_WEB_SERVICE_LOCAL_ADDRESSES: ${TECHNITIUM_WEB_SERVICE_LOCAL_ADDRESSES:-127.0.0.1,172.17.0.1}
+      DNS_SERVER_RECURSION: "${DNS_SERVER_RECURSION:-AllowOnlyForPrivateNetworks}"
+      DNS_SERVER_ENABLE_BLOCKING: "${DNS_SERVER_ENABLE_BLOCKING:-true}"
+      DNS_SERVER_BLOCK_LIST_URLS: ${DNS_SERVER_BLOCK_LIST_URLS:-}
+      DNS_SERVER_FORWARDERS: ${DNS_SERVER_FORWARDERS:-1.1.1.1,8.8.8.8}
+      DNS_SERVER_FORWARDER_PROTOCOL: "${DNS_SERVER_FORWARDER_PROTOCOL:-Udp}"
+    volumes:
+      - ../../1-primary/cerulean/data/technitium:/etc/dns
+    # The image ships no wget/curl/nc, so probe the web console over bash's
+    # /dev/tcp instead of an HTTP client. GET / answers 200 once the server
+    # is listening. /dev/tcp is a bash feature, so invoke bash explicitly
+    # (the container's default /bin/sh is dash, which lacks it).
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/5380 && printf \"GET / HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3 && grep -qi \"^HTTP/1\\.[01] 200\" <&3'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── Technitium console gateway (oauth2-proxy) ───────────────────────────
+  # The DNS/DHCP console is the admin plane, so it runs on loopback + docker0
+  # only (see cerulean-technitium above) and a real OIDC relying party is its
+  # only door. That gateway has to run *beside the console it fronts*. It used to
+  # live in Group 2 with Capstone, which worked only while every product shared
+  # one host: when the voice stack moved to a server of its own, the gateway went
+  # with it and could no longer reach a console that refuses the LAN address, so
+  # `dns.internal.innotel.us` answered 502 to anyone who had just signed in.
+  #
+  # Same client, cookie and session store as every other gateway on the platform,
+  # so this is still one Authentik sign-in — and there is no password anywhere in
+  # the path, because the console's own login is unreachable off this host.
+
+  cerulean-technitium-sso:   # from cerulean (profiles: "technitium")
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.8.2
+    container_name: cerulean-technitium-sso
+    profiles: ["technitium"]
+    restart: unless-stopped
+    environment:
+      OAUTH2_PROXY_PROVIDER: oidc
+      # Endpoints are explicit (no discovery). The issuer is the APP-SCOPED one,
+      # because that is the value Authentik puts in the id_token's `iss`:
+      # oauth2-proxy verifies `iss` against --oidc-issuer-url even with
+      # --skip-oidc-discovery, so the bare base here makes every callback die
+      # with `oidc: id token issued by a different provider` -> HTTP 500 on
+      # /oauth2/callback (reproduced on v7.8.2).
+      OAUTH2_PROXY_SKIP_OIDC_DISCOVERY: "true"
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/${SSO_APP_SLUG:-innotel-app-gateway}/
+      OAUTH2_PROXY_LOGIN_URL: ${SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/authorize/
+      OAUTH2_PROXY_REDEEM_URL: ${SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/token/
+      OAUTH2_PROXY_PROFILE_URL: ${SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/userinfo/
+      OAUTH2_PROXY_OIDC_JWKS_URL: ${SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/${SSO_APP_SLUG:-innotel-app-gateway}/jwks/
+      OAUTH2_PROXY_CLIENT_ID: ${SSO_CLIENT_ID:-innotel-app-gateway}
+      OAUTH2_PROXY_CLIENT_SECRET: ${SSO_CLIENT_SECRET:-}
+      OAUTH2_PROXY_COOKIE_SECRET: ${SSO_COOKIE_SECRET:-}
+      OAUTH2_PROXY_COOKIE_NAME: _innotel_sso
+      OAUTH2_PROXY_COOKIE_DOMAINS: ${SSO_COOKIE_DOMAIN:-.innotel.us}
+      OAUTH2_PROXY_COOKIE_SECURE: "true"
+      OAUTH2_PROXY_COOKIE_SAMESITE: lax
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      # Authentik's own `email` scope mapping sets email_verified: false and
+      # oauth2-proxy refuses such a token, which turns every callback into a 500.
+      OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: "true"
+      # Without the groups claim, --allowed-groups restricts nothing.
+      OAUTH2_PROXY_OIDC_GROUPS_CLAIM: groups
+      OAUTH2_PROXY_ALLOWED_GROUPS: ${SSO_REQUIRED_GROUP:-cerulean-platform}
+      OAUTH2_PROXY_SCOPE: openid email profile groups
+      # Server-side sessions, the platform-wide store this host already runs: the
+      # gateways share ONE store so one sign-in covers them all.
+      OAUTH2_PROXY_SESSION_STORE_TYPE: redis
+      OAUTH2_PROXY_REDIS_CONNECTION_URL: redis://:${SSO_SESSION_REDIS_PASSWORD:-}@cerulean-sso-sessions:6379/0
+      OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
+      OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
+      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+      OAUTH2_PROXY_REVERSE_PROXY: "true"
+      OAUTH2_PROXY_PASS_USER_HEADERS: "true"
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+      OAUTH2_PROXY_WHITELIST_DOMAINS: ${SSO_COOKIE_DOMAIN:-.innotel.us}
+      # The console is host-networked and listens on docker0 (172.17.0.1), which
+      # every bridge can dial — never its LAN address. `host.docker.internal`
+      # resolves to that gateway via extra_hosts below; a literal bridge IP is
+      # what the CI addressing policy forbids in service targets.
+      OAUTH2_PROXY_UPSTREAMS: http://${DOCKER_BRIDGE_GATEWAY:-host.docker.internal}:5380
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Published on every interface like every other zone's gateways: this IS the
+    # SSO door, so there is nothing behind it for a loopback bind to protect.
+    ports:
+      - "${TECHNITIUM_SSO_PORT:-14015}:4180"
+    depends_on:
+      cerulean-sso-sessions:
+        condition: service_started
+
+  # ── Authentik (OPT-IN: docker compose --profile authentik up -d) ────────
+
+  cerulean-authentik-server:   # from cerulean (profiles: "authentik")
+    mem_limit: 1500m
+    memswap_limit: 1500m
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2026.8.3}
+    container_name: cerulean-authentik-server
+    profiles: ["authentik"]
+    restart: unless-stopped
+    command: server
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL_PASSWORD:-}
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_REDIS__CACHE_TIMEOUT_OVERRIDES__default: "86400"
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@cerulean.innotel.us}
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - ../../1-primary/cerulean/data/authentik/media:/media
+      - ../../1-primary/cerulean/data/authentik/custom-templates:/templates
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+
+
+  cerulean-authentik-worker:   # from cerulean (profiles: "authentik")
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2026.8.3}
+    container_name: cerulean-authentik-worker
+    profiles: ["authentik"]
+    restart: unless-stopped
+    command: worker
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL_PASSWORD:-}
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@cerulean.innotel.us}
+    volumes:
+      - ../../1-primary/cerulean/data/authentik/media:/media
+      - ../../1-primary/cerulean/data/authentik/custom-templates:/templates
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+
+
+  authentik-postgres:   # from cerulean (profiles: "authentik")
+    image: docker.io/library/postgres:16-alpine
+    container_name: cerulean-authentik-postgres
+    profiles: ["authentik"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: ${AUTHENTIK_POSTGRESQL_PASSWORD:-}
+    volumes:
+      - ../../1-primary/cerulean/data/authentik/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentik"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  cerulean-authentik-redis:   # from cerulean (profiles: "authentik")
+    image: docker.io/library/redis:alpine
+    container_name: cerulean-authentik-redis
+    profiles: ["authentik"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── HashiCorp Vault (OPT-IN: docker compose --profile vault up -d) ───────
+
+  vault:   # from cerulean (profiles: "vault")
+    mem_limit: 512m
+    memswap_limit: 512m
+    image: hashicorp/vault:${VAULT_IMAGE_TAG:-1.17}
+    container_name: cerulean-vault
+    profiles: ["vault"]
+    restart: unless-stopped
+    # Durable, file-backed Vault (not dev mode). scripts/vault-entrypoint.sh
+    # initialises+unseals the server on start, enables KV v2 at VAULT_PREFIX,
+    # mints a periodic token for that prefix, and mints a narrower token for each
+    # product in VAULT_PRODUCT_TOKENS — renewing them all in place. See
+    # docs/vault-setup.md.
+    entrypoint: ["/bin/sh", "/vault/bootstrap/entrypoint.sh"]
+    environment:
+      # Used by the healthcheck and by the bootstrap CLI (the server itself is
+      # configured from /vault/init/vault.hcl). The app reaches it as vault:8200.
+      VAULT_ADDR: http://127.0.0.1:8200
+      VAULT_PREFIX: ${VAULT_PREFIX:-cerulean}
+      # Products needing a token narrowed to <prefix>/data/<product> rather than
+      # the mount-wide grant. Space-separated; empty = mount-wide token only.
+      VAULT_PRODUCT_TOKENS: ${VAULT_PRODUCT_TOKENS:-}
+      # Authentik OIDC sign-in for the UI (step 4c of the bootstrap). Empty
+      # secret = the step is skipped and the UI keeps its token login, so a
+      # checkout with no Authentik application still comes up.
+      VAULT_OIDC_CLIENT_ID: ${VAULT_OIDC_CLIENT_ID:-vault}
+      VAULT_OIDC_CLIENT_SECRET: ${VAULT_OIDC_CLIENT_SECRET:-}
+      VAULT_OIDC_DISCOVERY_URL: ${VAULT_OIDC_DISCOVERY_URL:-https://auth.cerulean.innotel.us/application/o/vault/}
+      VAULT_OIDC_GROUP: ${VAULT_OIDC_GROUP:-cerulean-platform}
+      VAULT_OIDC_REDIRECT: ${VAULT_OIDC_REDIRECT:-https://secrets.cerulean.innotel.us/ui/vault/auth/oidc/oidc/callback}
+    volumes:
+      # Encrypted storage — the durable part; survives restarts and rebuilds.
+      - ../../1-primary/cerulean/data/vault/file:/vault/file
+      # Unseal key + root token (mode 600). Operator-only: never mounted into
+      # the app. Back this directory up — losing it means the store stays sealed
+      # (or must be wiped, losing the mirrored secrets).
+      - ../../1-primary/cerulean/data/vault/init:/vault/init
+      # The tokens clients read: cerulean.token for the mount-wide policy, plus
+      # one <product>.token per name in VAULT_PRODUCT_TOKENS.
+      - ../../1-primary/cerulean/data/vault/token:/vault/token
+      - ../../1-primary/cerulean/scripts/vault-entrypoint.sh:/vault/bootstrap/entrypoint.sh:ro
+    ports:
+      - "8200:8200"
+    healthcheck:
+      # `vault status` exits 2 while sealed/uninitialised, so this only turns
+      # healthy once the bootstrap has unsealed and provisioned the store.
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  cerulean-npm:   # from npm (profiles: "npm")
+    # First-party image: this fork, built from docker/Dockerfile.sso. It carries
+    # the Authentik forward-auth sign-in (`backend/lib/sso.js`), which the
+    # upstream image does not have. NPM is no longer a second user directory:
+    # the admin UI signs in with the identity the edge already authenticated.
+    image: innotel/npm-edge:2.15.1
+    build:
+      context: ../../1-primary/npm
+      dockerfile: docker/Dockerfile.sso
+      args:
+        BUILD_VERSION: '2.15.1'
+    container_name: cerulean-npm
+    profiles: ["npm"]
+    restart: unless-stopped
+    environment:
+      DB_MYSQL_HOST: cerulean-npm-db
+      DB_MYSQL_PORT: 3306
+      DB_MYSQL_USER: nginxpm
+      DB_MYSQL_PASSWORD: "${NPM_DB_MYSQL_PASSWORD:-}"
+      DB_MYSQL_NAME: npm
+      DISABLE_IPV6: "true"
+      # ── Authentik forward-auth sign-in (see docs/stack.md) ──
+      # Off by default: an upgrade must not change how anyone signs in. With it
+      # on, the admin UI signs in with the identity the edge authenticated, and
+      # the password form is closed on the gated doors. Every proxy host that
+      # fronts this UI must forward to the UI's LOOPBACK address — `127.0.0.1`,
+      # port ${NPM_ADMIN_PORT:-81} — so this image's admin vhost sees a loopback
+      # peer and vouches for the request (see backend/lib/sso.js).
+      AUTH_SSO_ENABLED: "${NPM_SSO_ENABLED:-0}"
+      AUTH_SSO_REQUIRED_GROUP: "${NPM_SSO_REQUIRED_GROUP:-cerulean-platform}"
+      AUTH_SSO_ADMIN_GROUP: "${NPM_SSO_ADMIN_GROUP:-cerulean-platform}"
+      AUTH_SSO_AUTO_CREATE: "${NPM_SSO_AUTO_CREATE:-1}"
+      AUTH_SSO_TOKEN_EXPIRY: "${NPM_SSO_TOKEN_EXPIRY:-1d}"
+      # Automation accounts that keep the password grant off-edge (Cerulean's
+      # NPM_EMAIL provisions hosts through the API). Everything else is refused.
+      AUTH_SERVICE_ACCOUNTS: "${NPM_SSO_SERVICE_ACCOUNTS:-}"
+      # Recovery only: re-enables the password form. Unset it again afterwards.
+      BREAKGLASS_LOGIN: "${NPM_BREAKGLASS_LOGIN:-}"
+      # First-run admin. NPM creates this user only while the user table is
+      # empty, so it is a bootstrap credential rather than a live one — the
+      # token the platform uses afterwards comes from NPM_EMAIL / NPM_PASSWORD
+      # (Cerulean's .env). Without it a fresh database has no way in at all.
+      INITIAL_ADMIN_EMAIL: "${NPM_ADMIN_EMAIL:-admin@innotel.us}"
+      INITIAL_ADMIN_PASSWORD: "${NPM_ADMIN_PASSWORD:-}"
+    ports:
+      - "${NPM_HTTP_PORT:-80}:80"
+      - "${NPM_HTTPS_PORT:-443}:443"
+      - "${NPM_ADMIN_PORT:-81}:81"
+    volumes:
+      - ../../1-primary/npm/data:/data
+      - ../../1-primary/npm/letsencrypt:/etc/letsencrypt
+    depends_on:
+      cerulean-npm-db:
+        condition: service_healthy
+
+  # ── SSO gateway (oauth2-proxy) ────────────────────────────────────────────
+  # Nginx Proxy Manager has no OIDC support, so the admin UI's sign-in is a real
+  # OIDC code flow performed here by oauth2-proxy — no outpost and no
+  # auth_request in the path. It shares the edge's network namespace
+  # (network_mode: service:cerulean-npm), so it listens on the edge's loopback
+  # and the proxy host that fronts the admin UI forwards to
+  # 127.0.0.1:${NPM_SSO_GATEWAY_PORT} instead of :${NPM_ADMIN_PORT}. Binding to
+  # 127.0.0.1 keeps the gateway off the published LAN ports.
+  #
+  # Same cookie name/secret/domain as every other gateway in the stack, so one
+  # Authentik sign-in is shared by all of them.
+
+  cerulean-npm-sso:   # from npm (profiles: "npm")
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.8.2
+    container_name: cerulean-npm-sso
+    profiles: ["npm"]
+    restart: unless-stopped
+    network_mode: "service:cerulean-npm"
+    # The session (not the browser) is what holds the identity: one opaque id
+    # travels in the _innotel_sso cookie instead. Reached by service name
+    # because this container shares the edge's network namespace.
+    environment:
+      OAUTH2_PROXY_REDIS_CONNECTION_URL: redis://:${SSO_SESSION_REDIS_PASSWORD:-}@cerulean-sso-sessions:6379/0
+    depends_on:
+      cerulean-npm:
+        condition: service_started
+      cerulean-sso-sessions:
+        condition: service_started
+    # Endpoints are explicit (no OIDC discovery), and the issuer is the
+    # APP-SCOPED one: that is the value Authentik puts in the id_token's `iss`,
+    # and oauth2-proxy verifies `iss` against --oidc-issuer-url even with
+    # --skip-oidc-discovery. The bare base here made every callback die with
+    # `oidc: id token issued by a different provider` -> HTTP 500 on
+    # /oauth2/callback (reproduced on v7.8.2).
+    command:
+      - --provider=oidc
+      - --skip-oidc-discovery=true
+      - --oidc-issuer-url=${NPM_SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/${NPM_SSO_APP_SLUG:-npm-edge}/
+      - --login-url=${NPM_SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/authorize/
+      - --redeem-url=${NPM_SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/token/
+      - --profile-url=${NPM_SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/userinfo/
+      - --oidc-jwks-url=${NPM_SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/${NPM_SSO_APP_SLUG:-npm-edge}/jwks/
+      - --client-id=${NPM_SSO_CLIENT_ID:-npm-edge}
+      - --client-secret=${NPM_SSO_CLIENT_SECRET:-}
+      - --cookie-secret=${SSO_COOKIE_SECRET:-}
+      - --cookie-name=_innotel_sso
+      - --cookie-domain=${SSO_COOKIE_DOMAIN:-.innotel.us}
+      # SERVER-SIDE SESSIONS, AND THIS IS LOAD-BEARING. A cookie session carries
+      # the email, the ID token and every group the identity claims; that exceeds
+      # the 4KB a cookie can hold, so oauth2-proxy splits it across several
+      # cookies, the callback's response header grows past the edge's
+      # `proxy_buffer_size`, and nginx answers the login with
+      # "upstream sent too big header while reading response header from upstream"
+      # -> 502 on /oauth2/callback, i.e. the sign-in silently fails at the one
+      # hop that finishes it. Measured live before this flag existed.
+      - --session-store-type=redis
+      - --pass-access-token=false
+      - --pass-authorization-header=false
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      - --email-domain=*
+      # Authentik's own `email` scope mapping sets email_verified: false (it has no
+      # authoritative source for whether an address is verified), and oauth2-proxy
+      # refuses such a token by default — the callback dies with
+      # "email in id_token (...) isn't verified" and the browser gets a 500.
+      # Verified live: without this flag nobody can sign in at all. It is safe
+      # because the door is --allowed-group below, not the address.
+      - --insecure-oidc-allow-unverified-email
+      # Without this the `groups` claim is never read, so --allowed-group
+      # restricts nothing and any authenticated identity is admitted.
+      - --oidc-groups-claim=groups
+      - --allowed-group=${SSO_REQUIRED_GROUP:-cerulean-platform}
+      - --scope=openid email profile groups
+      - --http-address=127.0.0.1:${NPM_SSO_GATEWAY_PORT:-4180}
+      - --upstream=http://127.0.0.1:${NPM_ADMIN_PORT:-81}
+      - --reverse-proxy=true
+      - --pass-user-headers=true
+      - --set-xauthrequest=true
+      - --skip-provider-button=true
+      - --redirect-url=${NPM_SSO_REDIRECT_URL:-https://proxy.innotel.us/oauth2/callback}
+      - --whitelist-domain=${SSO_COOKIE_DOMAIN:-.innotel.us}
+
+  # ── Shared SSO session store (one sign-in across every gateway) ───────────
+  # oauth2-proxy keeps sessions here rather than in the browser cookie (see the
+  # --session-store-type note on the gateway above). Every gateway in the
+  # platform points at THIS store, so a session established through one of them
+  # is found by all the others and the shared `_innotel_sso` cookie means one
+  # Authentik sign-in covers every surface.
+  #
+  # It is published on the host because the gateways live in three different
+  # Docker networks (the edge's own, Monarch's, Capstone's); the LAN address is
+  # the one the other two can both reach. The password is therefore the whole
+  # control on that listener, which is why an empty one refuses to start rather
+  # than opening it. Sessions are the only thing stored, there is no volume, and
+  # losing it costs a re-login and nothing else.
+
+  cerulean-sso-sessions:   # from npm (profiles: "npm")
+    image: redis:7-alpine
+    container_name: cerulean-sso-sessions
+    profiles: ["npm"]
+    restart: unless-stopped
+    environment:
+      SSO_SESSION_REDIS_PASSWORD: "${SSO_SESSION_REDIS_PASSWORD:-}"
+    command:
+      - sh
+      - -c
+      - |
+        if [ -z "$$SSO_SESSION_REDIS_PASSWORD" ]; then
+          echo "cerulean-sso-sessions: SSO_SESSION_REDIS_PASSWORD is empty; refusing to start an unauthenticated session store." >&2
+          echo "Add one with:  printf 'SSO_SESSION_REDIS_PASSWORD=%s\\n' \$$(openssl rand -hex 32) >> .env" >&2
+          exit 2
+        fi
+        exec redis-server \
+          --requirepass "$$SSO_SESSION_REDIS_PASSWORD" \
+          --save "" \
+          --appendonly no \
+          --maxmemory-policy noeviction
+    # Published on the host's loopback and docker0 gateway only — never the LAN
+    # address. The edge's own gateway reaches it by service name (they share a
+    # network namespace), but the gateways in the *other* stacks are separate
+    # compose projects, so they dial the docker0 address instead
+    # (SSO_SESSION_REDIS_HOST). A password-protected session store has no
+    # business being reachable from the office wifi.
+    ports:
+    - "${SSO_SESSION_REDIS_BIND:-127.0.0.1}:${SSO_SESSION_REDIS_PORT:-16380}:6379"
+    - "${SSO_SESSION_REDIS_DOCKER_BIND:-172.17.0.1}:${SSO_SESSION_REDIS_PORT:-16380}:6379"
+    # Bind for stacks that live on ANOTHER host. The store is what makes one
+    # login work across every product, so a stack that moved to its own server
+    # still has to reach it: from there, neither this host's loopback nor its
+    # docker0 gateway is reachable, and a gateway that cannot reach the store
+    # exits on "dial tcp 172.17.0.1:16380: connect: connection refused" rather
+    # than degrading. Off by default (the loopback default keeps this host-only
+    # unless an operator opts in), and it stays password-protected by
+    # SSO_SESSION_REDIS_PASSWORD. Set it to this host's LAN IP.
+    - "${SSO_SESSION_REDIS_LAN_BIND:-127.0.0.1}:${SSO_SESSION_REDIS_PORT:-16380}:6379"
+
+
+  cerulean-npm-db:   # from npm (profiles: "npm")
+    image: jc21/mariadb-aria:latest
+    container_name: cerulean-npm-db
+    profiles: ["npm"]
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "${NPM_DB_ROOT_PASSWORD:-}"
+      MYSQL_DATABASE: npm
+      MYSQL_USER: nginxpm
+      MYSQL_PASSWORD: "${NPM_DB_MYSQL_PASSWORD:-}"
+    volumes:
+      - ../../1-primary/npm/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h localhost -u root -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+
+  cerulean-npm-backup-ui:   # from npm (profiles: "npm")
+    build: ../../1-primary/npm/backup-ui
+    container_name: cerulean-npm-backup-ui
+    profiles: ["npm"]
+    restart: unless-stopped
+    ports:
+      - "${NPM_BACKUP_UI_PORT:-82}:80"
+    environment:
+      DB_HOST: cerulean-npm-db
+      DB_PORT: 3306
+      DB_USER: nginxpm
+      DB_PASSWORD: "${NPM_DB_MYSQL_PASSWORD:-}"
+      DB_NAME: npm
+      DB_ROOT_PASSWORD: "${NPM_DB_ROOT_PASSWORD:-}"
+      BACKUP_DIR: /backups
+      APP_IMAGE: jc21/nginx-proxy-manager:latest
+      BACKUP_UI_USER: "${NPM_BACKUP_UI_USER:-}"
+      BACKUP_UI_PASSWORD: "${NPM_BACKUP_UI_PASSWORD:-}"
+      CRON_SCHEDULE: "${NPM_CRON_SCHEDULE-0 2 * * *}"
+      BACKUP_RETENTION: "${NPM_BACKUP_RETENTION:-7}"
+    volumes:
+      - ../../1-primary/npm/backups:/backups
+      - ../../1-primary/npm/data:/data
+      - ../../1-primary/npm/letsencrypt:/etc/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      cerulean-npm-db:
+        condition: service_healthy
+
+  app:   # from npm
+    # First-party image: this fork, built from docker/Dockerfile.sso. It adds the
+    # Authentik forward-auth sign-in the upstream image does not have — see
+    # docs/stack.md. Leave AUTH_SSO_ENABLED unset for a plain upstream-like
+    # install (the password form behaves exactly as before).
+    image: 'innotel/npm-edge:2.15.1'
+    build:
+      context: ../../1-primary/npm
+      dockerfile: docker/Dockerfile.sso
+      args:
+        BUILD_VERSION: '2.15.1'
+    restart: unless-stopped
+    ports:
+      - '${NPM_HTTP_PORT:-80}:80'   # Public HTTP Port
+      - '${NPM_HTTPS_PORT:-443}:443' # Public HTTPS Port
+      - '${NPM_ADMIN_PORT:-81}:81'   # Admin Web Port
+      # Add any other Stream port you want to expose
+      # - '21:21' # FTP
+    environment:
+      DB_MYSQL_HOST: "db"
+      DB_MYSQL_PORT: 3306
+      DB_MYSQL_USER: "nginxpm"
+      DB_MYSQL_PASSWORD: "${DB_MYSQL_PASSWORD:?set DB_MYSQL_PASSWORD in .env}"
+      DB_MYSQL_NAME: "npm"
+      DISABLE_IPV6: 'true'
+      # ── Authentik forward-auth sign-in (optional; see docs/stack.md) ──
+      # The proxy host that fronts this UI must forward to the UI's loopback
+      # (127.0.0.1:${NPM_ADMIN_PORT:-81}): the app believes X-authentik-* only on
+      # a loopback connection, which is what stops a LAN client forging one.
+      AUTH_SSO_ENABLED: "${AUTH_SSO_ENABLED:-0}"
+      AUTH_SSO_REQUIRED_GROUP: "${AUTH_SSO_REQUIRED_GROUP:-}"
+      AUTH_SSO_ADMIN_GROUP: "${AUTH_SSO_ADMIN_GROUP:-}"
+      AUTH_SSO_AUTO_CREATE: "${AUTH_SSO_AUTO_CREATE:-1}"
+      AUTH_SERVICE_ACCOUNTS: "${AUTH_SERVICE_ACCOUNTS:-}"
+      BREAKGLASS_LOGIN: "${BREAKGLASS_LOGIN:-}"
+      # First-run admin, created only while the user table is empty. Set these
+      # or the fresh instance has to be claimed through the setup wizard.
+      INITIAL_ADMIN_EMAIL: "${INITIAL_ADMIN_EMAIL:-admin@innotel.us}"
+      INITIAL_ADMIN_PASSWORD: "${INITIAL_ADMIN_PASSWORD:-}"
+    volumes:
+      - ../../1-primary/npm/data:/data
+      - ../../1-primary/npm/letsencrypt:/etc/letsencrypt
+    depends_on:
+      - db
+
+
+  db:   # from npm
+    image: 'jc21/mariadb-aria:latest'
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}"
+      MYSQL_DATABASE: 'npm'
+      MYSQL_USER: 'nginxpm'
+      MYSQL_PASSWORD: "${DB_MYSQL_PASSWORD:?set DB_MYSQL_PASSWORD in .env}"
+    volumes:
+      - ../../1-primary/npm/mysql:/var/lib/mysql
+
+  # Companion settings backup/import UI (http://<host>:82)
+
+  backup-ui:   # from npm
+    build: ../../1-primary/npm/backup-ui
+    restart: unless-stopped
+    ports:
+      - '${BACKUP_UI_PORT:-82}:80'
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: nginxpm
+      DB_PASSWORD: "${DB_MYSQL_PASSWORD:?set DB_MYSQL_PASSWORD in .env}"
+      DB_NAME: npm
+      DB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}"
+      BACKUP_DIR: /backups
+      APP_IMAGE: 'jc21/nginx-proxy-manager:latest'
+      # Optional basic auth for the backup UI (leave blank to disable)
+      BACKUP_UI_USER: "${BACKUP_UI_USER:-}"
+      BACKUP_UI_PASSWORD: "${BACKUP_UI_PASSWORD:-}"
+      # Automatic nightly backup + rolling retention
+      CRON_SCHEDULE: "${CRON_SCHEDULE-0 2 * * *}"
+      BACKUP_RETENTION: "${BACKUP_RETENTION:-7}"
+    volumes:
+      - ../../1-primary/npm/backups:/backups
+      - ../../1-primary/npm/data:/data
+      - ../../1-primary/npm/letsencrypt:/etc/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock  # to stop/start the NPM container on import
+    depends_on:
+      - db
+
+  magnate:   # from magnate
+    build: ../../1-primary/magnate
+    container_name: magnate
+    restart: unless-stopped
+    # Memory posture (docs/service-audit.md): billing API is light; cap for
+    # node heap safety.
+    mem_limit: 1g
+    memswap_limit: 1g
+    security_opt:
+      - apparmor:unconfined
+    ports:
+      # Host port configurable via MAGNATE_PORT (default 3000) — lets the app
+      # sit beside other :3000 services on a shared host (e.g. a billing portal).
+      - "${MAGNATE_PORT:-3000}:3000"
+    environment:
+      # All values come from .env (gitignored — keep secrets out of git!).
+      # Copy .env.sample to .env and fill in the real values, or run
+      # `docker compose up -d` and let Compose read them from .env.
+      APP_URL: "${APP_URL:-https://app.magnate.innotel.us}"
+      # Stripe (create keys at https://dashboard.stripe.com/apikeys)
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-sk_live_xxx}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-whsec_xxx}"
+      STRIPE_CURRENCY: "${STRIPE_CURRENCY:-usd}"
+      # Jellyfin server + API key (Dashboard → Advanced → API Keys)
+      JELLYFIN_URL: "${JELLYFIN_URL:-https://media.magnate.innotel.us}"
+      JELLYFIN_API_KEY: "${JELLYFIN_API_KEY:-your-jellyfin-api-key}"
+      # Authentik — external by default. Set AUTHENTIK_BASE_URL and
+      # AUTHENTIK_BOOTSTRAP_TOKEN for the shared IdentityOps instance, or
+      # start with `--profile authentik` to run the local replacement.
+      # Admin SSO through Cerulean (the auth & trust stack). When
+      # AUTHENTIK_ISSUER_URL/_CLIENT_ID/_CLIENT_SECRET are set, the admin login
+      # page offers "Sign in with Cerulean"; AUTHENTIK_ADMIN_EMAILS is the
+      # comma-separated allowlist that may hold the admin session.
+      # Account portal link (footer + success page): Authentik self-service
+      # user settings (password resets). Defaults to AUTHENTIK_BASE_URL/if/user/
+      ACCOUNT_PORTAL_URL: "${ACCOUNT_PORTAL_URL:-https://auth.magnate.innotel.us/if/user/}"
+      # Jellyseerr request portal (movie/TV requests, tied to Jellyfin)
+      REQUEST_URL: "${REQUEST_URL:-https://req.magnate.innotel.us}"
+      # LEGACY placeholder — the ARR billing-api was retired; Magnate enforces
+      # access itself in its Stripe webhook (app/api/webhook/route.ts).
+      # Kept so existing deployments' .env values don't break `up`.
+      BILLING_API_URL: "${BILLING_API_URL:-}"
+      # Affiliate & referral program
+      # % of a referral's first payment credited to the referrer (0 disables)
+      REFERRAL_REWARD_PERCENT: "${REFERRAL_REWARD_PERCENT:-10}"
+      # Optional Stripe coupon ID applied to referred signups' first invoice
+      REFERRAL_COUPON_ID: "${REFERRAL_COUPON_ID:-}"
+      # AI recommendations & churn prevention (OpenAI-compatible API)
+      AI_API_URL: "${AI_API_URL:-https://api.openai.com/v1}"
+      AI_API_KEY: "${AI_API_KEY:-}"
+      AI_MODEL: "${AI_MODEL:-gpt-4o-mini}"
+      # Authentik (Cerulean SSO) — the admin panel's identity provider.
+      # These MUST be passed through: lib/oidc.ts reads them from process.env,
+      # so a value that only lives in .env (compose substitution) never reaches
+      # the container and SSO silently stays off.
+      AUTHENTIK_ISSUER_URL: "${AUTHENTIK_ISSUER_URL:-}"
+      AUTHENTIK_CLIENT_ID: "${AUTHENTIK_CLIENT_ID:-}"
+      AUTHENTIK_CLIENT_SECRET: "${AUTHENTIK_CLIENT_SECRET:-}"
+      AUTHENTIK_REDIRECT_URI: "${AUTHENTIK_REDIRECT_URI:-}"
+      AUTHENTIK_ADMIN_EMAILS: "${AUTHENTIK_ADMIN_EMAILS:-}"
+      # Admin API (user provisioning / password resets) — same caution.
+      AUTHENTIK_BASE_URL: "${AUTHENTIK_BASE_URL:-}"
+      AUTHENTIK_BOOTSTRAP_TOKEN: "${AUTHENTIK_BOOTSTRAP_TOKEN:-}"
+      # SecretOps (Cerulean Vault) — the entrypoint resolves vault:// refs
+      # (Stripe keys) through these before boot. The path-scoped token file is
+      # minted by the platform: data/vault/token/magnate.token on .46.
+      VAULT_ADDR: "${VAULT_ADDR:-}"
+      VAULT_TOKEN: "${VAULT_TOKEN:-}"
+      VAULT_TOKEN_FILE: "${VAULT_TOKEN_FILE:-}"
+      VAULT_PREFIX: "${VAULT_PREFIX:-cerulean}"
+      PAID_GROUPS: "${PAID_GROUPS:-paid_users}"
+      # Default paid-tier group for plans without their own override.
+      # Members gain whatever the consumers grant to that group (Jellyfin
+      # LDAP filters, Distro entitlements, Olympus quotas read the same claim).
+      # Admin panel — identity is Cerulean Authentik. The password env is the
+      # BREAK-GLASS fallback: it only works while BREAKGLASS_LOGIN is set, and
+      # the login page hides the password form otherwise (lib/auth.ts).
+      BREAKGLASS_LOGIN: "${BREAKGLASS_LOGIN:-}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-change-me-to-a-strong-password}"
+      # Used to encrypt stored credentials and sign admin sessions
+      SESSION_SECRET: "${SESSION_SECRET:-change-me-to-a-long-random-string}"
+    networks: [magnate-net]
+    volumes:
+      - ../../1-primary/magnate/data:/app/data
+
+  # ── Authentik — optional local identity replacement ──
+  # Default deployments use the shared external Authentik instance. Enable the
+  # local replacement explicitly with: docker compose --profile authentik up -d
+
+
+
+
+
+  server:   # from sign
+    image: opensign/opensignserver:main
+    build:
+      context: ../../1-primary/sign
+      dockerfile: apps/OpenSignServer/Dockerhubfile
+    restart: unless-stopped
+    volumes:
+      - opensign-files:/usr/src/app/files
+    ports:
+      - "8080:8080"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file: ../../1-primary/sign/.env.prod
+    environment:
+      NODE_ENV: production
+    networks:
+      - app-network
+
+
+  mongo:   # from sign
+    image: mongo:7.0
+    restart: unless-stopped
+    volumes:
+      - data-volume:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-network
+
+
+  client:   # from sign
+    image: opensign/opensign:main
+    build:
+      context: ../../1-primary/sign
+      dockerfile: apps/OpenSign/Dockerhubfile
+    restart: unless-stopped
+    depends_on:
+      - server
+    env_file: ../../1-primary/sign/.env.prod
+    ports:
+      - "3000:3000"
+    networks:
+      - app-network
+
+
+  frontend:   # from signara
+    image: ${SIGNARA_WEB_IMAGE:-ghcr.io/innotelinc/signara-web:latest}
+    build:
+      context: ../../1-primary/signara
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${API_URL:-https://api.signara.innotel.us}
+        NEXT_PUBLIC_WEB_URL: ${WEB_URL:-https://app.signara.innotel.us}
+    pull_policy: missing
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${API_URL:-https://api.signara.innotel.us}
+      NEXT_PUBLIC_WEB_URL: ${WEB_URL:-https://app.signara.innotel.us}
+    ports:
+      - '${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_BIND_PORT:-3000}:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Public object-storage endpoint used by browser-facing presigned document
+  # URLs (S3_PUBLIC_ENDPOINT, e.g. https://storage.signara.innotel.us). Host
+  # port 9002 avoids the host 9000 taken by Cerulean's Authentik.
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+      restart_policy:
+        condition: unless-stopped
+    logging: *logging-default
+
+
+  api:   # from signara
+    image: ${SIGNARA_API_IMAGE:-ghcr.io/innotelinc/signara-api:latest}
+    build:
+      context: ../../1-primary/signara
+      dockerfile: apps/api/Dockerfile
+    pull_policy: missing
+    restart: unless-stopped
+    env_file: ../../1-primary/signara/.env
+    environment:
+      NODE_ENV: production
+      API_PORT: 8000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-signara}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-signara}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:-change-me}@redis:6379
+      # The document store is a *profile*, not a hard-coded MinIO
+      # (docs/Roadmap.md W3). These read from SIGNARA_S3_* rather than S3_* on
+      # purpose: S3_ACCESS_KEY/S3_SECRET_KEY stay MinIO's own root credentials,
+      # so the retired store can be started again for rollback without its
+      # credentials having been repointed underneath it. Compose gives
+      # `environment` precedence over `env_file`, so these win over .env.
+      S3_ENDPOINT: ${SIGNARA_S3_ENDPOINT:-http://minio:9000}
+      S3_ACCESS_KEY: ${SIGNARA_S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${SIGNARA_S3_SECRET_KEY:-}
+      S3_BUCKET: ${SIGNARA_S3_BUCKET:-signara-documents}
+      S3_REGION: ${SIGNARA_S3_REGION:-us-east-1}
+      S3_FORCE_PATH_STYLE: ${SIGNARA_S3_FORCE_PATH_STYLE:-true}
+      S3_PUBLIC_ENDPOINT: ${SIGNARA_S3_PUBLIC_ENDPOINT:-}
+      MEILISEARCH_HOST: http://meilisearch:7700
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:-https://auth.signara.innotel.us/application/o/signara/jwks/}
+      OIDC_TOKEN_URL: ${OIDC_TOKEN_URL:-https://auth.signara.innotel.us/application/o/token/}
+      OIDC_USERINFO_URL: ${OIDC_USERINFO_URL:-https://auth.signara.innotel.us/application/o/userinfo/}
+    ports:
+      - '${API_BIND_ADDRESS:-127.0.0.1}:${API_BIND_PORT:-8000}:8000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # No `minio` dependency: the API must be able to start with the retired
+      # store stopped, or "demote MinIO" would mean "cannot boot"
+      # (docs/Roadmap.md W3).
+      meilisearch:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8000/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+      restart_policy:
+        condition: unless-stopped
+    logging: *logging-default
+
+
+  migrate:   # from signara
+    image: ${SIGNARA_API_IMAGE:-ghcr.io/innotelinc/signara-api:latest}
+    pull_policy: missing
+    env_file: ../../1-primary/signara/.env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-signara}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-signara}?schema=public
+    command:
+      [
+        'node_modules/.bin/prisma',
+        'migrate',
+        'deploy',
+        '--schema',
+        'packages/database/prisma/schema.prisma',
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+    logging: *logging-default
+
+
+  postgres:   # from signara
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-signara}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-signara}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-signara}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    logging: *logging-default
+
+
+  redis:   # from signara
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      ['redis-server', '--requirepass', '${REDIS_PASSWORD:-change-me}', '--appendonly', 'yes']
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-change-me}', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    logging: *logging-default
+
+
+  minio:   # from signara (profiles: 'legacy-storage')
+    # Retired as the primary store (docs/Roadmap.md W3): Signara now reads and
+    # writes the estate's onyx-objectstore. Kept defined and profile-gated so
+    # it is *not* resurrected by a plain `up -d` — bring it back deliberately
+    # for rollback with `--profile legacy-storage`, alongside its volume, which
+    # still holds every object as it was.
+    profiles: ['legacy-storage']
+    # MinIO retired its Docker Hub images (pull access denied), so a fresh host
+    # cannot pull this from docker.io — MinIO's own registry serves the same
+    # release. Cached hosts keep working either way.
+    image: quay.io/minio/minio:RELEASE.2024-09-13T20-26-02Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-signara}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-change-me}
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    logging: *logging-default
+
+    ports:
+      - '0.0.0.0:9002:9000'
+
+  # Observability + backup are opt-in (they are otherwise in the default set
+  # and cost ~2 GB on modest hosts). Start with:
+  #   docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
+  #     --profile monitoring up -d prometheus grafana loki alertmanager backup backup-metrics
+
+  meilisearch:   # from signara
+    image: getmeili/meilisearch:v1.10
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILISEARCH_API_KEY:-change-me}
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: 'true'
+    volumes:
+      - meilidata:/meili_data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:7700/health']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    logging: *logging-default
+
+
+  signara-authentik-server:   # from signara (profiles: "authentik")
+    profiles: ["authentik"]
+    image: ghcr.io/goauthentik/server:2024.8.1
+    restart: unless-stopped
+    command: server
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-authentik}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: 'false'
+      AUTHENTIK_POSTGRESQL__HOST: authentik-db
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:-change-me-authentik-db}
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@signara.innotel.us}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-change-me}
+    ports:
+      - '${AUTHENTIK_BIND_ADDRESS:-127.0.0.1}:${AUTHENTIK_BIND_PORT:-9100}:9000'
+      - '${AUTHENTIK_BIND_ADDRESS:-127.0.0.1}:${AUTHENTIK_HTTPS_BIND_PORT:-9443}:9443'
+    volumes:
+      - ../../1-primary/signara/cert:/certs:ro
+    depends_on:
+      authentik-db:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_started
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:9000/health/live/']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging-default
+
+
+  signara-authentik-worker:   # from signara (profiles: "authentik")
+    profiles: ["authentik"]
+    image: ghcr.io/goauthentik/server:2024.8.1
+    restart: unless-stopped
+    command: worker
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-authentik}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: 'false'
+      AUTHENTIK_POSTGRESQL__HOST: authentik-db
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_DB_PASSWORD:-change-me-authentik-db}
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_REDIS__HOST: authentik-redis
+    depends_on:
+      authentik-db:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_started
+    logging: *logging-default
+
+
+  authentik-db:   # from signara (profiles: "authentik")
+    profiles: ["authentik"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: ${AUTHENTIK_DB_PASSWORD:-change-me-authentik-db}
+      POSTGRES_DB: authentik
+    volumes:
+      - authentikdb:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U authentik']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *logging-default
+
+
+  signara-authentik-redis:   # from signara (profiles: "authentik")
+    profiles: ["authentik"]
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - authentikredis:/data
+    logging: *logging-default
+
+
+  prometheus:   # from signara (profiles: 'monitoring')
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROM_RETENTION:-90d}
+    volumes:
+      - ../../1-primary/signara/infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../../1-primary/signara/infra/monitoring/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
+      - promdata:/prometheus
+    depends_on:
+      - api
+    logging: *logging-default
+
+    profiles: ['monitoring']
+
+  grafana:   # from signara (profiles: 'monitoring')
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_SERVER_ROOT_URL: https://monitoring.signara.innotel.us
+    volumes:
+      - ../../1-primary/signara/infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../1-primary/signara/infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    logging: *logging-default
+
+    profiles: ['monitoring']
+
+  loki:   # from signara (profiles: 'monitoring')
+    image: grafana/loki:3.1.0
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki.yaml
+    volumes:
+      - ../../1-primary/signara/infra/monitoring/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - lokidata:/loki
+    logging: *logging-default
+
+    profiles: ['monitoring']
+
+  alertmanager:   # from signara (profiles: 'monitoring')
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ../../1-primary/signara/infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertdata:/alertmanager
+    logging: *logging-default
+
+  # --------------------------------------------------------------- backup ---
+    profiles: ['monitoring']
+
+  backup:   # from signara (profiles: 'monitoring')
+    build:
+      context: ../../1-primary/signara
+      dockerfile: infra/backup/Dockerfile
+    restart: unless-stopped
+    entrypoint: ['/bin/sh', '/backup/entrypoint.sh']
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-signara}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-signara}
+      AUTHENTIK_POSTGRES_HOST: ${AUTHENTIK_POSTGRES_HOST:-}
+      AUTHENTIK_POSTGRES_USER: authentik
+      AUTHENTIK_POSTGRES_PASSWORD: ${AUTHENTIK_DB_PASSWORD:-}
+      AUTHENTIK_POSTGRES_DB: authentik
+      # Backs up whatever the API is actually using, so it follows the storage
+      # profile rather than naming MinIO.
+      SOURCE_S3_ENDPOINT: ${SIGNARA_S3_ENDPOINT:-http://minio:9000}
+      SOURCE_S3_BUCKET: ${SIGNARA_S3_BUCKET:-signara-documents}
+      SOURCE_S3_ACCESS_KEY: ${SIGNARA_S3_ACCESS_KEY:-signara}
+      SOURCE_S3_SECRET_KEY: ${SIGNARA_S3_SECRET_KEY:-change-me}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-signara-backups}
+      BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY:-}
+      BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY:-}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_ONCE: ${BACKUP_ONCE:-false}
+      BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-false}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_REQUIRE_REMOTE: ${BACKUP_REQUIRE_REMOTE:-false}
+    volumes:
+      - ../../1-primary/signara/infra/backup:/backup:ro
+      - backupcache:/backup-cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # No `minio` dependency — same reason as the api service above.
+    logging: *logging-default
+
+    profiles: ['monitoring']
+
+  backup-metrics:   # from signara (profiles: 'monitoring')
+    image: python:3.12-alpine
+    restart: unless-stopped
+    command: ['python', '/metrics/backup_metrics.py']
+    volumes:
+      - backupcache:/backup-cache:ro
+      - ../../1-primary/signara/infra/backup/backup_metrics.py:/metrics/backup_metrics.py:ro
+    expose:
+      - '9101'
+    depends_on:
+      - backup
+    logging: *logging-default
+
+    profiles: ['monitoring']
+
+  tutor-mysql:   # group-owned (extras/1-primary.yml)
+    image: docker.io/mysql:8.4.11
+    container_name: g1-tutor-mysql
+    restart: unless-stopped
+    command: >
+      mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+      --binlog-expire-logs-seconds=259200 --mysql-native-password=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: ${TUTOR_MYSQL_ROOT_PASSWORD:?set in .env}
+    volumes:
+      - tutor-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+      - innotel-mesh-net
+
+
+  tutor-mongodb:   # group-owned (extras/1-primary.yml)
+    image: docker.io/mongo:7.0.39
+    container_name: g1-tutor-mongodb
+    restart: unless-stopped
+    command: mongod --storageEngine wiredTiger
+    user: "999:999"
+    volumes:
+      - tutor-mongodb:/data/db
+    networks:
+      - default
+
+
+  tutor-redis:   # group-owned (extras/1-primary.yml)
+    image: docker.io/redis:7.4.10
+    container_name: g1-tutor-redis
+    restart: unless-stopped
+    volumes:
+      - tutor-redis:/data
+    networks:
+      - default
+
+  # LMS/CMS publish their origin ports directly (18000/18001). Public hostnames
+  # (learn./studio.) terminate at the shared NPM edge — no local Caddy.
+
+
+  tutor-lms:   # group-owned (extras/1-primary.yml)
+    image: docker.io/overhangio/openedx:22.0.2
+    container_name: g1-tutor-lms
+    restart: unless-stopped
+    ports:
+      - "${OPENEDX_LMS_PORT:-18000}:18000"
+    command: ./lms.sh gunicorn -b 0.0.0.0:18000 -w 2 --timeout 120
+    environment:
+      SERVICE_VARIANT: lms
+      DJANGO_SETTINGS_MODULE: lms.envs.tutor.production
+    volumes:
+      - tutor-lms-data:/openedx/data
+    depends_on:
+      - tutor-mysql
+      - tutor-mongodb
+      - tutor-redis
+    networks:
+      - default
+      - innotel-mesh-net
+
+
+  tutor-cms:   # group-owned (extras/1-primary.yml)
+    image: docker.io/overhangio/openedx:22.0.2
+    container_name: g1-tutor-cms
+    restart: unless-stopped
+    ports:
+      - "${OPENEDX_CMS_PORT:-18001}:18001"
+    command: ./cms.sh gunicorn -b 0.0.0.0:18001 -w 2 --timeout 120
+    environment:
+      SERVICE_VARIANT: cms
+      DJANGO_SETTINGS_MODULE: cms.envs.tutor.production
+    volumes:
+      - tutor-cms-data:/openedx/data
+    depends_on:
+      - tutor-mysql
+      - tutor-mongodb
+      - tutor-redis
+    networks:
+      - default
+      - innotel-mesh-net
+
+
+  tutor-meilisearch:   # group-owned (extras/1-primary.yml)
+    image: docker.io/getmeili/meilisearch:v1.36.0
+    container_name: g1-tutor-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${TUTOR_MEILI_KEY:-miFS50LGWh0Uc75s5upoe3ER}
+    volumes:
+      - tutor-meilisearch:/meili_data
+    networks:
+      - default
+
+  # ═══ MAGNATE (Billing) ═══════════════════════════════════════════════════
+
+
+  consul-reg-g1:   # group-owned (extras/1-primary.yml)
+    image: curlimages/curl:latest
+    container_name: g1-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "cerulean|${MESH_SERVER_IP:-10.10.1.1}|3003|auth,primary" \
+          "authentik|${MESH_SERVER_IP:-10.10.1.1}|9000|auth,sso,oidc" \
+          "vault|${MESH_SERVER_IP:-10.10.1.1}|8200|secrets,vault" \
+          "lms|${MESH_SERVER_IP:-10.10.1.1}|18000|education,primary" \
+          "cms|${MESH_SERVER_IP:-10.10.1.1}|18001|education,cms" \
+          "magnate|${MESH_SERVER_IP:-10.10.1.1}|3010|billing,primary" \
+          "npm|${MESH_SERVER_IP:-10.10.1.1}|81|edge,proxy,tls" \
+          "signara|${MESH_SERVER_IP:-10.10.1.1}|8000|trust,docs,signing"; do
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g1] Registered $$NAME at $$ADDR:$$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+
+
+volumes:
+  tutor-cms-data:
+  tutor-lms-data:
+  tutor-meilisearch:
+  tutor-mongodb:
+  tutor-mysql:
+  tutor-redis:
+  data-volume:
+  opensign-files:
+  pgdata:
+  redisdata:
+  miniodata:
+  meilidata:
+  authentikdb:
+  authentikredis:
+  promdata:
+  grafanadata:
+  lokidata:
+  alertdata:
+  backupcache:
+
+networks:
+  default:
+    name: g1-net
+  innotel-mesh-net:
+    external: true
+  magnate-net:
+    name: magnate-net
+  app-network:
+    driver: bridge

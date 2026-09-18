@@ -1,0 +1,1910 @@
+# ══════════════════════════════════════════════════════════════════════════
+# Group 2 — VOICE
+# GENERATED — do not edit. `ips/scripts/gen-group-compose.py` builds this
+# file from its member repos; edit those, or the group's own wiring in
+# `ips/groups/extras/2-voice.yml`, and regenerate.
+# `scripts/gen-group-compose.py --check` runs in CI.
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Sources:
+#   2-voice/capstone/docker-compose.yml
+#   2-voice/zeus/docker-compose.full.yml
+
+name: innotel-group2
+
+x-sso-gateway: &sso-gateway
+  image: quay.io/oauth2-proxy/oauth2-proxy:v7.8.2
+  restart: unless-stopped
+  logging:
+    driver: json-file
+  environment: &sso-gateway-env
+    OAUTH2_PROXY_PROVIDER: oidc
+    # Endpoints are explicit (no discovery). The issuer is the APP-SCOPED one,
+    # because that is the value Authentik puts in the id_token's `iss`:
+    # oauth2-proxy verifies `iss` against --oidc-issuer-url even with
+    # --skip-oidc-discovery, so the bare base here makes every callback die with
+    # `oidc: id token issued by a different provider` -> HTTP 500 on
+    # /oauth2/callback (reproduced on v7.8.2).
+    OAUTH2_PROXY_SKIP_OIDC_DISCOVERY: "true"
+    OAUTH2_PROXY_OIDC_ISSUER_URL: ${SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/${SSO_APP_SLUG:-innotel-app-gateway}/
+    OAUTH2_PROXY_LOGIN_URL: ${SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/authorize/
+    OAUTH2_PROXY_REDEEM_URL: ${SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/token/
+    OAUTH2_PROXY_PROFILE_URL: ${SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/userinfo/
+    OAUTH2_PROXY_OIDC_JWKS_URL: ${SSO_AUTHENTIK_BASE:-https://auth.cerulean.innotel.us}/application/o/${SSO_APP_SLUG:-innotel-app-gateway}/jwks/
+    OAUTH2_PROXY_CLIENT_ID: ${SSO_CLIENT_ID:-innotel-app-gateway}
+    OAUTH2_PROXY_CLIENT_SECRET: ${SSO_CLIENT_SECRET:-}
+    OAUTH2_PROXY_COOKIE_SECRET: ${SSO_COOKIE_SECRET:-}
+    OAUTH2_PROXY_COOKIE_NAME: _innotel_sso
+    OAUTH2_PROXY_COOKIE_DOMAINS: ${SSO_COOKIE_DOMAIN:-.innotel.us}
+    OAUTH2_PROXY_COOKIE_SECURE: "true"
+    OAUTH2_PROXY_COOKIE_SAMESITE: lax
+    OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+    OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: "true"
+    OAUTH2_PROXY_OIDC_GROUPS_CLAIM: groups
+    OAUTH2_PROXY_ALLOWED_GROUPS: ${SSO_REQUIRED_GROUP:-cerulean-platform}
+    OAUTH2_PROXY_SCOPE: openid email profile groups
+    OAUTH2_PROXY_SESSION_STORE_TYPE: redis
+    # The session store runs on the EDGE host. While edge and stack shared a box
+    # the gateway dialled the host-gateway alias (its own docker0); Capstone now
+    # has a server of its own, so SSO_SESSION_REDIS_HOST names the edge host's
+    # LAN address — the address the store is published on for exactly this case.
+    # The alias stays as the fallback and is correct only on the edge host
+    # itself: a gateway pointed at a docker0 that holds no store exits on
+    # "dial tcp 172.17.0.1:16380: connect: connection refused" rather than
+    # degrading. extra_hosts below supplies the alias; a literal gateway IP is
+    # what the CI addressing policy forbids in service targets.
+    OAUTH2_PROXY_REDIS_CONNECTION_URL: redis://:${SSO_SESSION_REDIS_PASSWORD:-}@${SSO_SESSION_REDIS_HOST:-host.docker.internal}:${SSO_SESSION_REDIS_PORT:-16380}/0
+    OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
+    OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
+    OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+    OAUTH2_PROXY_REVERSE_PROXY: "true"
+    OAUTH2_PROXY_PASS_USER_HEADERS: "true"
+    OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+    OAUTH2_PROXY_WHITELIST_DOMAINS: ${SSO_COOKIE_DOMAIN:-.innotel.us}
+  # The host-gateway alias every SSO gateway dials host-published services
+  # through (session store, Technitium console). It resolves to this host's
+  # docker0 gateway, so the target stays correct without naming a bridge IP.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+
+services:
+  postgres:   # from capstone
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:5432:5432"   # loopback only — dograh (host mode) reaches it on 127.0.0.1
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks: [interview-net]
+
+
+  redis:   # from capstone
+    image: redis:7
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redissecret}"]
+    ports:
+      - "127.0.0.1:6379:6379"   # loopback only
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redissecret}", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    networks: [interview-net]
+
+
+  minio:   # from capstone
+    # Mirrored into this repo's GHCR namespace by the release pipeline
+    # (.github/workflows/release.yml) — upstream docker.io unauthenticated
+    # pulls get rate-limited and fail setup.sh with "pull access denied for
+    # minio/minio". The pinned upstream RELEASE tag is mirrored verbatim;
+    # override with MINIO_IMAGE in .env to use a different build.
+    image: ${MINIO_IMAGE:-ghcr.io/innotelinc/capstone/minio:RELEASE.2025-09-07T16-13-09Z}
+    # Memory posture (docs/service-audit.md): cap the object store so a media
+    # burst can't crowd out the agent pipeline. memswap = mem (no swap spill).
+    mem_limit: 1g
+    memswap_limit: 1g
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
+    ports:
+      - "127.0.0.1:9200:9000"   # loopback only; 9000 on the host is Cerulean Authentik
+      - "127.0.0.1:9201:9001"
+      # Also reachable on the LAN plane (same convention as the Asterisk ports
+      # below). The remote NPM edge serves /voice-audio out of this bucket —
+      # browsers fetch recordings/transcripts straight from MinIO through that
+      # route — and the edge can only reach the host's LAN address, never its
+      # loopback. See npm-proxy-hosts.py MEDIA_* and MINIO_PUBLIC_ENDPOINT.
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:9200:9000"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [interview-net]
+
+  # dograh-api in HOST mode: binds ARI/telephony sockets and reaches the PBX on
+  # loopback. All DB/cache/storage/TTS/LLM/OTel endpoints are 127.0.0.1:port.
+  # DEPLOYMENT_MODE defaults to "oss", which is what lets it point model
+  # services at localhost URLs — set it explicitly so it can never flip.
+
+  dograh-api:   # from capstone
+    # Upstream dograh platform image, published to GitHub's container registry.
+    # If it isn't published, setup.sh builds from the dograh source clone
+    # (docker-compose.dograh-build.yml). Override via DOGRAH_API_IMAGE.
+    image: ${DOGRAH_API_IMAGE:-ghcr.io/innotelinc/dograh-api:latest}
+    container_name: dograh-api
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: "local"
+      DEPLOYMENT_MODE: "oss"
+      LOG_LEVEL: "INFO"
+      OSS_JWT_SECRET: "${OSS_JWT_SECRET:?set OSS_JWT_SECRET in your .env}"
+      # dograh-api binds uvicorn on UVICORN_BASE_PORT (its default is 8000).
+      # Host mode = it listens on the host directly at 0.0.0.0:8000.
+      UVICORN_BASE_PORT: "8000"
+
+      # Public origin. For the n8n transcript fetch to work, BACKEND_API_ENDPOINT
+      # must be reachable from INSIDE the n8n container: use the host LAN IP or a
+      # public URL, NOT localhost (n8n would resolve localhost to itself).
+      # The .env carries the detected LAN IP (e.g. http://192.168.1.63:8000).
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:8000}"
+      BACKEND_API_ENDPOINT: "${BACKEND_API_ENDPOINT:-http://localhost:8000}"
+
+      # ── Authentication ─────────────────────────────────────────────────
+      # 'oidc' = sign in exclusively through Cerulean (Authentik). Local
+      # password routes 404 in this mode — there is deliberately no
+      # break-glass. The client secret is held by the API only.
+      AUTH_PROVIDER: "${AUTH_PROVIDER:-local}"
+      AUTHENTIK_ISSUER_URL: "${AUTHENTIK_ISSUER_URL:-}"
+      AUTHENTIK_CLIENT_ID: "${AUTHENTIK_CLIENT_ID:-}"
+      AUTHENTIK_CLIENT_SECRET: "${AUTHENTIK_CLIENT_SECRET:-}"
+      AUTHENTIK_REDIRECT_URI: "${AUTHENTIK_REDIRECT_URI:-}"
+      AUTHENTIK_POST_LOGIN_REDIRECT: "${AUTHENTIK_POST_LOGIN_REDIRECT:-}"
+      AUTHENTIK_ADMIN_EMAILS: "${AUTHENTIK_ADMIN_EMAILS:-}"
+      AUTHENTIK_ALLOWED_EMAILS: "${AUTHENTIK_ALLOWED_EMAILS:-}"
+      # Group gate: any Authentik identity carrying one of these groups (from
+      # the 'groups' scope) is admitted alongside the email allowlist.
+      AUTHENTIK_ALLOWED_GROUPS: "${AUTHENTIK_ALLOWED_GROUPS:-}"
+      AUTHENTIK_ORGANIZATION_PROVIDER_ID: "${AUTHENTIK_ORGANIZATION_PROVIDER_ID:-}"
+
+      # Host-mode URLs for the bridge services
+      DATABASE_URL: "postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@127.0.0.1:5432/postgres"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-redissecret}@127.0.0.1:6379"
+      MINIO_ENDPOINT: "127.0.0.1:9200"
+      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+      MINIO_BUCKET: "voice-audio"
+      MINIO_SECURE: "false"
+      # Signed/plain URLs for transcripts & recordings must be reachable from
+      # the n8n container (it fetches transcript_url). Upstream expects nginx to
+      # proxy /voice-audio/ to MinIO; locally we point straight at MinIO on the
+      # shared interview-net bridge. The bucket has anonymous read access, so
+      # no signature is needed (see services/filesystem/minio.py).
+      MINIO_PUBLIC_ENDPOINT: "${MINIO_PUBLIC_ENDPOINT:-http://minio:9000}"
+
+      # ARI is configured per-organization in the dograh UI (ari_endpoint etc.),
+      # not via env. Point it at the PBX LAN IP (http://192.168.x.x:8088) — 8088
+      # has no loopback leg (README → Addressing).
+      ENABLE_ARI_MANAGER: "true"
+      ENABLE_ARI_STASIS: "true"
+      ENABLE_CAMPAIGN_ORCHESTRATOR: "false"
+
+      # ── OpenTelemetry → the stack's collector ─────────────────────────────
+      # Standard OTel SDK auto-config vars (used by any exporter that reads them)
+      OTEL_SERVICE_NAME: "dograh-interview-agent"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_METRICS_EXPORTER: "otlp"
+      # No log pipeline exists in the metrics-only collector; exporting them
+      # only produced per-batch drop warnings. Traces + metrics are the surfaces.
+      OTEL_LOGS_EXPORTER: "none"
+      # dograh's tracing_config.py builds its default exporter from this var
+      # (wired in api/constants.py + api/services/pipecat/tracing_config.py):
+      # spans go to the OTel collector instead of being dropped when no Langfuse
+      # creds are set. The name is the fork's, not SigNoz's — the collector
+      # converts each span to a RED histogram and drops the span. See README
+      # "Observability wiring".
+      SIGNOZ_OTLP_ENDPOINT: "http://127.0.0.1:4318/v1/traces"
+
+      # ── Call length ───────────────────────────────────────────────────────
+      # Upstream dograh hard-codes a 300 s per-workflow call cap (and a 1200 s
+      # ceiling) unless the workflow sets max_call_duration. The cap cut real
+      # interviews off mid-call, so the fork makes both numbers deployment
+      # settings and treats 0 as "no time limit"; a workflow that sets its own
+      # max_call_duration (e.g. the mock interviews) still wins.
+      #
+      # MAX_CALL_DURATION_SECONDS is the ceiling a workflow may request: 0
+      # removes it, so interview workflows can ask for unlimited calls.
+      # STALE_CALL_TIMEOUT_SECONDS is the concurrency rate limiter's slot age-out
+      # and must stay >= the longest call you allow, or a live call's slot is
+      # purged and the org concurrency limit under-counts.
+      DEFAULT_MAX_CALL_DURATION_SECONDS: "${DEFAULT_MAX_CALL_DURATION_SECONDS:-300}"
+      MAX_CALL_DURATION_SECONDS: "${MAX_CALL_DURATION_SECONDS:-0}"
+      STALE_CALL_TIMEOUT_SECONDS: "${STALE_CALL_TIMEOUT_SECONDS:-7200}"
+    # Host-mode FastAPI on 8000; probe the same health endpoint smoke-test.sh uses.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  # ── Dograh web UI (Next.js frontend) ─────────────────────────────────────
+  # The dograh platform ships a separate Next.js UI (published to GHCR).
+  # dograh-api runs HOST mode on its original uvicorn port (8000); the UI is
+  # published on host port 3010 and reaches the API back via
+  # host.docker.internal:8000. From the browser, the API is reached at
+  # PUBLIC_BASE_URL (LAN IP :8000).
+
+  dograh-ui:   # from capstone
+    image: ${DOGRAH_UI_IMAGE:-ghcr.io/innotelinc/dograh-ui:latest}
+    container_name: dograh-ui
+    restart: unless-stopped
+    environment:
+      # Bind the Next.js standalone server to all interfaces
+      HOSTNAME: "0.0.0.0"
+      PORT: "3010"
+      # Server-side URL (SSR, inside docker) → host-mode dograh-api
+      BACKEND_URL: "${DOGRAH_UI_BACKEND_URL:-http://host.docker.internal:8000}"
+      NODE_ENV: "oss"
+      ENABLE_TELEMETRY: "${DOGRAH_UI_ENABLE_TELEMETRY:-false}"
+    ports:
+      - "0.0.0.0:3010:3010"   # UI on 3010 — API owns 8000
+    depends_on:
+      dograh-api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3010 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [interview-net]
+
+  # ── TURN server for WebRTC/media traversal ────────────────────────────────
+  # Coturn uses static credentials from .env and a dedicated relay range that
+  # does not overlap Webmin (TCP 10000) or Asterisk RTP (UDP 10101-10120).
+
+  capstone-coturn:   # from capstone
+    image: coturn/coturn:latest
+    container_name: capstone-coturn
+    profiles: ["standalone"]  # Only start when Capstone runs alone (Zeus coturn is primary)
+    restart: unless-stopped
+    command:
+      - turnserver
+      - --no-tls
+      - --fingerprint
+      - --lt-cred-mech
+      - --user=${TURN_USERNAME:-turnuser}:${TURN_PASSWORD:-change-me-turn-password}
+      - --realm=${TURN_REALM:-turn.example.com}
+      - --listening-port=3478
+      - --min-port=${TURN_RELAY_PORT_START:-49152}
+      - --max-port=${TURN_RELAY_PORT_END:-49251}
+      - --listening-ip=0.0.0.0
+      # Public address coturn advertises for relayed candidates. Behind Docker
+      # NAT it cannot discover this itself, so it must be told — and a pinned
+      # address silently rots when the WAN IP changes (relay candidates then
+      # point at an address nobody can reach and calls carry no audio).
+      #
+      # The coturn image's entrypoint eval()s each argument and ships
+      # detect-external-ip (a DNS query that returns the caller's public IP),
+      # so this is detected on every container start. Pin TURN_EXTERNAL_IP in
+      # .env only for a box where the DNS probe is blocked.
+      - --external-ip=${TURN_EXTERNAL_IP:-$(detect-external-ip)}
+      - --log-file=stdout
+      - --simple-log
+    environment:
+      TURN_USERNAME: "${TURN_USERNAME:-turnuser}"
+      TURN_PASSWORD: "${TURN_PASSWORD:-change-me-turn-password}"
+      TURN_REALM: "${TURN_REALM:-turn.example.com}"
+      TURN_RELAY_PORT_START: "${TURN_RELAY_PORT_START:-49152}"
+      TURN_RELAY_PORT_END: "${TURN_RELAY_PORT_END:-49251}"
+      TURN_EXTERNAL_IP: "${TURN_EXTERNAL_IP:-127.0.0.1}"
+    ports:
+      - "${TURN_LISTENING_PORT:-3478}:3478/udp"
+      - "${TURN_LISTENING_PORT:-3478}:3478/tcp"
+      - "${TURN_RELAY_PORT_START:-49152}-${TURN_RELAY_PORT_END:-49251}:${TURN_RELAY_PORT_START:-49152}-${TURN_RELAY_PORT_END:-49251}/udp"
+    # Image has bash but no curl/wget/python — a raw TCP connect proves the
+    # TURN listener is up.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/3478' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks: [interview-net]
+    # Note: this is Capstone's standalone-mode coturn only. When the stack runs
+    # in add-on mode (CAPSTONE_PBX=zeus), the shared Asterisk zone already owns
+    # a production coturn (diegosouzapw/omniroute on zeus-pbx:3478); Capstone
+    # consumes it through the TURN_* env vars rather than starting its own.
+    # See docs/zeus-integration.md §4 and .env TURN_EXTERNAL_IP.
+
+  # ── Local TTS: Kokoro-82M via kokoro-fastapi (OpenAI-compatible) ──────────
+
+  kokoro:   # from capstone
+    image: ${KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-cpu:latest}
+    container_name: kokoro-fastapi
+    restart: unless-stopped
+    # Memory posture: Kokoro-82M on CPU peaks ~1.5 GiB during synthesis, but
+    # the full boot (torch + model + voice packs + inno tuner) transiently
+    # overshoots even 4 GiB and gets OOM-killed (exit 137) — give the boot
+    # plenty of headroom; steady-state after load is ~2-3 GiB.
+    mem_limit: 8g
+    memswap_limit: 8g
+    # Torch/OpenMP size their thread pools (and thread-local arenas) from the
+    # core count; on an 8-core host that multiplies the load-time allocation
+    # spike past even 6 GiB. Two threads per pool keeps the boot allocation
+    # bounded — synthesis stays well under 1.5 GiB either way.
+    environment:
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      KMP_INIT_AT_FORK: "FALSE"
+      KMP_AFFINITY: "granularity=fine,compact,1,0"
+    # GPU? Use ghcr.io/remsky/kokoro-fastapi-gpu:latest and add:
+    #   deploy: { resources: { reservations: { devices: [ { driver: nvidia, count: 1, capabilities: [gpu] } ] } } }
+    # The image bakes in kokoro-v1.0.onnx + voices (entrypoint serves :8880).
+    ports:
+      - "127.0.0.1:8880:8880"   # loopback only
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8880/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks: [interview-net]
+
+  # ── TTS shim: one OpenAI-compatible door in front of the TTS engines ──────
+  # Speaks exactly what pipecat's SpeachesTTSService dials — POST
+  # /v1/audio/speech, response_format=pcm, s16le mono at 24 kHz — so dograh is
+  # pointed at it with a model-configuration change and no fork patch. Behind
+  # the door: a second engine for A/B, and a synthesized-audio cache, because
+  # the interview script is fixed text re-spoken on every call and upstream's
+  # cache covers recordings/ambient noise only. See tts-shim/README.md.
+
+  tts-shim:   # from capstone
+    build:
+      context: ../../2-voice/capstone/tts-shim
+      args:
+        WITH_PIPER: "${TTS_SHIM_WITH_PIPER:-1}"
+    image: ${TTS_SHIM_IMAGE:-capstone-tts-shim:local}
+    container_name: tts-shim
+    restart: unless-stopped
+    # Memory posture: the cache is on a volume and the engines are remote
+    # (Kokoro) or a subprocess (Piper), so the process itself stays small.
+    mem_limit: 2g
+    memswap_limit: 2g
+    environment:
+      TTS_SHIM_ENGINES: "${TTS_SHIM_ENGINES:-kokoro}"
+      TTS_SHIM_DEFAULT_ENGINE: "${TTS_SHIM_DEFAULT_ENGINE:-kokoro}"
+      TTS_SHIM_KOKORO_URL: "${TTS_SHIM_KOKORO_URL:-http://kokoro-fastapi:8880}"
+      TTS_SHIM_PIPER_VOICE: "${TTS_SHIM_PIPER_VOICE:-}"
+      TTS_SHIM_CACHE_ENABLED: "${TTS_SHIM_CACHE_ENABLED:-true}"
+      TTS_SHIM_CACHE_MAX_BYTES: "${TTS_SHIM_CACHE_MAX_BYTES:-536870912}"
+      TTS_SHIM_SAMPLE_RATE: "24000"
+    ports:
+      # 8881 on the host: 8880 is kokoro-fastapi's own loopback port.
+      - "127.0.0.1:8881:8880"   # loopback only
+    volumes:
+      - tts_shim_cache:/var/cache/tts-shim
+      # Piper voice packs (.onnx + .onnx.json). On a volume rather than in the
+      # image so a voice is a data decision, not a rebuild: fetch one with
+      # `docker exec tts-shim python -m piper.download_voices <voice>`.
+      - tts_piper_voices:/opt/piper-voices
+    depends_on:
+      - kokoro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8880/health', timeout=5)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [interview-net]
+
+  # ── Local STT: Speaches (faster-whisper, OpenAI-compatible) ──────────────
+  # dograh's native "speaches" STT provider points here (base_url …/v1). Host
+  # Host port 8001 (dograh-api is host-mode on 8000, so 8001 stays free of
+  # conflicts). First start downloads
+  # the Whisper model into speaches_models (one-time); after that it's fully
+  # offline. GPU: use ghcr.io/speaches-ai/speaches:latest-cuda and set
+  # SPEACHES_WHISPER_DEVICE=cuda (+ deploy.resources.reservations.devices).
+
+  speaches:   # from capstone
+    image: ${SPEACHES_IMAGE:-ghcr.io/speaches-ai/speaches:latest-cpu}
+    container_name: speaches
+    restart: unless-stopped
+    # Memory posture: faster-whisper (small/int8) peaks ~1.5 GiB.
+    mem_limit: 2g
+    memswap_limit: 2g
+    environment:
+      WHISPER__INFERENCE_DEVICE: "${SPEACHES_WHISPER_DEVICE:-cpu}"      # cpu | cuda | auto
+      WHISPER__COMPUTE_TYPE: "${SPEACHES_WHISPER_COMPUTE_TYPE:-int8}"
+      WHISPER__MODEL: "${SPEACHES_WHISPER_MODEL:-Systran/faster-distil-whisper-small.en}"
+      UVICORN_HOST: "0.0.0.0"
+      UVICORN_PORT: "8000"
+    ports:
+      - "127.0.0.1:8001:8000"   # loopback only
+    volumes:
+      - speaches_models:/home/ubuntu/.cache/huggingface/hub   # cached models → offline runtime
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=5)\""]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    networks: [interview-net]
+
+  # ── LLM gateway: OmniRoute (OpenAI-compatible, port 20128) ────────────────
+  # MIT-licensed AI gateway (github.com/diegosouzapw/OmniRoute), official image
+  # diegosouzapw/omniroute. Model "auto" = zero-config routing across its free
+  # connected providers with automatic failover; the dashboard also runs on
+  # :20128, but it is no longer on the LAN — the dashboard is reached through the
+  # Authentik-fronted proxy on :20129 (5-dev/olympus/docs/gateway-sso.md) and the
+  # gateway's own login is off. dograh (host mode) dials 127.0.0.1:20128; every
+  # other consumer dials the proxy on 20129.
+  # ⚠ Free-tier cloud providers need internet; for a fully-local LLM, add your
+  # local Ollama / llama.cpp / vLLM as a provider in the dashboard and route to it.
+
+  omniroute:   # from capstone
+    image: ${OMNIROUTE_IMAGE:-diegosouzapw/omniroute:latest}
+    container_name: omniroute
+    restart: unless-stopped
+    # Memory posture: the gateway buffers model streams; cap it so it never
+    # crowds the rest of the stack — but cap it ABOVE where it settles, because
+    # this gateway refuses work when its own cgroup runs near the limit.
+    #
+    # MEASURED. At 1g the container sits at ~0.59 GiB right after a restart and
+    # climbs past 1 GiB under combo load; OmniRoute's resource-pressure guard
+    # (highRatio .85, criticalRatio .92 of the cgroup limit) then trips with
+    # `reason=cgroup_ratio` — 56 times in 35 minutes here — and *every* model
+    # call gets
+    #
+    #   503 Service temporarily unavailable due to resource pressure. Retry shortly.
+    #
+    # in ~30 ms. Nothing downstream can tell that apart from a broken provider,
+    # so an app build stalls and the edge turns the wait into a 504. 3g keeps
+    # the guard's own threshold (~2.55 GiB) clear of the working set the gateway
+    # actually needs; the host has the headroom (15 GiB, ~9 GiB available).
+    mem_limit: 3g
+    memswap_limit: 3g
+    environment:
+      # The image ships a 1 GiB V8 heap; raise it with the cgroup, since the
+      # pressure guard also watches heap ratio (85% of the heap limit).
+      NODE_OPTIONS: --max-old-space-size=2048
+      OMNIROUTE_JWT_SECRET: "${OMNIROUTE_JWT_SECRET:-change-me-jwt-secret}"
+      OMNIROUTE_API_KEY_SECRET: "${OMNIROUTE_API_KEY_SECRET:-change-me-api-key-secret}"
+      # The image reads INITIAL_PASSWORD, and only INITIAL_PASSWORD: 114
+      # references to process.env.INITIAL_PASSWORD in its tree, and none at all
+      # to OMNIROUTE_INITIAL_PASSWORD. Passing only the OMNIROUTE_ name (as this
+      # file used to) leaves the dashboard with no password configured at all —
+      # POST /api/auth/login answers 403 "No password configured. Complete
+      # onboarding first.", which is not an error anyone can act on. Everything
+      # that mints a key through this gateway then fails: setup.sh's grader key,
+      # and the distro control plane, which disables the account it could not
+      # provision and never revisits it. The .env key stays OMNIROUTE_* — that
+      # is the name setup.sh and the control plane read — so only the name
+      # handed to the container is translated here.
+      INITIAL_PASSWORD: "${OMNIROUTE_INITIAL_PASSWORD:-change-me-admin-password}"
+      OMNIROUTE_WS_BRIDGE_SECRET: "${OMNIROUTE_WS_BRIDGE_SECRET:-change-me-ws-bridge-secret}"
+    ports:
+      # Two bindings, and deliberately not the LAN. The consumers of this port reach
+      # the host by one of two names and these cover both: a container *on this host*
+      # via `host.docker.internal:20128`, which `host-gateway` resolves to 172.17.0.1
+      # (olympus-studio, cerulean and the distro control plane all use it), and a
+      # host-mode process via 127.0.0.1:20128 (dograh).
+      #
+      # A consumer on ANY OTHER host is not covered here, and must not try to be: its
+      # `host.docker.internal` is its own docker0. That is what n8n and this stack's
+      # dashboard-api do from `.30`, and it is why the two defaults above name the
+      # proxy on 20129 rather than this port.
+      #
+      # Publishing on 0.0.0.0 also satisfied those two, and put the dashboard on the
+      # LAN — where the only gate is its own password login, because Authentik and the
+      # `cerulean-platform` group check live in the proxy that fronts this, not here.
+      # A client on another machine uses that door instead: `192.168.1.46:20129/v1`.
+      - "127.0.0.1:20128:20128"
+      - "172.17.0.1:20128:20128"
+      #
+      # THERE IS NO LAN BINDING, and that is now load-bearing rather than tidy.
+      # There used to be a third one (`OMNIROUTE_LAN_BIND`) for stacks that moved to
+      # another host, kept safe by the dashboard's own password. That safety is gone
+      # by design: `make gateway-auth-mode` sets `requireLogin=false`, so the gateway
+      # has no gate of its own and this port's reachability IS the control — see
+      # scripts/gateway-auth-mode.py, which refuses to make that change while the
+      # port answers anywhere but this host. So the LAN door is the proxy that
+      # fronts this service (`oauth2-proxy`, `192.168.1.46:20129`), which exempts
+      # `/v1` for inference clients and requires an Authentik session in
+      # `cerulean-platform` for the dashboard. Same host as this container, so it
+      # reaches the two bindings above and nothing else needs the LAN.
+      # See 5-dev/olympus/docs/gateway-sso.md.
+    volumes:
+      - omniroute_data:/data
+    networks: [interview-net]
+
+  # ── Workflow automation: n8n (Community Edition) ──────────────────────────
+
+  n8n:   # from capstone
+    # Custom image: adds OpenTelemetry auto-instrumentation (see n8n.Dockerfile)
+    # so the grading workflow's LLM call exports spans to the collector.
+    build:
+      context: ../../2-voice/capstone
+      dockerfile: n8n.Dockerfile
+    image: ${N8N_IMAGE:-capstone-n8n-otel:local}
+    pull_policy: build
+    container_name: n8n
+    restart: unless-stopped
+    # Memory posture: workflow runs are bursty; NODE_OPTIONS (in the env block
+    # below) caps the V8 heap so a runaway workflow is OOM-killed inside the
+    # container, not the host.
+    mem_limit: 1g
+    memswap_limit: 1g
+    ports:
+      # 127.0.0.1 — host-mode dograh posts its webhook events to
+      # 127.0.0.1:5678, and the public door is n8n.<domain> → n8n-sso (14010).
+      - "127.0.0.1:5678:5678"
+    environment:
+      NODE_OPTIONS: --max-old-space-size=768
+      N8N_HOST: "${N8N_HOST:-localhost}"
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_EDITOR_BASE_URL: "${N8N_EDITOR_BASE_URL:-http://localhost:5678/}"
+      WEBHOOK_URL: "${N8N_WEBHOOK_URL:-http://localhost:5678/}"
+      N8N_SECURE_COOKIE: "false"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      # The Interview Grader workflow reads GRIST_DOC_ID via $env; n8n 2.x
+      # denies env access in expressions unless this is explicitly enabled.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      GENERIC_TIMEZONE: "${N8N_TIMEZONE:-UTC}"
+      # Headless owner provisioning (auto-creates the owner on first start, so
+      # the workflow can be imported/activated via the n8n CLI without the UI).
+      N8N_USER_MANAGEMENT_JWT_SECRET: "${N8N_USER_MANAGEMENT_JWT_SECRET:-change-me-in-env}"
+      OWNER_EMAIL: "${N8N_OWNER_EMAIL:-admin@localhost}"
+      OWNER_PASSWORD: "${N8N_OWNER_PASSWORD:-admin123}"
+      OWNER_FIRST_NAME: "Interview"
+      OWNER_LAST_NAME: "Admin"
+      # Created by the Grist bootstrap step (scripts/grist_bootstrap.py). The
+      # default is the bootstrapped doc for this repo — override in .env with
+      # `GRIST_DOC_ID=$(python3 scripts/grist_bootstrap.py)` output. The doc is
+      # owned by the Grist user, so the grader authenticates its writes with
+      # GRIST_API_KEY (a key for that user).
+      #
+      # GRIST_API_KEY is matched PLAINTEXT against Grist's `users.api_key`
+      # column (HomeDB) — create it in Grist's UI (Profile → API Keys) or set
+      # it directly there. A stale/mismatched key makes the grader's final
+      # Grist write 401 while every earlier node succeeds; the smoke test
+      # exercises this via POST /webhook/interview-graded.
+      GRIST_DOC_ID: "${GRIST_DOC_ID:-new~w8ixnSUpaAEGjaH9BE7636}"
+      GRIST_API_KEY: "${GRIST_API_KEY:-}"
+      # API key for the OpenAI-compatible OmniRoute gateway on 20128. setup.sh
+      # mints this automatically and persists it in .env.
+      # OpenTelemetry → the collector (bootstrap in n8n.Dockerfile reads these)
+      OTEL_SERVICE_NAME: "n8n"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318/v1/traces"
+
+      # ── n8n AI Assistant (self-hosted, open-source) ───────────────────────
+      # instance-ai module + locally-run sandbox (n8n-sandbox) + SearXNG search.
+      # The model is served by OmniRoute (OpenAI-compatible /v1); model "auto"
+      # routes across its free/connected providers.
+      #
+      # 20129, NOT 20128. 20128 is the gateway's own port and it is published on
+      # loopback + this host's docker0 only — no LAN binding, because
+      # `make gateway-auth-mode` leaves the gateway with no login of its own and
+      # the reachability of that port is then the entire control (see the ports
+      # block under `omniroute`). 20129 is the oauth2-proxy in front of it, which
+      # exempts /v1 precisely so inference clients are unaffected. Through the
+      # alias this is correct on the host running that proxy; a stack on another
+      # host pins the LAN address of that host in .env instead, because the alias
+      # resolves to *its own* docker0 where nothing listens.
+      N8N_ENABLED_MODULES: "${N8N_ENABLED_MODULES:-instance-ai}"
+      N8N_INSTANCE_AI_MODEL: "${N8N_INSTANCE_AI_MODEL:-auto}"
+      N8N_INSTANCE_AI_MODEL_URL: "${N8N_INSTANCE_AI_MODEL_URL:-http://host.docker.internal:20129/v1}"
+      N8N_INSTANCE_AI_MODEL_API_KEY: "${N8N_INSTANCE_AI_MODEL_API_KEY:-omniroute}"
+      N8N_INSTANCE_AI_SANDBOX_ENABLED: "true"
+      N8N_INSTANCE_AI_SANDBOX_PROVIDER: "n8n-sandbox"
+      N8N_INSTANCE_AI_SANDBOX_API_URL: "http://sandbox-api:8080"
+      N8N_INSTANCE_AI_SANDBOX_API_KEY: "${SANDBOX_API_KEYS:-change-me-sandbox-api-key}"
+      N8N_INSTANCE_AI_SANDBOX_IMAGE: "ghcr.io/n8n-io/n8n-sandbox-service-sandbox:latest"
+      N8N_INSTANCE_AI_SEARXNG_URL: "http://searxng:8080"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ../../2-voice/capstone/n8n-grader-workflow.json:/workflows/n8n-grader-workflow.json:ro
+    # Lets n8n call host-mode dograh (8000) and OmniRoute (20128).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      sandbox-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5678/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      # First boot is slow (fresh DB migrations + instance-ai module init, made
+      # worse while compose is still pulling/building the rest of the stack); a
+      # 30s grace period used to mark n8n unhealthy mid-boot, which made
+      # n8n-import's `depends_on: service_healthy` abort the whole `up`. Give
+      # it 5 minutes to come up before the healthcheck starts counting.
+      start_period: 300s
+    networks: [interview-net]
+
+  # Imports + publishes + activates the Interview Grader workflow on startup AND
+  # restarts n8n so the production webhook actually registers (n8n 2.x only picks
+  # up publish/activate after a restart — otherwise dograh's hang-up POST 404s).
+  # See scripts/n8n-import.sh for the full sequence + webhook verification.
+
+  n8n-import:   # from capstone
+    image: ${N8N_IMAGE:-capstone-n8n-otel:local}
+    container_name: n8n_import
+    restart: "no"
+    # Root so the one-shot can restart n8n via the mounted docker socket (the
+    # image's default `node` user can't read root:docker 660 /var/run/docker.sock).
+    user: "root"
+    entrypoint: ["/bin/sh", "/workflows/n8n-import.sh"]
+    environment:
+      N8N_CONTAINER: n8n
+      DOCKER_HOST_SOCK: /var/run/docker.sock
+      N8N_PROBE_URL: "http://n8n:5678/"   # in-container probe target (n8n service)
+      # This one-shot runs as root (needed for the docker-socket restart), so
+      # n8n's default user folder would be /root/.n8n — a DIFFERENT database than
+      # the one the n8n server reads (/home/node/.n8n via the n8n_data volume).
+      # Pin the user folder (n8n appends ".n8n" itself) so the CLI imports into
+      # the same DB the server uses.
+      N8N_USER_FOLDER: /home/node
+    depends_on:
+      n8n:
+        condition: service_healthy
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ../../2-voice/capstone/n8n-grader-workflow.json:/workflows/n8n-grader-workflow.json:ro
+      - ../../2-voice/capstone/scripts/n8n-import.sh:/workflows/n8n-import.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock   # lets the one-shot restart n8n
+    networks: [interview-net]
+
+  # ── n8n AI Assistant sandbox stack (self-hosted; see docs.n8n.io …/set-up-ai-assistant).
+  # sandbox-certs generates mTLS certs once, sandbox-api is the control plane n8n
+  # talks to, sandbox-runner-1 is a privileged DinD runner that creates the actual
+  # execution sandboxes, and searxng provides web search. None of these publish
+  # ports to the host — n8n reaches them by service name over interview-net.
+
+  sandbox-certs:   # from capstone
+    image: ghcr.io/n8n-io/n8n-sandbox-service-api:latest
+    container_name: n8n-sandbox-certs
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        bootstrap-mtls.sh --out-dir /tls --api-san sandbox-api
+        --control-san-prefix sandbox-runner &&
+        chown -R sandbox-api:sandbox-api /tls/api
+    environment:
+      NUM_RUNNERS: "1"
+    volumes:
+      - sandbox-tls:/tls
+    networks: [interview-net]
+
+
+  sandbox-api:   # from capstone
+    image: ghcr.io/n8n-io/n8n-sandbox-service-api:latest
+    container_name: n8n-sandbox-api
+    restart: unless-stopped
+    depends_on:
+      sandbox-certs:
+        condition: service_completed_successfully
+    environment:
+      SANDBOX_API_KEYS: "${SANDBOX_API_KEYS:-change-me-sandbox-api-key}"
+      SANDBOX_API_RUNNER_REGISTRATION_TOKEN: "${SANDBOX_API_RUNNER_REGISTRATION_TOKEN:-change-me-runner-registration-token}"
+      SANDBOX_API_RUNNER_API_KEY: "${SANDBOX_API_RUNNER_API_KEY:-change-me-runner-key}"
+      SANDBOX_API_GRPC_TLS_CERT_FILE: /tls/api/grpc-server.crt
+      SANDBOX_API_GRPC_TLS_KEY_FILE: /tls/api/grpc-server.key
+      SANDBOX_API_GRPC_TLS_CLIENT_CA_FILE: /tls/api/ca.crt
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_CA_FILE: /tls/api/ca.crt
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_CERT_FILE: /tls/api/control-grpc-api-client.crt
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_KEY_FILE: /tls/api/control-grpc-api-client.key
+      SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_SERVER_NAME: sandbox-runner-1
+    volumes:
+      - sandbox-tls:/tls:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [interview-net]
+
+
+  sandbox-runner-1:   # from capstone
+    image: ghcr.io/n8n-io/n8n-sandbox-service-runner-dind:latest
+    container_name: n8n-sandbox-runner-1
+    restart: unless-stopped
+    privileged: true
+    depends_on:
+      sandbox-api:
+        condition: service_healthy
+    environment:
+      SANDBOX_RUNNER_API_KEYS: "${SANDBOX_API_RUNNER_API_KEY:-change-me-runner-key}"
+      SANDBOX_RUNNER_REGISTRATION_TOKEN: "${SANDBOX_API_RUNNER_REGISTRATION_TOKEN:-change-me-runner-registration-token}"
+      SANDBOX_RUNNER_API_GRPC_ADDR: sandbox-api:9090
+      # The runner image's HTTP listener on :8080 is TLS-only (cert SANs
+      # sandbox-runner-1/localhost, signed by the bootstrap CA) — advertise
+      # https so registrations and sandbox-api match reality.
+      SANDBOX_RUNNER_HTTP_BASE_URL: https://sandbox-runner-1:8080
+      SANDBOX_RUNNER_CONTROL_GRPC_LISTEN_ADDR: ":9091"
+      SANDBOX_RUNNER_CONTROL_GRPC_ADVERTISE_ADDR: sandbox-runner-1:9091
+      SANDBOX_RUNNER_ID: runner-1
+      SANDBOX_RUNNER_DOCKER_SANDBOX_IMAGE: ghcr.io/n8n-io/n8n-sandbox-service-sandbox:latest
+      # This kernel images ship with no loadable br_netfilter, so the nested
+      # dockerd can't set bridge netfilter rules; ignore that (harmless here).
+      DOCKER_IGNORE_BR_NETFILTER_ERROR: "1"
+      SANDBOX_RUNNER_REGISTRATION_GRPC_CA_FILE: /tls/runner/ca.crt
+      SANDBOX_RUNNER_REGISTRATION_GRPC_CERT_FILE: /tls/runner/grpc-client.crt
+      SANDBOX_RUNNER_REGISTRATION_GRPC_KEY_FILE: /tls/runner/grpc-client.key
+      SANDBOX_RUNNER_CONTROL_GRPC_TLS_CERT_FILE: /tls/runner/control-grpc-server.crt
+      SANDBOX_RUNNER_CONTROL_GRPC_TLS_KEY_FILE: /tls/runner/control-grpc-server.key
+      SANDBOX_RUNNER_CONTROL_GRPC_TLS_CLIENT_CA_FILE: /tls/runner/ca.crt
+    volumes:
+      - sandbox-tls:/tls:ro
+    healthcheck:
+      # The runner's control HTTP listener answers /healthz only after the
+      # registration stream is established (heartbeats flowing) — a real
+      # liveness signal for the dashboard. The :8080 listener is TLS-only now
+      # (cert SANs are sandbox-runner-1/localhost), so probe it over https
+      # with cert verification off (BusyBox wget has no --ca-certificate).
+      test: ["CMD-SHELL", "wget -qO- -T 5 --no-check-certificate https://localhost:8080/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks: [interview-net]
+
+
+  searxng:   # from capstone
+    image: ghcr.io/searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: "${SEARXNG_SECRET:-change-me-searxng-secret}"
+    volumes:
+      - ../../2-voice/capstone/searxng-settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider -T 5 http://127.0.0.1:8080/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks: [interview-net]
+
+  # ── Workflow Studio: browser UI for creating phone agents ────────────────
+  # Wraps scripts/generate_dograh_workflow.py: describe an agent in plain
+  # English, the OmniRoute gateway expands it into a dograh workflow, preview
+  # the JSON, then import it into dograh and register the next free extension
+  # — all from the browser. Stdlib-only Python (no pip deps).
+
+  workflow-studio:   # from capstone
+    build:
+      context: ../../2-voice/capstone
+      dockerfile: workflow-studio.Dockerfile
+    image: ${WORKFLOW_STUDIO_IMAGE:-capstone-workflow-studio:local}
+    pull_policy: build
+    container_name: workflow-studio
+    restart: unless-stopped
+    ports:
+      # 127.0.0.1 — the public door is workflow.<domain> → workflow-sso (14013).
+      - "127.0.0.1:8090:8090"
+    environment:
+      PORT: "8090"
+      # The gateway + dograh are reached through the host (dograh-api is host
+      # mode); the UI container itself is on the bridge.
+      DOGRAH_API_ENDPOINT: "http://host.docker.internal:8000"
+      DOGRAH_API_TOKEN: "${DOGRAH_API_TOKEN:-}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      # Stdlib-only image (no curl/wget) — probe with python urllib like
+      # dashboard-api does. The UI serves / with 200 when the server is up.
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8090/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks: [interview-net]
+
+  # ── Authentik — identity provider + SSO (auth.<domain>) ─────────────────
+  # NOTE: this stack does NOT run its own Authentik — Cerulean's shared
+  # Authentik (containers cerulean-authentik*) is the IdP, published on host
+  # ports 9000 (HTTP) / 9443 (HTTPS) and proxied by NPM at auth.<domain>.
+  # The AUTHENTIK_* / OIDC env below points the Control Center (dashboard-api)
+  # at that instance (issuer https://auth.<domain>/application/o/<client>).
+  # The comment block below is retained from an earlier iteration that bundled
+  # Authentik in this compose file; it is intentionally inert.
+
+
+
+
+  # ── Storage & dashboard: Grist (single-binary, API-first, no SaaS) ────────
+
+  grist:   # from capstone
+    image: gristlabs/grist:latest
+    container_name: grist
+    restart: unless-stopped
+    # Memory posture: dashboards are light; cap for node heap safety.
+    mem_limit: 768m
+    memswap_limit: 768m
+    ports:
+      # 127.0.0.1 — n8n writes to Grist as `http://grist:8484` over
+      # interview-net; the public door is grist.<domain> → grist-sso (14011).
+      - "127.0.0.1:8484:8484"
+    environment:
+      # GRIST_DEFAULT_EMAIL = single-identity mode (no password): Grist attributes
+      # every request to this address, so the REST API needs no Authorization
+      # header. GRIST_IN_SERVICE skips the first-run Quick-setup/boot-key gate.
+      GRIST_DEFAULT_EMAIL: "${GRIST_ADMIN_EMAIL:-admin@localhost}"
+      GRIST_IN_SERVICE: "true"
+      GRIST_SERVE_SAME_ORIGIN: "true"
+    volumes:
+      - grist_data:/persist   # Grist writes to /persist (GRIST_INST_DIR), not /persistent
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8484/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [interview-net]
+
+  # ── Observability: metrics-only — OTel Collector (span metrics) →
+  # Prometheus → Grafana. The collector converts inbound OTLP spans into RED
+  # histograms (calls + duration, dimensioned by span.name) and then DROPS the
+  # spans: there is no trace or log store to run. That is what removes the
+  # ClickHouse + Keeper + metastore + SigNoz cluster, which was measured here
+  # holding ~400 KiB of telemetry while pinning ~125% CPU and 1.18 GiB RSS.
+  # Every latency number the old SigNoz dashboard charted is still available as
+  # a Prometheus metric — see grafana/dashboards/pipeline-latency.json. Config
+  # lives in otel-collector-config.yaml and prometheus/. Grist is the sole
+  # record store (NocoDB removed — see docs/legacy-dependencies.md).
+
+  otel-collector:   # from capstone
+    image: ${OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.161.0}
+    container_name: otel-collector
+    restart: unless-stopped
+    # Memory posture: this collector only holds span→metric aggregation state
+    # (bounded by the spanmetrics dimension set), so a small cap is real.
+    mem_limit: 512m
+    memswap_limit: 512m
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    ports:
+      - "127.0.0.1:4317:4317"   # OTLP gRPC — loopback only (dograh host mode → 127.0.0.1:4317)
+      - "127.0.0.1:4318:4318"   # OTLP HTTP — loopback only (dograh host mode → 127.0.0.1:4318)
+      - "127.0.0.1:8888:8888"   # collector internal metrics — loopback only
+      - "127.0.0.1:8889:8889"   # span metrics, in Prometheus format — loopback only
+    volumes:
+      - ../../2-voice/capstone/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    # No healthcheck: this image is distroless — no shell and no wget to probe
+    # with. It fails closed regardless: a bad config exits 1 and the restart
+    # policy surfaces it as `Restarting`, which is what the Control Center reads.
+    networks: [interview-net]
+
+
+  prometheus:   # from capstone
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.13.3}
+    container_name: prometheus
+    restart: unless-stopped
+    # Memory posture: metrics + a bounded TSDB WAL. Both retention knobs are
+    # set (time AND size) so a busy week can't fill the disk before the window
+    # rolls — the old ClickHouse had only a 2 GiB memory cap and grew freely.
+    mem_limit: 1g
+    memswap_limit: 1g
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}"
+      - "--storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-2GB}"
+      - "--web.listen-address=0.0.0.0:9090"
+    ports:
+      - "127.0.0.1:9090:9090"   # loopback only
+    volumes:
+      - ../../2-voice/capstone/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks: [interview-net]
+
+
+  grafana:   # from capstone
+    # 13.x has a provisioning regression that crash-loops on datasource
+    # provisioning ("Datasource provisioning error: data source not found",
+    # grafana/grafana#110740). Pinned until that is fixed.
+    image: ${GRAFANA_IMAGE:-grafana/grafana:11.6.0}
+    container_name: grafana
+    restart: unless-stopped
+    # Memory posture: UI + dashboard rendering only; the store is Prometheus.
+    mem_limit: 512m
+    memswap_limit: 512m
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: "${GRAFANA_ROOT_URL:-http://localhost:3301}"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports:
+      # 3301 is deliberately the port the SigNoz UI held: the NPM proxy host,
+      # the dashboard catalog and any firewall rule keep pointing at the same
+      # number, and only the upstream behind it changed.
+      - "127.0.0.1:3301:3000"   # loopback only; public door is grafana.<domain> → grafana-sso (14012)
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../../2-voice/capstone/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../2-voice/capstone/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [interview-net]
+
+  # ── PBX / FreePBX (Asterisk 22 + FreePBX 17 + AvantFax) ───────────────────
+  # FreePBX fullstack image + dograh ARI wiring. Was a separate compose file
+  # (formerly docker-compose.asterisk.yml); merged here so one `docker compose up -d`
+  # brings up the whole stack. See pbx/README.md for details.
+
+  capstone-freepbx:   # from capstone (profiles: "standalone")
+    image: ${FREEPBX_IMAGE:-ghcr.io/innotelinc/pbx-portal:latest-fullstack}
+    container_name: capstone-freepbx
+    # CAPSTONE_PBX=zeus (add-on mode): skip the bundled PBX — dograh's ARI/WS
+    # point at the Zeus-owned shared Asterisk instead (docs/zeus-integration.md
+    # §1.1). Standalone (default) keeps the bundled FreePBX.
+    profiles: ["standalone"]
+    restart: unless-stopped
+    security_opt:
+      - apparmor=unconfined
+    entrypoint: ["/bin/bash", "/usr/local/bin/entrypoint-dograh.sh"]
+    ports:
+      - "8083:80"                       # FreePBX web UI (8083 avoids conflict with monarch NPM)
+      - "5060:5060/udp"                 # SIP (standalone mode only; in add-on mode
+      #   Zeus owns 5060/5061 and Capstone consumes them — see .env
+      #   DOGRAH_ARI_HOST / DOGRAH_WS_URI and docs/zeus-integration.md)
+      - "5061:5061/tcp"                 # SIP TLS (standalone-mode only)
+      # Dedicated VoIP.ms trunk port (VOIPMS_REGISTER_PORT): the trunk binds
+      # and advertises this port for signaling; forward it on the router too.
+      - "${VOIPMS_REGISTER_PORT:-5065}:${VOIPMS_REGISTER_PORT:-5065}/udp"
+      # 8088 is dialled at the host LAN IP and nothing else: dograh's ARI
+      # telephony config points there (ansible/group_vars/all.yml, and the live
+      # config was moved to match), as do the edge proxy and LAN clients. The
+      # loopback leg was dropped once dograh — its last client — stopped dialling
+      # 127.0.0.1. 8089 keeps a loopback leg because no client has been measured
+      # on it yet; check `ss -tnp | grep :8089` before narrowing that one.
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:8088:8088" # Asterisk HTTP / ARI (LAN + edge proxy)
+      - "127.0.0.1:8089:8089"                            # PJSIP WebSocket (WSS, host-mode)
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:8089:8089" # PJSIP WebSocket (WSS, LAN + edge proxy)
+      # AMI answers on the host LAN IP and nothing else — not 0.0.0.0, not a
+      # docker address (project rule: README → Addressing). Binding it on every
+      # interface is what let public scanners reach 5038 and fill the security
+      # log with RequestBadFormat records.
+      #
+      # The portal dials this same LAN IP (`ASTERISK_AMI_HOST` below), so both
+      # ends of the rule agree: the host masquerades the connection, Asterisk
+      # sees the LAN address, and the [pbxportal] ACL's LAN permit admits it.
+      # Point the portal at a docker address instead and the ACL refuses it.
+      #
+      # On a shared Zeus PBX the port belongs to that stack
+      # (zeus/docker-compose.full.yml) and needs the same pin —
+      # that file currently publishes it on 0.0.0.0. See docs/operations.md →
+      # "The PBX".
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:5038:5038"  # Asterisk AMI (LAN IP only)
+      - "${FREEPBX_WEBMIN_PORT:-10000}:10000" # Webmin admin panel (optional; host port configurable)
+      - "${FREEPBX_RTP_PORT_START:-10101}-${FREEPBX_RTP_PORT_END:-10120}:10101-10120/udp" # RTP media (20 ports / 10 active calls)
+    environment:
+      HOSTNAME: ${HOSTNAME:-voice.capstone.innotel.us}
+      DOGRAH_ARI_PASSWORD: ${DOGRAH_ARI_PASSWORD:-}
+      DOGRAH_WS_URI: ${DOGRAH_WS_URI:-}
+      # Stasis app name dograh generated for the ARI config (dograh_<hex>);
+      # the dialplan must route into it. dograh_wire.py persists this.
+      DOGRAH_STASIS_APP_NAME: ${DOGRAH_STASIS_APP_NAME:-}
+      # LAN subnet offered the LOCAL media address (pjsip transport local_net)
+      # so LAN softphones aren't told to send RTP to the public IP. See
+      # pbx/entrypoint-dograh.sh inject_pjsip_media_address.
+      PJSIP_LOCAL_NET: ${PJSIP_LOCAL_NET:-192.168.1.0/255.255.255.0}
+      PJSIP_MEDIA_ADDRESS: ${PJSIP_MEDIA_ADDRESS:-192.168.1.46}
+      PJSIP_LAN_ENDPOINTS: ${PJSIP_LAN_ENDPOINTS:-101}
+      # STUN/TURN relay wiring: the entrypoint pushes these into FreePBX's
+      # SIP Settings so Asterisk's RTP engine + WebRTC endpoints use coturn.
+      # PJSIP_STUN_TURN_ADDR overrides the address (default: the `coturn`
+      # compose service on the same network).
+      PJSIP_STUN_TURN_ADDR: ${PJSIP_STUN_TURN_ADDR:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_PASSWORD: ${TURN_PASSWORD:-}
+      TURN_LISTENING_PORT: ${TURN_LISTENING_PORT:-3478}
+      FREEPBX_RTP_PORT_START: ${FREEPBX_RTP_PORT_START:-10101}
+      FREEPBX_RTP_PORT_END: ${FREEPBX_RTP_PORT_END:-10120}
+      FREEPBX_AMI_USER: ${FREEPBX_AMI_USER:-pbxportal}
+      FREEPBX_AMI_SECRET: ${FREEPBX_AMI_SECRET:-}
+      FREEPBX_CLIENT_ID: ${FREEPBX_CLIENT_ID:-pbxportal-api}
+      FREEPBX_CLIENT_SECRET: ${FREEPBX_CLIENT_SECRET:-}
+      # AvantFAX (fax UI at /fax) — the entrypoint converges the DB user +
+      # schema with local_config.php from these on every boot.
+      AVANTFAX_DB_PASS: ${AVANTFAX_DB_PASS:-1d18eb145d805ff7}
+      FAX_EMAIL: ${FAX_EMAIL:-fax@innotel.us}
+      AVANTFAX_HOSTNAME: ${AVANTFAX_HOSTNAME:-fax.zeus.innotel.us}
+      ASTERISK_CONVERGE_TOOL: /opt/asterisk_converge.py
+      VOIPMS_SIP_USER: ${VOIPMS_SIP_USER:-}
+      VOIPMS_SIP_PASS: ${VOIPMS_SIP_PASS:-}
+      VOIPMS_SIP_SERVER: ${VOIPMS_SIP_SERVER:-newyork1.voip.ms}
+      # DID → dograh agent extension map, e.g. "2125551234:8003,2125551235:8004"
+      VOIPMS_DIDS: ${VOIPMS_DIDS:-}
+      # Dedicated outbound-only SIP port for the trunk registration (default:
+      # reuse FreePBX's main transport). Set when the router's 5060 port-forward
+      # drops the PBX's own outbound REGISTERs (same source port as the rule).
+      VOIPMS_REGISTER_PORT: ${VOIPMS_REGISTER_PORT:-}
+      # Cloudonix SIP peering (see pbx/entrypoint-dograh.sh setup_cloudonix_trunk).
+      # Enabled when CLOUDONIX_SIP_ENABLED=1, or automatically when a server,
+      # edge IP or SIP credentials are provided.
+      CLOUDONIX_SIP_ENABLED: ${CLOUDONIX_SIP_ENABLED:-}
+      CLOUDONIX_SIP_SERVER: ${CLOUDONIX_SIP_SERVER:-sip.cloudonix.net}
+      CLOUDONIX_EDGE_IP: ${CLOUDONIX_EDGE_IP:-18.219.128.166}
+      CLOUDONIX_SIP_PORT: ${CLOUDONIX_SIP_PORT:-5060}
+      CLOUDONIX_SIP_USER: ${CLOUDONIX_SIP_USER:-}
+      CLOUDONIX_SIP_PASS: ${CLOUDONIX_SIP_PASS:-}
+      # DID → dograh agent extension map, e.g. "4132643964:8000"
+      CLOUDONIX_DIDS: ${CLOUDONIX_DIDS:-}
+      ASTERISK_WATCHDOG_INTERVAL: ${ASTERISK_WATCHDOG_INTERVAL:-30}
+      ASTERISK_WATCHDOG_COOLDOWN: ${ASTERISK_WATCHDOG_COOLDOWN:-60}
+    volumes:
+      - ../../2-voice/capstone/pbx/asterisk:/opt/pbx-dograh:ro
+      - ../../2-voice/capstone/pbx/entrypoint-dograh.sh:/usr/local/bin/entrypoint-dograh.sh:ro
+      # shared-voice-plane dialplan renderer (per-context merge, markers)
+      - ../../2-voice/capstone/pbx/asterisk_converge.py:/opt/asterisk_converge.py:ro
+      - asterisk-config:/etc/asterisk
+      - asterisk-sounds:/var/lib/asterisk/sounds
+      - asterisk-spool:/var/spool/asterisk
+      # Asterisk's log dir on a named volume so host-side fail2ban can read the
+      # rejected-registration records straight off disk (scripts/install-fail2ban.sh,
+      # pbx/fail2ban/). See pbx/README.md → "Blocking invalid SIP registrations".
+      - asterisk-logs:/var/log/asterisk
+      - freepbx-www:/var/www/html
+      - mariadb-data:/var/lib/mysql
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks: [interview-net]
+
+  # ── PBX Customer Portal (Next.js) — optional profile ────────────────────
+  # Enable with `docker compose --profile portal up -d`. Requires the
+  # pbx-portal .env vars (see pbx/README.md).
+
+  capstone-portal:   # from capstone (profiles: "portal")
+    image: ghcr.io/innotelinc/pbx-portal:latest
+    container_name: capstone-portal
+    restart: unless-stopped
+    security_opt:
+      - apparmor=unconfined
+    profiles: ["portal"]
+    # Standalone-mode surface: fronts the bundled FreePBX. In zeus add-on mode
+    # (CAPSTONE_PBX=zeus) the bundled PBX is skipped — don't enable this profile.
+    depends_on:
+      - capstone-freepbx
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      FREEPBX_URL: http://freepbx
+      FREEPBX_CLIENT_ID: ${FREEPBX_CLIENT_ID:-pbxportal-api}
+      FREEPBX_CLIENT_SECRET: ${FREEPBX_CLIENT_SECRET:-}
+      AVANTFAX_HOSTNAME: ${AVANTFAX_HOSTNAME:-fax.zeus.innotel.us}
+      # The host LAN IP, not a compose service name: docker addresses do not
+      # resolve correctly for this project, and the [pbxportal] ACL admits the
+      # LAN address the host masquerades this connection to.
+      ASTERISK_AMI_HOST: "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}"
+      ASTERISK_AMI_PORT: "5038"
+      ASTERISK_AMI_USERNAME: ${FREEPBX_AMI_USER:-pbxportal}
+      ASTERISK_AMI_SECRET: ${FREEPBX_AMI_SECRET:-}
+      NEXT_PUBLIC_FREEPBX_WSS_URL: ${FREEPBX_WSS_URL:-wss://localhost:8089/ws}
+      # Billing — legacy self-billing mode only. Canonical billing is
+      # Magnate (RevenueOps): agents are a Magnate SKU, Stripe keys live in
+      # Magnate. Leave STRIPE_* empty when Magnate owns billing (the
+      # default); the portal's /api/health reports "degraded" without them.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
+    volumes:
+      - portal-data:/app/data
+      - asterisk-config:/etc/asterisk:rw
+    networks: [interview-net]
+
+  # ── Capstone Control Center (dashboard-api + dashboard) ────────────────
+  # dashboard-api aggregates live stack state (Docker containers/health/
+  # ports, the .env secret inventory, host users, whole-host resource stats)
+  # into the JSON the SPA expects. dashboard serves the built React app and
+  # reverse-proxies /api to it, keeping the browser same-origin.
+
+  dashboard-api:   # from capstone
+    build:
+      context: ../../2-voice/capstone/dashboard-backend
+      dockerfile: Dockerfile
+    image: ${DASHBOARD_API_IMAGE:-capstone-dashboard-api:local}
+    pull_policy: build
+    container_name: dashboard-api
+    restart: unless-stopped
+    ports:
+      - "8095:8095"   # 0.0.0.0 — optional direct browser access to the API
+    environment:
+      SELF_CONTAINER: "dashboard-api"
+      # Reachable host used to build resource-link URLs (LAN IP / hostname).
+      # Normalised by the API (scheme/port/path stripped). The dashboard has
+      # its own public URL (e.g. https://dashboard.<NPM_BASE_DOMAIN>) — do NOT
+      # reuse PUBLIC_BASE_URL, which is dograh's advertised origin.
+      DASHBOARD_HOST: "${DASHBOARD_PUBLIC_URL:-${PUBLIC_BASE_URL:-http://localhost:8000}}"
+      # Public base domain for NPM-proxied services (e.g. capstone.innotel.us
+      # → app/api/auth/voice/admin/pbx.capstone.innotel.us, …). Empty when
+      # unset → links fall back to http://<host>:<port>.
+      NPM_BASE_DOMAIN: "${NPM_BASE_DOMAIN:-}"
+      DASHBOARD_ADMIN_EMAIL: "${GRIST_ADMIN_EMAIL:-}"
+      # Interview reports page: read-only access to the Grist doc the n8n
+      # grader writes to (same key setup.sh minted for the grader). Grist is
+      # on the same interview-net bridge, so the service name resolves.
+      GRIST_URL: "http://grist:8484"
+      GRIST_DOC_ID: "${GRIST_DOC_ID:-}"
+      GRIST_API_KEY: "${GRIST_API_KEY:-}"
+      # Cerulean (Authentik) OIDC gate for the control center. When
+      # AUTHENTIK_ISSUER_URL is set the API requires a Cerulean session on
+      # every data endpoint; empty = open API (local dev / no auth stack).
+      #
+      # These are the dashboard's OWN Authentik application "Capstone Dashboard"
+      # (slug/client_id ``capstone-dashboard``), NOT the bare AUTHENTIK_* vars
+      # above — those are dograh's, and signing in with them bounces the browser
+      # to the voice app (Authentik's Dograh provider only allows its own
+      # callback). Empty = the dashboard falls back to an open API, so set all
+      # three whenever the stack has an auth stack.
+      AUTHENTIK_ISSUER_URL: "${DASHBOARD_AUTHENTIK_ISSUER_URL:-}"
+      AUTHENTIK_CLIENT_ID: "${DASHBOARD_AUTHENTIK_CLIENT_ID:-}"
+      AUTHENTIK_CLIENT_SECRET: "${DASHBOARD_AUTHENTIK_CLIENT_SECRET:-}"
+      # The dashboard's OWN callback — the single redirect_uri registered on
+      # that provider. AUTHENTIK_REDIRECT_URI is dograh's
+      # (…/api/v1/auth/oidc/callback) and must not reach this container. When
+      # unset the API derives https://dashboard.<NPM_BASE_DOMAIN>/api/auth/callback.
+      DASHBOARD_AUTHENTIK_REDIRECT_URI: "${DASHBOARD_AUTHENTIK_REDIRECT_URI:-}"
+      AUTHENTIK_ADMIN_EMAILS: "${AUTHENTIK_ADMIN_EMAILS:-}"
+      # Health page → "Stack SSO & access" panel: reads the stack/user access
+      # inventory from Authentik (which applications are gated by a group
+      # binding, and which user can reach which stack). Needs an admin token —
+      # scripts/authentik_bootstrap.py already uses the same one. The token
+      # stays server-side; the browser only ever sees the aggregated result.
+      AUTHENTIK_TOKEN: "${AUTHENTIK_TOKEN:-}"
+      AUTHENTIK_PUBLIC_URL: "${AUTHENTIK_PUBLIC_URL:-}"
+      # Optional direct IdP address for the API (defaults to the public URL),
+      # and an opt-out for self-signed certs on that direct address.
+      AUTHENTIK_API_URL: "${AUTHENTIK_API_URL:-}"
+      AUTHENTIK_API_INSECURE: "${AUTHENTIK_API_INSECURE:-}"
+      CERULEAN_TENANT: "${CERULEAN_TENANT:-}"
+      # Dograh voice-agent management (Agents page): dograh-api runs in host
+      # mode, so the dashboard reaches it via host.docker.internal. Token is
+      # minted by scripts/dograh_wire.py; empty = page shows setup guidance.
+      DOGRAH_API_ENDPOINT: "http://host.docker.internal:8000"
+      DOGRAH_API_TOKEN: "${DOGRAH_API_TOKEN:-}"
+      DOGRAH_CONFIG_NAME: "${DOGRAH_CONFIG_NAME:-Asterisk ARI (dograh)}"
+      # ARI app dograh generates per telephony config (dograh_<hex>). The
+      # generated extensions_custom_dograh.conf must call Stasis(<this>): a
+      # bare Stasis(dograh) names an app no ARI client registered, so
+      # Asterisk falls through to Hangup() and inbound calls die silently.
+      # scripts/dograh_wire.py persists it when it wires the telephony config.
+      DOGRAH_STASIS_APP_NAME: "${DOGRAH_STASIS_APP_NAME:-}"
+      # "Describe it with AI" workflow authoring on the Workflows page / agent
+      # modal: the same route the Workflow Studio uses, through the SSO proxy
+      # (20129) rather than the gateway's own port (20128, loopback + docker0
+      # only — see the ports block under `omniroute`). Empty key is fine.
+      OMNIROUTE_URL: "${OMNIROUTE_URL:-http://host.docker.internal:20129}"
+      OMNIROUTE_API_KEY: "${OMNIROUTE_API_KEY:-}"
+      OMNIROUTE_MODEL: "${OMNIROUTE_MODEL:-auto}"
+      # standalone (default): dashboard provisions FreePBX rows directly
+      # (docker exec). addon: Zeus shared PBX — dashboard only manages dograh;
+      # the shared box applies the *_custom.conf moniker on sync.
+      CAPSTONE_DEPLOY_MODE: "${CAPSTONE_DEPLOY_MODE:-standalone}"
+      # Shared Magnate storefront for entitlement checks (RevenueOps);
+      # empty when running standalone (no billing).
+      MAGNATE_PUBLIC_URL: "${MAGNATE_PUBLIC_URL:-}"
+      # Compose project(s) this control center reports on (comma-separated).
+      # Defaults to this stack's own project so other projects on the same
+      # Docker host never leak in.
+      DASHBOARD_PROJECTS: "${DASHBOARD_PROJECTS:-capstone-voice-aiagent-platform}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../../2-voice/capstone/.env:/config/.env:ro
+      - /etc/passwd:/etc/host-passwd:ro
+      - /etc/group:/etc/host-groupfile:ro
+      - /:/host:ro   # whole-host proc/disk for /metrics + /snapshot
+    extra_hosts:
+      # dograh-api is host-mode — resolve its host address from the bridge
+      # (used by the Agents page / DOGRAH_API_ENDPOINT above).
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8095/healthz', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks: [interview-net]
+
+
+  dashboard:   # from capstone
+    build:
+      context: ../../2-voice/capstone/dashboard
+      dockerfile: Dockerfile
+    image: ${DASHBOARD_IMAGE:-capstone-dashboard:local}
+    pull_policy: build
+    container_name: dashboard
+    restart: unless-stopped
+    environment:
+      # Which host the /ws signaling upstream dials (dashboard/nginx.conf).
+      # Standalone default: the bundled PBX on this compose network. In zeus
+      # add-on mode the real PBX is the shared zeus-freepbx container on the
+      # pbx-net bridge, which this service is joined to below.
+      DASHBOARD_PBX_WSS_HOST: "${DASHBOARD_PBX_WSS_HOST:-pbx-freepbx}"
+    depends_on:
+      dashboard-api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    ports:
+      - "8096:80"   # the Control Center: http://<host>:8096
+    # pbx-net as well as its own bridge: DASHBOARD_PBX_WSS_HOST names the PBX
+    # from *this* container's networks (Docker's embedded DNS only answers for
+    # names on a network the querier shares). Standalone is unaffected — the
+    # default `pbx-freepbx` resolves over interview-net either way.
+    networks: [interview-net, pbx-net]
+
+  ###############################################
+  # SSO gateways — one per app that has no OIDC of its own
+  ###############################################
+  # Each listens on 4180 inside the stack and is published on a distinct host
+  # port; scripts/npm-proxy-hosts.py forwards the matching proxy host there.
+
+  n8n-sso:   # from capstone
+    <<: *sso-gateway
+    container_name: n8n-sso
+    environment:
+      <<: *sso-gateway-env
+      # n8n's whole point is receiving webhooks from outside, so those paths are
+      # exempted from the login; /healthz is liveness. The editor and the REST API
+      # stay gated.
+      OAUTH2_PROXY_SKIP_AUTH_ROUTES: '^/webhook/,^/webhook-test/,^/healthz$'
+      OAUTH2_PROXY_UPSTREAMS: http://n8n:5678
+    ports:
+      - "${N8N_SSO_PORT:-14010}:4180"
+    networks: [interview-net]
+
+
+  grist-sso:   # from capstone
+    <<: *sso-gateway
+    container_name: grist-sso
+    environment:
+      <<: *sso-gateway-env
+      # NOTHING is skipped here on purpose. Grist runs in single-identity mode
+      # (GRIST_DEFAULT_EMAIL), so its /api is effectively unauthenticated —
+      # exempting it would publish the dashboards to the internet. n8n writes to
+      # Grist over the compose network by container name, so it needs no edge
+      # route.
+      OAUTH2_PROXY_UPSTREAMS: http://grist:8484
+    ports:
+      - "${GRIST_SSO_PORT:-14011}:4180"
+    networks: [interview-net]
+
+
+  grafana-sso:   # from capstone
+    <<: *sso-gateway
+    container_name: grafana-sso
+    environment:
+      <<: *sso-gateway-env
+      # Liveness only. OTLP arrives at the collector's own ports, not here.
+      OAUTH2_PROXY_SKIP_AUTH_ROUTES: '^/api/health$'
+      OAUTH2_PROXY_UPSTREAMS: http://grafana:3000
+    ports:
+      - "${GRAFANA_SSO_PORT:-14012}:4180"
+    networks: [interview-net]
+
+
+  workflow-sso:   # from capstone
+    <<: *sso-gateway
+    container_name: workflow-sso
+    environment:
+      <<: *sso-gateway-env
+      OAUTH2_PROXY_UPSTREAMS: http://workflow-studio:8090
+    ports:
+      - "${WORKFLOW_SSO_PORT:-14013}:4180"
+    networks: [interview-net]
+
+
+  pbx-sso:   # from capstone
+    <<: *sso-gateway
+    container_name: pbx-sso
+    environment:
+      <<: *sso-gateway-env
+      # FreePBX's own GUI is on the shared voice plane, so the gateway reaches
+      # it by container name over pbx-net (`zeus-freepbx`, owned by Zeus's
+      # compose; the network is declared external above). Its host :8083 mapping
+      # is loopback-only now, so this is the only path in — hence the extra
+      # network rather than a host address.
+      OAUTH2_PROXY_UPSTREAMS: http://zeus-freepbx:80
+    ports:
+      - "${PBX_SSO_PORT:-14014}:4180"
+    networks: [interview-net, pbx-net]
+
+  # ── Technitium's console is not gated from here ───────────────────────────
+  # `technitium-sso` used to be the sixth gateway in this stack. That was right
+  # only while every product shared one host: Cerulean owns the container
+  # (`dns.internal.innotel.us` → `cerulean-technitium`), and the console is
+  # host-networked with its web listener pinned to `127.0.0.1,172.17.0.1`, so a
+  # gateway on *another* server has nothing to dial — on `.30` both of those
+  # addresses are that host's own, and every signed-in request to the name
+  # answered `502` while the redirect to Authentik still looked healthy.
+  #
+  # The gateway now runs beside the console it fronts, in the cerulean stack
+  # (`1-primary/cerulean/docker-compose.yml`, profile `technitium`), on the same
+  # shared client, cookie and session store — so nothing about the sign-in
+  # changed and there is still one Authentik session across the platform.
+
+
+
+  zeus-freepbx:   # from zeus
+    # Pre-built image published to GHCR by .github/workflows/docker-publish.yml
+    # (latest-fullstack tracks master; semver tags on releases). Pulled on the
+    # first `up` — no 45-90 min local build needed.
+    #   - Refresh after a newer build:   docker compose pull freepbx
+    #   - Build locally instead (dev/offline): use the build override
+    #     docker compose -f docker-compose.full.yml -f docker-compose.full.build.yml up -d
+    # No pull_policy set — the default (`missing`) pulls only when the image
+    # is not present locally. The build override below relies on that default
+    # to build instead of pull on offline servers.
+    # Overridable so a bad published build can be rolled back with one line in
+    # .env instead of editing this file — e.g.
+    #   ZEUS_PBX_IMAGE=ghcr.io/innotelinc/zeus:latest-fullstack-rollback
+    image: ${ZEUS_PBX_IMAGE:-ghcr.io/innotelinc/zeus:latest-fullstack}
+    container_name: zeus-freepbx
+    restart: unless-stopped
+    security_opt:
+      - apparmor=unconfined
+    ports:
+      # The GUI is loopback-only: this host's NPM edge forwards pbx.<domain> to
+      # the pbx-sso gateway, which reaches the GUI over pbx-net as
+      # `zeus-freepbx:80`. Host-side scripts (sync_dograh_routes.py,
+      # bootstrap_dograh_route.py) still dial 127.0.0.1:8083, which is why the
+      # mapping is kept rather than dropped. Port 80 was dropped in the
+      # NPM-edge cutover (ips/docs/npm-edge-migration.md §4.2): host :80 belongs
+      # to the NPM edge now.
+      - "127.0.0.1:8083:80"
+      - "5060:5060/udp"   # SIP
+      - "5061:5061/tcp"   # SIP TLS
+      # 8088 is dialled at ${LAN_IP} and nothing else: dograh's ARI telephony
+      # config points there (moved off 127.0.0.1 in the shared dograh API), as do
+      # the edge proxy and LAN clients. Never 0.0.0.0.
+      - "${LAN_IP:-127.0.0.1}:8088:8088"   # Asterisk HTTP (LAN + edge proxy)
+      - "8089:8089"       # PJSIP WebSocket (WSS)
+      # AMI is dialled at the LAN IP only — the Zeus portal authenticates there
+      # (ASTERISK_AMI_HOST below) and the ACL admits it. Never 0.0.0.0: that is
+      # what put 5038 in front of public scanners.
+      - "${LAN_IP:-127.0.0.1}:5038:5038"   # Asterisk AMI (LAN IP only — never expose)
+      - "10000:10000"     # Webmin admin panel
+      # RTP media — the SAME range Capstone publishes, because both products
+      # ride one RTP plane on a shared box. The host side is env-driven so an
+      # install whose 10101-10120 is busy can shift the block; the container
+      # side stays fixed at 10101-10120 (what Asterisk binds), so the two sides
+      # must stay the same length. Keep Webmin (TCP 10000) out of the range.
+      # docker-entrypoint-full.sh writes the matching rtpstart/rtpend into both
+      # rtp_custom.conf and FreePBX's kvstore_Sipsettings — all three must agree.
+      - "${FREEPBX_RTP_PORT_START:-10101}-${FREEPBX_RTP_PORT_END:-10120}:10101-10120/udp"
+    environment:
+      # Becomes the self-signed WebRTC cert CN (docker-entrypoint-full.sh). On a
+      # box that already ran the PBX under another name, pin it in .env to that
+      # existing identity — renaming it rewrites the cert, not the SIP domain.
+      HOSTNAME: ${HOSTNAME:-pbx.zeus.innotel.us}
+      # VoIP.ms SIP trunk auto-configuration
+      VOIPMS_SIP_USER: ${VOIPMS_SIP_USER:-}
+      VOIPMS_SIP_PASS: ${VOIPMS_SIP_PASS:-}
+      VOIPMS_SIP_SERVER: ${VOIPMS_SIP_SERVER:-newyork1.voip.ms}
+      VOIPMS_MAIN_ACCOUNT: ${VOIPMS_MAIN_ACCOUNT:-}
+      # DID → dograh agent extension map, e.g. "2125551234:8003,4132643964:8000"
+      VOIPMS_DIDS: ${VOIPMS_DIDS:-}
+      # Cloudonix SIP peering (pbx/setup-cloudonix-trunk.sh, called by
+      # docker-entrypoint-full.sh). Enabled when CLOUDONIX_SIP_ENABLED=1, or
+      # automatically when a server, edge IP, credential or DID is provided.
+      CLOUDONIX_SIP_ENABLED: ${CLOUDONIX_SIP_ENABLED:-}
+      CLOUDONIX_SIP_SERVER: ${CLOUDONIX_SIP_SERVER:-sip.cloudonix.net}
+      CLOUDONIX_EDGE_IP: ${CLOUDONIX_EDGE_IP:-18.219.128.166}
+      CLOUDONIX_SIP_PORT: ${CLOUDONIX_SIP_PORT:-5060}
+      CLOUDONIX_SIP_USER: ${CLOUDONIX_SIP_USER:-}
+      CLOUDONIX_SIP_PASS: ${CLOUDONIX_SIP_PASS:-}
+      CLOUDONIX_DIDS: ${CLOUDONIX_DIDS:-}
+      # AMI credentials
+      FREEPBX_AMI_USER: ${FREEPBX_AMI_USER:-pbxportal}
+      FREEPBX_AMI_SECRET: ${FREEPBX_AMI_SECRET:-}
+      # Password for the FreePBX MariaDB user, needed only when this container
+      # runs against a pbx-mariadb-data volume another image created (see
+      # .env.docker.example). docker-entrypoint-full.sh reconciles
+      # /etc/freepbx.conf and the MariaDB grant to it, leaving the volume's own
+      # credentials alone so the stack hand-off stays reversible.
+      PBX_DB_PASS: ${PBX_DB_PASS:-}
+      # OAuth2 API client
+      FREEPBX_CLIENT_ID: ${FREEPBX_CLIENT_ID:-pbxportal-api}
+      FREEPBX_CLIENT_SECRET: ${FREEPBX_CLIENT_SECRET:-}
+      # SMTP for voicemail-to-email
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-pbx@zeus.innotel.us}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      # AvantFax's MariaDB password (docker-entrypoint-full.sh creates/updates
+      # the `avantfax` user and writes it into local_config.php). Left empty it
+      # is generated per boot; the entrypoint keeps the DB user in step either
+      # way, but pinning it keeps the credentials stable across restarts.
+      AVANTFAX_DB_PASS: ${AVANTFAX_DB_PASS:-}
+      FAX_EMAIL: ${FAX_EMAIL:-fax@zeus.innotel.us}
+      # Asterisk watchdog (see docker-entrypoint-full.sh) — self-heals
+      # a dropped control socket by running `fwconsole reload`.
+      ASTERISK_WATCHDOG_INTERVAL: ${ASTERISK_WATCHDOG_INTERVAL:-30}
+      ASTERISK_WATCHDOG_COOLDOWN: ${ASTERISK_WATCHDOG_COOLDOWN:-60}
+      # RTP plane (docker-entrypoint-full.sh -> write_rtp_plane). Asterisk binds
+      # exactly this range; the entrypoint caps rtp_custom.conf with it AND
+      # writes it into FreePBX's kvstore_Sipsettings (which is what regenerates
+      # rtp_additional.conf on Apply Config), so it must match the published
+      # mapping above. Same env names/defaults as the Capstone stack.
+      FREEPBX_RTP_PORT_START: ${FREEPBX_RTP_PORT_START:-10101}
+      FREEPBX_RTP_PORT_END: ${FREEPBX_RTP_PORT_END:-10120}
+      # STUN/TURN address for Asterisk's RTP engine. PROJECT RULE: set this to
+      # the host's LAN IP (192.168.x.x) — docker addresses do not resolve for
+      # this project (host.docker.internal is not resolvable from inside this
+      # container at all: no extra_hosts, every lookup fails). Empty falls back
+      # to the `coturn` compose name and the entrypoint warns; do NOT use
+      # host.docker.internal, ast_sockaddr_resolve fails on it and silently
+      # disables STUN.
+      PJSIP_STUN_TURN_ADDR: ${PJSIP_STUN_TURN_ADDR:-}
+      # LAN subnet(s) Asterisk treats as on-net, comma separated. Defaults to
+      # the /24 of PJSIP_STUN_TURN_ADDR. Never a docker range: a foreign subnet
+      # recorded by another stack leaves Asterisk classifying addresses that do
+      # not exist here as local (this box carried 172.18.0.0/16 while its
+      # network is 172.31.0.0/16).
+      PJSIP_LOCAL_NETS: ${PJSIP_LOCAL_NETS:-}
+      # External-media WebSocket URI for the Dograh voice agent (host-mode api
+      # on :8000). Must be a LAN address — the add-on's default of
+      # host.docker.internal cannot resolve in this container, which kills the
+      # media stream silently.
+      DOGRAH_WS_URI: ${DOGRAH_WS_URI:-}
+      TURN_LISTENING_PORT: ${TURN_LISTENING_PORT:-3478}
+      # TURN credentials, written into FreePBX's settings DB by the entrypoint so
+      # Asterisk, coturn and the portals' browsers all authenticate with one
+      # pair (see docker-entrypoint-full.sh → write_turn_plane).
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
+      # Public STUN/TURN name for the *WebRTC* rows only — browsers cannot
+      # resolve the internal compose name that Asterisk's own ICE uses.
+      TURN_PUBLIC_ADDR: ${TURN_PUBLIC_ADDR:-coturn.zeus.innotel.us}
+    volumes:
+      - asterisk-config:/etc/asterisk
+      - asterisk-sounds:/var/lib/asterisk/sounds
+      - asterisk-spool:/var/spool/asterisk
+      # Asterisk's log dir on a named volume so host-side fail2ban can read the
+      # rejected-registration records straight off disk (scripts/install-fail2ban.sh,
+      # pbx/fail2ban/). See pbx/README.md → "Blocking invalid SIP registrations".
+      - asterisk-logs:/var/log/asterisk
+      - freepbx-www:/var/www/html
+      # MS Teams Direct Routing tooling (pbx/cerulean-msteams.sh + the
+      # vendored wizard) — mounted read-only so the SBC bring-up can run
+      # inside this container (see pbx/README.md → Docker deployment).
+      - ../../2-voice/zeus/pbx:/opt/zeus/pbx:ro
+      # Persist MariaDB so the FreePBX module registry can't drift from the
+      # freepbx-www volume across container recreates (a fresh DB would reset
+      # module versions and re-trigger the disabled-module / "Unknown Error"
+      # failure after the boot-time `fwconsole ma refreshsignatures`).
+      - mariadb-data:/var/lib/mysql
+      # MariaDB drop-in that disables strict mode, which AvantFAX 3.4.1 needs.
+      # It writes '' into UserAccount's DATE/TIMESTAMP columns (last_mod on
+      # every save, plus pwdexpire) and MariaDB 10.11's default
+      # STRICT_TRANS_TABLES rejects that with error 1292, so logins, user edits
+      # and password changes all ended in HTTP 500. Mirrors scripts/setup.sh's
+      # bare-metal step; see the file for the full explanation.
+      - ../../2-voice/zeus/pbx/mariadb/zz-avantfax-sql-mode.cnf:/etc/mysql/conf.d/zz-avantfax-sql-mode.cnf:ro
+    # `core show version` alone passes before Apache ever starts, so a fresh
+    # container reports healthy while the GUI is still refusing connections
+    # (observed on this host: 302 on :80 only minutes after `healthy`). The GUI
+    # is half of what users touch, so probe both — Asterisk via the CLI, the
+    # web root via its HTTP listener on :80 (published as loopback :8083).
+    # `follow_redirects=false` is fine: any HTTP answer proves the listener is
+    # serving, and FreePBX's login redirect is exactly what we expect.
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show version' >/dev/null 2>&1 && curl -sf -o /dev/null http://127.0.0.1:80/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - pbx-net
+
+  # ── AvantFax (fax web UI) ──────────────────────────────────
+  # Shares the freepbx image — AvantFax runs inside the same container
+  # via PHP 7.4 FPM and Apache at /fax. This service is just an alias
+  # so the portal can resolve 'avantfax' as a hostname.
+  # The actual fax UI is at http://zeus-freepbx/fax (port 80).
+  # For external access, use the HOSTNAME:80/fax path.
+
+  # ── Zeus Customer Portal (Next.js) ─────────────────────────
+
+  zeus-portal:   # from zeus
+    # Pre-built image published to GHCR by .github/workflows/docker-publish.yml
+    # (latest tracks master; semver tags on releases), same as freepbx above.
+    #   - Refresh after a newer build:   docker compose pull portal
+    #   - Build locally instead (dev/offline): use the build override
+    #     docker compose -f docker-compose.full.yml -f docker-compose.full.build.yml up -d
+    image: ghcr.io/innotelinc/zeus:latest
+    container_name: zeus-portal
+    restart: unless-stopped
+    security_opt:
+      - apparmor=unconfined
+    depends_on:
+      - zeus-freepbx
+    # HOST networking, deliberately — PROJECT RULE: LAN addresses only.
+    #
+    # On the bridge (pbx-net, 172.31.0.0/16) every call the portal makes to the
+    # PBX is sourced from the container's own 172.31.x.x address, so the AMI
+    # permit and the FreePBX access log both end up keyed on a Docker address —
+    # and Docker addresses do not resolve correctly for this project. Joining the
+    # host namespace instead lets the portal reach every service on this host's
+    # LAN IP, so Asterisk sees 192.168.1.46 and only the LAN subnet is ever
+    # permitted (no `permit = 172.16.0.0/12` anywhere).
+    #
+    # Consequences: the portal listens on the host port directly (PORT below)
+    # rather than through a `ports:` mapping, the healthcheck targets that same
+    # port, and there is no `networks:` entry — it no longer has a Docker DNS
+    # name, which nothing uses (the PBX never calls back into the portal).
+    network_mode: host
+    env_file:
+      - path: ../../2-voice/zeus/.env
+        required: false
+    environment:
+      NODE_ENV: production
+      # Host listening port: with network_mode: host there is no mapping, so
+      # 3001 here IS the port NPM forwards to. Matches docker-compose.yml, so
+      # the full stack stays off the shared :3000 owned by the Signara frontend.
+      PORT: "3001"
+      # Next binds to $HOSTNAME — pin it so the server listens on all local
+      # interfaces (0.0.0.0) instead of failing with EADDRNOTAVAIL.
+      HOSTNAME: "0.0.0.0"
+
+      # ── Session ──
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      SESSION_SECURE: ${SESSION_SECURE:-false}
+      SESSION_SAMESITE: ${SESSION_SAMESITE:-lax}
+      SESSION_DOMAIN: ${SESSION_DOMAIN:-}
+
+      # ── Auth mode ──
+      # "authentik" = SSO only · "freepbx" = local password auth only ·
+      # "both" = Authentik button + password form. Default: "authentik"
+      # when the AUTHENTIK_* OIDC vars are set, "freepbx" otherwise.
+      AUTH_MODE: ${AUTH_MODE:-}
+
+      # ── VoIP.ms ──
+      VOIPMS_API_USERNAME: ${VOIPMS_API_USERNAME:-}
+      VOIPMS_API_PASSWORD: ${VOIPMS_API_PASSWORD:-}
+      VOIPMS_WEBHOOK_SECRET: ${VOIPMS_WEBHOOK_SECRET:-}
+      VOIPMS_SIP_USER: ${VOIPMS_SIP_USER:-}
+      VOIPMS_SIP_PASS: ${VOIPMS_SIP_PASS:-}
+      VOIPMS_SIP_SERVER: ${VOIPMS_SIP_SERVER:-newyork1.voip.ms}
+      VOIPMS_MAIN_ACCOUNT: ${VOIPMS_MAIN_ACCOUNT:-}
+
+      # ── FreePBX (this portal runs with network_mode: host) ──
+      # The PBX GUI is published on the host's loopback only (see the freepbx
+      # service above), and a host-networked portal shares that namespace, so
+      # 127.0.0.1:8083 is the path to it. A container name would not resolve
+      # here — this service has no `networks:` entry — and the LAN address
+      # would now be refused.
+      # PROJECT RULE: AMI (5038) is still dialled at the LAN IP — that one has
+      # a `[pbxportal]` ACL whose permit is the LAN subnet only.
+      FREEPBX_URL: http://127.0.0.1:8083
+      FREEPBX_CLIENT_ID: ${FREEPBX_CLIENT_ID:-pbxportal-api}
+      FREEPBX_CLIENT_SECRET: ${FREEPBX_CLIENT_SECRET:-}
+
+      # ── Asterisk AMI ──
+      ASTERISK_AMI_HOST: ${LAN_IP:-127.0.0.1}
+      ASTERISK_AMI_PORT: "5038"
+      ASTERISK_AMI_USERNAME: ${FREEPBX_AMI_USER:-pbxportal}
+      ASTERISK_AMI_SECRET: ${FREEPBX_AMI_SECRET:-}
+
+      # ── WebRTC / TURN ──
+      # WSS URL the browser dials for the softphone. Prefer FREEPBX_WSS_URL
+      # (same override capstone uses) — the :8089 form below reaches Asterisk
+      # directly, whose WSS certificate is self-signed, so a browser refuses it
+      # unless the operator trusts that cert. Point FREEPBX_WSS_URL at the edge
+      # hostname (wss://ws.<domain>/ws) to ride the wildcard certificate NPM
+      # serves, which also satisfies the `sip` subprotocol the softphone needs.
+      NEXT_PUBLIC_FREEPBX_WSS_URL: ${FREEPBX_WSS_URL:-wss://${FREEPBX_WSS_HOST:-ws.zeus.innotel.us}:8089/ws}
+      # TURN URL handed to the browser, e.g. turn:coturn.<domain>:3478. Empty
+      # leaves the softphone on public STUN alone, which fails behind symmetric
+      # NAT — the relay is what makes calls carry audio for most residential
+      # links. Credentials below are the coturn pair from .env.
+      NEXT_PUBLIC_TURN_SERVER: ${TURN_SERVER:-}
+      NEXT_PUBLIC_TURN_USERNAME: ${TURN_USERNAME:-}
+      NEXT_PUBLIC_TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
+
+      # ── AvantFax (runs inside freepbx container at /fax) ──
+      # Server-side probe: the portal runs in host networking mode, so the
+      # FreePBX container's loopback-published :8083 is reachable as-is.
+      AVANTFAX_URL: http://127.0.0.1:8083/fax
+      # Browser-facing, and therefore https: the portal is served over https and
+      # a plain-http URL here is blocked as mixed content, so the fax link died
+      # silently on every page. This used to be built from ${HOSTNAME}, which is
+      # not a hostname in any usable sense (it is 0.0.0.0 in the container) and
+      # hardcoded the http scheme, overriding the correct value documented in
+      # .env.example. An explicit NEXT_PUBLIC_AVANTFAX_URL wins; the default is
+      # the edge hostname NPM already terminates TLS for.
+      NEXT_PUBLIC_AVANTFAX_URL: ${NEXT_PUBLIC_AVANTFAX_URL:-https://fax.zeus.innotel.us/fax}
+
+      # ── Atlas integration ──
+      ATLAS_API_URL: ${ATLAS_API_URL:-http://atlas-server:3000}
+      ATLAS_API_KEY: ${ATLAS_API_KEY:-}
+
+      # ── Stripe billing (LEGACY — Magnate owns billing) ──
+      # Leave STRIPE_* empty when Magnate is the billing platform.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_CONSUMER_PRICE_ID: ${STRIPE_CONSUMER_PRICE_ID:-}
+      STRIPE_BUSINESS_PRICE_ID: ${STRIPE_BUSINESS_PRICE_ID:-}
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
+      # Magnate (RevenueOps) — source billing platform for all projects.
+      MAGNATE_PUBLIC_URL: ${MAGNATE_PUBLIC_URL:-}
+
+      # ── Email (SMTP for voicemail/invoice/fax notifications) ──
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@zeus.innotel.us}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-pbx@zeus.innotel.us}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+
+      # ── Public URL ──
+      NEXT_PUBLIC_URL: ${NEXT_PUBLIC_URL:-https://app.zeus.innotel.us}
+    volumes:
+      - portal-data:/app/data
+      - asterisk-config:/etc/asterisk:rw
+      # This product's Vault token, read-only — the same mount docker-compose.yml
+      # gives its portal. Cerulean's Vault bootstrap mints it
+      # (VAULT_PRODUCT_TOKENS=zeus there) and renews it in place; the stack only
+      # ever reads it. Without it the portal boots holding literal `vault://…`
+      # strings for SESSION_SECRET and VOIPMS_SIP_PASS — signing sessions with a
+      # reference instead of a secret — because .env names the secret and this
+      # file is what has to let the reader reach it. See data/vault/token/.
+      - ../../2-voice/zeus/data/vault/token:/vault/token:ro
+    healthcheck:
+      # No `-f`: the health endpoint returns 503 when >=2 external services
+      # (FreePBX/VoIP.ms/Stripe) are down. The container is healthy as long as
+      # the portal itself responds — any HTTP response counts; only transport
+      # errors (connection refused/timeout) fail the check.
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  # ── Coturn TURN server for WebRTC NAT traversal (enabled by default) ──
+  # Realm/credentials come from .env (TURN_USERNAME/TURN_CREDENTIAL/
+  # TURN_REALM/TURN_EXTERNAL_IP); the softphone advertises the public
+  # address coturn.zeus.innotel.us (DNS CNAME + edge proxy).
+  #
+  # TLS is ON and the client is offered BOTH `turn:` and `turns:` (TURN_SERVER
+  # in .env lists them). `turns:` is worth having because it rides one TCP port
+  # and so survives networks that filter UDP; `turn:` is kept first because UDP
+  # costs less latency when it is allowed. Both reach the outside only if the
+  # router delivers their ports here, and its static forwards for TURN still
+  # point at this platform's OLD host — the TURN control ports AND the relay
+  # range, because relayed media is a peer-to-peer flow into 49152-49251 that
+  # a TLS control channel does not remove. scripts/edge-turn-relay.sh carries
+  # those forwards across the move (see its header for the measurements).
+  # The certificate is the `*.zeus.innotel.us` wildcard Cerulean already issues
+  # and the edge already holds; scripts/install-turn-cert.sh places it and
+  # checks it actually covers the name before coturn will start.
+
+  zeus-coturn:   # from zeus
+    image: coturn/coturn:latest
+    container_name: zeus-coturn
+    restart: unless-stopped
+    # NB: only flags this image's turnserver actually accepts. `--no-dtls` is
+    # rejected outright ("unrecognized option") and `--no-cli` is deprecated in
+    # favour of `--cli`, so both made the container exit 255 in a restart loop
+    # the first time anyone ran `docker compose up coturn`. For the same reason
+    # DTLS is left at its default: TLS cannot be disabled per-transport here,
+    # and the wildcard already covers the name DTLS validates against.
+    volumes:
+      # Host state, not repo content (data/ is ignored): the wildcard key must
+      # never be committed, and scripts/install-turn-cert.sh is what puts it
+      # here. Mounted read-only — turnserver has no business writing a key.
+      - ../../2-voice/zeus/data/coturn/certs:/etc/coturn/certs:ro
+    command:
+      - turnserver
+      - --fingerprint
+      - --lt-cred-mech
+      - --user=${TURN_USERNAME:-turnuser}:${TURN_CREDENTIAL:?set TURN_CREDENTIAL in .env}
+      - --realm=${TURN_REALM:-zeus.innotel.us}
+      - --listening-port=3478
+      - --min-port=${TURN_RELAY_PORT_START:-49152}
+      - --max-port=${TURN_RELAY_PORT_END:-49251}
+      - --listening-ip=0.0.0.0
+      # TLS/DTLS on the one port, using the wildcard above. Without both the
+      # cert and the key turnserver exits rather than serving plaintext on a
+      # port the client reaches with TLS, which is the failure worth having.
+      - --cert=/etc/coturn/certs/fullchain.pem
+      - --pkey=/etc/coturn/certs/privkey.pem
+      - --tls-listening-port=${TURN_TLS_PORT:-5349}
+      # Public address coturn advertises for relayed candidates. It sits behind
+      # Docker NAT and cannot discover this itself. The coturn image eval()s
+      # each argument and ships detect-external-ip (a DNS probe returning the
+      # caller's public IP), so a changing WAN IP is tracked on every start —
+      # which matters here: 73.68.203.71 is residential, and a pinned address
+      # rots into relay candidates nobody can reach (calls connect, no audio).
+      # Pin TURN_EXTERNAL_IP in .env only where that probe is blocked. Same
+      # expression as the Capstone coturn service, so handing the voice plane
+      # back changes nothing.
+      - --external-ip=${TURN_EXTERNAL_IP:-$(detect-external-ip)}
+      - --log-file=stdout
+      - --simple-log
+    ports:
+      - "${TURN_LISTENING_PORT:-3478}:3478"
+      - "${TURN_LISTENING_PORT:-3478}:3478/udp"
+      - "${TURN_TLS_PORT:-5349}:5349"
+      - "${TURN_TLS_PORT:-5349}:5349/udp"
+      # The relay range has to be published: 3478 alone only carries the TURN
+      # control channel. Relayed media is delivered to a relayed transport
+      # address inside 49152-49251, so without this mapping every peer outside
+      # pbx-net — i.e. every real browser — sends into a closed port and calls
+      # are silent. Capstone published it; this service initially did not, so
+      # the relay went dark the moment Zeus took over port 3478.
+      - "${TURN_RELAY_PORT_START:-49152}-${TURN_RELAY_PORT_END:-49251}:${TURN_RELAY_PORT_START:-49152}-${TURN_RELAY_PORT_END:-49251}/udp"
+    # The image ships bash but no curl/wget/python, so a raw TCP connect is the
+    # proof the TURN listener is up — a dead relay then shows in `compose ps`
+    # instead of being discovered by a silent user.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/3478' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    networks:
+      - pbx-net
+
+# ── Shared voice-plane volumes (the pbx-* names) ──────────────────────────
+# Identical to the volumes the Capstone agent add-on declares (external,
+# name: pbx-*), so both products reference ONE data plane instead of copying
+# between two: extensions, routes, CDRs, voicemail, Asterisk config and the
+# FreePBX web root are the same for whichever stack is running. Handing the
+# voice plane back to the bundled add-on FreePBX therefore needs no data
+# movement at all — only a container swap.
+#
+# `external` is deliberate: the data must outlive either project (Docker
+# refuses to let a compose file own a volume another project is using), and
+# `scripts/setup.sh` creates the names on a fresh host. See the Capstone repo
+# docs/zeus-integration.md ("one shared PBX") for the ownership contract.
+
+  consul-reg-g2:   # group-owned (extras/2-voice.yml)
+    image: curlimages/curl:latest
+    container_name: g2-consul-reg
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 15
+        for svc in \
+          "capstone-api|${MESH_SERVER_IP:-10.10.2.1}|3000|voice,ai-agents" \
+          "zeus-freepbx|${MESH_SERVER_IP:-10.10.2.1}|8083|voice,pbx" \
+          "zeus-portal|${MESH_SERVER_IP:-10.10.2.1}|3001|voice,pbx,portal" \
+          "omniroute|${MESH_SERVER_IP:-10.10.2.1}|20128|llm,ai,gateway"; do
+          NAME=$(echo "$$svc" | cut -d'|' -f1)
+          ADDR=$(echo "$$svc" | cut -d'|' -f2)
+          PORT=$(echo "$$svc" | cut -d'|' -f3)
+          TAGS=$(echo "$$svc" | cut -d'|' -f4)
+          curl -s -X PUT http://${REGISTRY_ADDR:-mesh-consul:8500}/v1/agent/service/register \
+            -H 'Content-Type: application/json' \
+            -d "{\"Name\":\"$$NAME\",\"Address\":\"$$ADDR\",\"Port\":$$PORT,\"Tags\":[\"$${TAGS// /\", \"}\"]}" \
+            >/dev/null
+          echo "[g2] Registered $$NAME at $$ADDR:$$PORT"
+        done
+    networks:
+      - default
+      - innotel-mesh-net
+
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio-data:
+  omniroute_data:
+  speaches_models:
+  n8n_data:
+  grist_data:
+  prometheus_data:
+  grafana_data:
+  tts_shim_cache:
+  tts_piper_voices:
+  sandbox-tls:
+  # PBX volumes (named + external so the stack shares state with a
+  # standalone pbx-portal deployment). Created by scripts/setup.sh on a
+  # fresh host.
+  asterisk-config:
+    name: pbx-asterisk-config
+    external: true
+  asterisk-sounds:
+    name: pbx-asterisk-sounds
+    external: true
+  asterisk-spool:
+    name: pbx-asterisk-spool
+    external: true
+  # Read by host-side fail2ban; created by scripts/setup.sh / the installer.
+  asterisk-logs:
+    name: pbx-asterisk-logs
+    external: true
+  freepbx-www:
+    name: pbx-freepbx-www
+    external: true
+  mariadb-data:
+    name: pbx-mariadb-data
+    external: true
+  portal-data:
+    name: pbx-portal-data
+    external: true
+  # Authentik volumes (internal, compose-managed)
+
+networks:
+  default:
+    name: g2-net
+  innotel-mesh-net:
+    external: true
+  interview-net:
+    name: interview-net
+    external: true
+  # The shared voice plane's bridge. When Capstone runs as an add-on on a
+  # Zeus-owned PBX, Zeus's compose declares this same pinned name and owns it,
+  # hence `external` — compose refuses to adopt a pinned name it did not label
+  # itself. The dashboard joins it so its /ws signaling upstream can name the
+  # real PBX container (`zeus-freepbx`) instead of the LAN IP; a container name
+  # only resolves from inside the network that container lives on. A
+  # standalone box runs nothing else on it and scripts/setup.sh pre-creates it
+  # (drop the network before handing the voice plane to Zeus, or Zeus's compose
+  # meets these labels).
+  pbx-net:
+    name: pbx-net
+    external: true

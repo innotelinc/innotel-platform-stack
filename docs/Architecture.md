@@ -76,8 +76,13 @@ Containers on different physical networks can reach each other by their mesh IP.
 ```
 Server A (10.10.1.1) ──WireGuard──► Server B (10.10.2.1)
    │                                      │
-   g1-cerulean ◄── HTTP ──► g2-omniroute
+   cerulean ◄── HTTP ──► omniroute
 ```
+
+(The names are the containers' own, as the repos declare them — a group compose
+is generated from its member repos, so it does not invent new ones. That is also
+why a `g<N>-` prefix, which the hand-written group files used, names nothing on
+any host; see `docs/stack-migration-gaps.md`.)
 
 ### Service Discovery (Consul)
 

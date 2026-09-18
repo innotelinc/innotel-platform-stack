@@ -274,11 +274,15 @@ still a second gateway.
       and no gateway volume. The provider connections were moved first: see the runbook below
 - [x] `make gateway-vault-backup` / `-check` / `-restore` stay in this repo as
       the *dashboard's* tooling but are documented as running on the gateway's
-      host, and the script's default container is now the Group 2
-      `g2-omniroute` — it asks Docker for that container's own mount, so the
-      volume it copies is the gateway's, not this checkout's
+      host, and the script's default container is now the gateway's own
+      `omniroute` — it asks Docker for that container's own mount, so the volume
+      it copies is the gateway's, not this checkout's. (`g2-omniroute`, the name
+      this said when it was written, is not a container on any host: a group
+      compose is generated from the member repos, so it carries their
+      `container_name` and not a group prefix. Fixed 2026-09-18 — see
+      `docs/stack-migration-gaps.md`.)
 - [x] kept `compose.gateway-sso.yml`, `scripts/gateway-auth-mode.py` (container
-      default `g2-omniroute`) and `gateway-edge-check.py`: the *dashboard* is
+      default `omniroute`) and `gateway-edge-check.py`: the *dashboard* is
       still one surface needing one gate, wherever the gateway runs
 - [x] the `localhost:20128` caveats are kept (`docker-compose.yml` header,
       `.env.example`, `docs/stack.md`, `compose.host-gateway.yml`) because they
@@ -289,7 +293,7 @@ side is done; these steps are deployment state and cannot be done from a
 checkout. In order:
 
 1. Move the provider connections into the shared gateway
-   (`scripts/omniroute-restore-providers.py`, with `--container g2-omniroute` or
+   (`scripts/omniroute-restore-providers.py`, with `--container omniroute` or
    against the mesh URL) and confirm with `make build-model-check` from the
    Olympus checkout. Nothing is removed until that check is green.
 2. Put the old gateway's state in Cerulean Vault —
