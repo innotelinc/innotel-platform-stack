@@ -20,6 +20,107 @@ when nobody uses it.
 
 ---
 
+## The conformance contract — what every stack must satisfy
+
+This section is normative: it is what "conforms" means, and what
+`authentik-conform-providers.py` and the per-zone `verify-sso.py` enforce.
+
+### The two conforming patterns, and no third
+
+| | A — OIDC-native | B — gateway |
+| --- | --- | --- |
+| Who runs the flow | the app itself | an `oauth2-proxy` in front of it |
+| Registered as | one OAuth2 provider + application per app | **one provider per stack**, shared by all of that stack's gateways |
+| Examples | Distro (`distro`), Studio (`studio`), Vault (`vault`), Grafana, Homarr, Dograh | Monarch's thirteen media gateways (`monarch-media`), Capstone's six (`innotel-app-gateway`), the edge's own (`npm-edge`) |
+| The app's own login | switched off; the app's OIDC screen is the only door | switched off **and the app bound to loopback**, so the gateway is the only door rather than one of two |
+
+* **An app that speaks OIDC does not get a gateway**, and an app behind a gateway
+does not get its own OIDC provider: two doors is the thing this contract removes.
+* **One exception, and it is an identity map rather than a login.** Jellyfin has to
+know *which* user is watching, and a gateway can prove someone signed in but never
+who. So Jellyfin keeps the LDAP-Auth plugin against the same Authentik directory,
+purely to map an Authentik identity onto a Jellyfin profile. The password is still
+Authentik's: LDAP is a directory read, not a second login.
+
+### What a conforming provider carries
+
+Every OAuth2 provider in Authentik must have all five of these. The first four are
+what `authentik-conform-providers.py` writes; the fifth is what it verifies.
+
+| Requirement | What breaks without it |
+| --- | --- |
+| `openid` + `profile` scope mappings | no `sub`, no usable name claims |
+| **`Innotel OAuth Mapping: OpenID 'email'`** and **not** the default | Authentik's default `email` mapping reports `email_verified: false`, and every relying party refuses such a token — oauth2-proxy 500s the callback, Vault and Grafana refuse the login. Replace the default; never keep both (two mappings on one scope is the drift this removes) |
+| **`Innotel OAuth Mapping: OpenID 'groups'`** | group gates read `groups`. Without it, `OAUTH2_PROXY_ALLOWED_GROUPS`, Distro's entitlements and Jellyfin's `paid_users` filter authorize **nobody** — or, worse, restrict nothing |
+| an RSA signing key | Authentik falls back to HS256 keyed on the client secret, and a client verifying against the published JWKS rejects every token |
+| **`issuer_mode: per_provider`** | see below — this is the one that fails most quietly |
+
+**`issuer_mode` is not a preference.** Authentik has two modes, and they put
+different values in the id_token's `iss`:
+
+| `issuer_mode` | the `iss` claim | discovery document's `issuer` |
+| --- | --- | --- |
+| `global` | `https://auth.cerulean.innotel.us/` | the same bare base |
+| **`per_provider`** | `https://auth.cerulean.innotel.us/application/o/<app-slug>/` | the app-scoped URL |
+
+oauth2-proxy verifies `iss` against `--oidc-issuer-url` **even with
+`--skip-oidc-discovery`** (measured on v7.8.2), and every relying party in this
+estate — every gateway, Distro, Magnate, Zeus, the Cerulean app — is configured
+with the **app-scoped** issuer. So a provider left on `global` refuses every token
+it issues, and the browser sees **HTTP 500 on `/oauth2/callback`**:
+
+```
+oidc: id token issued by a different provider,
+expected "https://auth.cerulean.innotel.us/application/o/npm-edge/"
+got      "https://auth.cerulean.innotel.us/"
+```
+
+One mode, `per_provider`, is the standard. It also settles the second half: a
+gateway's `--oidc-issuer-url` is `<base>/application/o/<slug>/`, trailing slash
+included, with the same `<slug>` its `--oidc-jwks-url` already used.
+
+### Repair every provider in one command
+
+```bash
+cd 1-primary/cerulean
+python3 scripts/authentik-conform-providers.py            # show the plan
+python3 scripts/authentik-conform-providers.py --apply     # write it, then verify
+```
+
+Idempotent, and it re-reads after writing: a provider whose PATCH failed is
+reported rather than assumed. `scripts/authentik-setup.py` provisions new
+providers to the same contract.
+
+### The shared session store
+
+Every gateway except Olympus shares **one** Redis (`cerulean-sso-sessions`,
+published by `1-primary/npm/compose.cerulean.yml`), so one Authentik sign-in
+covers the edge, the media apps and the app gateways. The one value a moved stack
+gets wrong:
+
+| Role | Variable | Value |
+| --- | --- | --- |
+| where the store **binds** (on its own host) | `SSO_SESSION_REDIS_BIND` / `SSO_SESSION_REDIS_DOCKER_BIND` / `SSO_SESSION_REDIS_LAN_BIND` | `127.0.0.1` / `172.17.0.1` / that host's LAN IP |
+| where a **client stack** dials it | `SSO_SESSION_REDIS_HOST` | the store host's routable LAN IP (`192.168.1.46`) |
+
+`172.17.0.1` is docker0 **of whichever host is asking** — right only on the host
+that runs the store. A gateway that cannot reach the store does not degrade: it
+**500s on `/oauth2/callback`**.
+
+### Conformance checklist for a stack
+
+1. **Pick the pattern** — OIDC-native or a gateway, never both for one app.
+2. **Register one provider per stack**, then conform it with the command above.
+3. **Bind the app to loopback** so its gateway is the only door.
+4. **Point `SSO_SESSION_REDIS_HOST` at the store's routable address.**
+5. **Turn the app's own login off**, or reduce it to an identity map (Jellyfin).
+6. **Prove it with a real login**, not a config diff: anonymous must be redirected
+   to `auth.cerulean.innotel.us`, a member must reach the app, and a non-member
+   must be refused. That is what each zone's `scripts/verify-sso.py` does, and
+   `ips/scripts/check-sign-in-posture.sh` runs them all.
+
+---
+
 ## 1. How a gateway works, and the three things that make it work
 
 ```
@@ -42,7 +143,8 @@ combination meant the sign-in had never actually completed:
 
 | Setting | What goes wrong without it |
 | --- | --- |
-| `--insecure-oidc-allow-unverified-email` | Authentik's own `email` scope mapping sets `email_verified: false` (it has no authoritative source for the claim), and oauth2-proxy refuses such a token: `Error redeeming code during OAuth2 callback: email in id_token (…) isn't verified` → **HTTP 500** on `/oauth2/callback`. |
+| `--oidc-issuer-url` = the **app-scoped** issuer | oauth2-proxy verifies the id_token's `iss` against it even with `--skip-oidc-discovery`, and a provider on `issuer_mode: global` publishes the bare base instead → `oidc: id token issued by a different provider` → **HTTP 500** on `/oauth2/callback`. This is the setting that failed estate-wide on 2026-09-18; see the contract above and the audit at the end of this file. |
+| `--insecure-oidc-allow-unverified-email` | Authentik's own `email` scope mapping sets `email_verified: false` (it has no authoritative source for the claim), and oauth2-proxy refuses such a token: `Error redeeming code during OAuth2 callback: email in id_token (…) isn't verified` → **HTTP 500** on `/oauth2/callback`. **Now a fallback rather than the fix**: every provider carries the `Innotel` email mapping that reports `email_verified: true`, so a conformed provider cannot produce such a token. The flag stays until every gateway has been recreated against the conformed providers. |
 | `--oidc-groups-claim=groups` | With no groups claim, `--allowed-group` restricts **nothing** — any authenticated identity is admitted, and the group binding becomes decoration. |
 | `--session-store-type=redis` | A cookie session carries the email, the ID token and every group. `dhunter` is in **28** groups, so it exceeds the 4KB cookie ceiling; oauth2-proxy splits it across several cookies, those `Set-Cookie` headers overflow the edge's `proxy_buffer_size`, and nginx answers the login with `upstream sent too big header while reading response header from upstream` → **HTTP 502** on `/oauth2/callback`. |
 
@@ -519,3 +621,91 @@ session store (`olympus-gateway-sso-sessions`, its own cookie secret), so a sign
 there is a second sign-in rather than a shared one — the one zone that deliberately
 does not ride this store, and the reason its gateway still works with the edge on
 another host.
+
+## 6. The issuer-mode outage, and what it closed (2026-09-18)
+
+**Symptom.** Every sign-in that reached Authentik came back as **HTTP 500** at the
+callback — Jellyfin and the other twelve media gateways, Jellyseerr, the edge admin
+UI, and the app gateways on `.30`, all at once. The login *looked* fine: the
+browser left for Authentik, authenticated, and the failure was on the way back, so
+the error was invisible from the IdP.
+
+**Cause, measured rather than inferred.** The providers were split between the two
+issuer modes — 27 on `per_provider`, 10 on `global` — while every relying party on
+the platform is configured with the **app-scoped** issuer. A `global` provider
+publishes the bare base as `iss`, and oauth2-proxy refuses a token whose issuer is
+not the one it was configured with. Reproduced against the real IdP and a real
+token on a local gateway before anything was changed:
+
+```
+[oauthproxy.go:897] Error redeeming code during OAuth2 callback: could not verify id_token:
+  failed to verify token: oidc: id token issued by a different provider,
+  expected "https://auth.cerulean.innotel.us/application/o/npm-edge/"
+  got      "https://auth.cerulean.innotel.us/"
+```
+
+The failure lands **before** the session store — the store's own connection list
+showed no writes from the failing flows, which is what ruled Redis out. Note also
+that `/oauth2/callback` with a bogus code answers 500 for an unrelated reason, so
+"500 on the callback" alone is not evidence: the gateway's log is.
+
+**Fix, in one place instead of thirteen.** `scripts/authentik-conform-providers.py`
+now sets `issuer_mode: per_provider` on every provider, which makes each
+provider's `iss` the app-scoped URL its clients already expect, and re-reads after
+writing to confirm it. No client configuration had to change: Distro, Magnate,
+Zeus, the Cerulean app and every gateway were already pointed at the app-scoped
+issuer, which is what made the mismatch a silent, estate-wide outage rather than a
+single broken app.
+
+**Live state after the fix, verified by driving each zone's real flow:**
+
+| Zone | Host | Result |
+| --- | --- | --- |
+| Cerulean — four edge admin names, Vault, Technitium, the closed password path | `.46` | **PASS** |
+| Media — 15 names across 13 gateways, non-member refused `403`, app ports loopback-only, store guarded | `.56` | **PASS** (`requestrr.monarch.innotel.us` does not resolve — a DNS gap, **open**) |
+| Distro — password path closed, issuer match, real flow to `/api/me`, public origin identical | `.46` | **PASS** |
+| App — n8n, Grist, Grafana, Workflow Studio, FreePBX | `.30` | gateways recreated on the conformed issuer; the zone's own script still needs a token on `.30` (**open**) |
+
+**Two things this closed besides the outage.** Seerr's *own* email/password login
+was still enabled (`main.localLogin: true`) — the drift check caught it, and
+`seerr-login-methods.py --apply` turned it off, so Jellyfin (the Cerulean identity)
+is now the only way in. And Monarch's `.env` carried an expired
+`AUTHENTIK_BOOTSTRAP_TOKEN`, which made its regression test fail for a reason that
+had nothing to do with the zone; it now carries the live one.
+
+**Still open.** `requestrr.monarch.innotel.us` has no DNS record. Jellyfin's
+`dhunter` account still holds a password in Jellyfin's own store, and the two
+obvious ways to close it do not work — both measured, not assumed:
+
+* **It cannot be disabled.** `jellyfin-login-methods.py --apply` answers
+  `403 "Administrators cannot be disabled."`: the LDAP-Auth plugin grants admin to
+  anyone in Authentik's `jellyfin_admins`, and Jellyfin refuses to disable an
+  administrator at all. So the account can only be disabled after the admin
+  mapping is removed, which is a change to someone's rights rather than a
+  clean-up.
+* **The stored password is not reachable in practice.** The plugin's
+  `LdapSearchFilter` (`memberOf=cn=paid_users,…`) covers `dhunter`, so the plugin
+  intercepts that username and validates against Authentik; the hash in Jellyfin's
+  own store is never consulted. `AuthenticationProviderId` still reads
+  `DefaultAuthenticationProvider`, which is what makes the account *look* like a
+  stray to the check.
+
+**Decision (2026-09-18): accept it, change nothing.** The account is left as it
+is. The two routes out were available and both cost more than the exposure:
+clearing the hash needs a write Jellyfin may refuse for a password-less account,
+and disabling needs the `jellyfin_admins` mapping removed first, which is a change
+to someone's rights. Combined with the interception above, the stored hash is a
+credential that cannot be used, so what is left is a finding for the next audit
+rather than a hole to close today.
+
+Do **not** "fix" it by setting the local password to something weak. That is the
+one change that would make the exposure worse, and on an account the plugin
+already intercepts it would not even take effect — it would only add a guessable
+string to Jellyfin's own store.
+
+Also found on the way, and fixed: Monarch's `.env` carried a stale
+`JELLYFIN_API_KEY` (`DRIFT: answers HTTP 401`) while the exported key file was
+live — resynced, and `jellyfin-admin-password.py --check` is green again.
+`jellyfin-login-methods.py` had been reporting *any* 401/403 as "the admin API key
+was rejected", which sent an operator to re-mint a working key; it now reports a
+403's reason and only blames the key for a 401.
