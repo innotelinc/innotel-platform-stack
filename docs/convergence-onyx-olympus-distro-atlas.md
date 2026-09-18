@@ -646,12 +646,66 @@ mechanical audit does not fail on:
       `conform-project.sh` audit accepts the `vault://` posture only, and the
       instance at `secrets.cerulean.innotel.us` survives as a **migration
       source** for `scripts/vault-migrate.py` (see `sign-in-posture.md` §2).
-      Two host-local `.env` files still carry the old `INFISICAL_*` block with no
-      `VAULT_*` counterpart — the Zeus portal and Atlas, 11 and 4 keys, both
-      running on plaintext values today — so the operator's `vault-migrate.py` +
-      `VAULT_*` pass has to land there before the block can be deleted. That is
-      deployment state, not repo state, and it is the only half of §6 still
-      open.
+      The half this bullet used to leave open — "two host-local `.env` files
+      still carry the old `INFISICAL_*` block with no `VAULT_*` counterpart, the
+      Zeus portal and Atlas, 11 and 4 keys, both running on plaintext values
+      today, so the operator's `vault-migrate.py` + `VAULT_*` pass has to land
+      there before the block can be deleted" — was measured across all four
+      hosts (`.30`, `.46`, `.50`, `.56`) on **2026-09-18** and the premise was
+      already false: **no `.env` anywhere holds an `INFISICAL_*` key or an
+      `infisical://` reference**, both named files carry a full `VAULT_*` block,
+      and every consumer's reference resolves. What the pass *did* find is the
+      failure the reference side cannot show:
+
+  * **Zeus conforms end-to-end.** `VAULT_ADDR=http://192.168.1.46:8200`, the
+    path-scoped token at `data/vault/token/zeus.token`, two references
+    (`SESSION_SECRET`, `VOIPMS_SIP_PASS`) — and the running portal logs
+    `[zeus][vault] resolved 2 secret reference(s) from cerulean` at boot, so
+    resolution is proven in the container rather than assumed from the file. Its
+    token is answered **403** on a sibling's path (`cerulean/atlas`), which is
+    what makes the per-product policy real instead of nominal.
+  * **Atlas is where the store, not the file, was wrong.** `cerulean/atlas` held
+    **one** of the two keys its `.env.example` declares Vault-owned
+    (`CONVEX_INSTANCE_SECRET`), and `GITEA_DB_PASSWORD` existed only in `.env` —
+    as the literal `change-me-gitea-db-password`, which is also what Gitea's own
+    `conf/app.ini` inside the `atlas_gitea-data` volume authenticates with (read
+    back read-only, so what moved is the deployed credential and not a guess).
+    It was migrated with `vault-migrate.py --from-env-file .env --keys
+    GITEA_DB_PASSWORD` and materialized with `vault-resolve.py --file .env
+    --write`; the path now holds both keys and `.env` holds values Vault
+    supplied. The Authentik-issued `OIDC_CLIENT_SECRET` was still its
+    `change-me` placeholder and **no `atlas-gitea` application exists in
+    Authentik**, so it was emptied rather than migrated: a wrong value that
+    looks like a working one is exactly what `vault-bootstrap.py` refuses to
+    invent.
+  * **Atlas is not deployed anywhere.** No Gitea, Convex or act-runner
+    container runs on any host, though `atlas_gitea-data`, `atlas_gitea-db-data`
+    and `atlas_convex-data` exist on `.46`. The volumes and the placeholder
+    above are why it reads as "running on plaintext values today": it is not
+    running at all. CodeOps being down is a finding for the operator, not part
+    of this bullet.
+  * **`setup.sh` and the two `vault-*.py` scripts read the environment, not the
+    `.env` `VAULT_*` block** — which is what the example's `export VAULT_ADDR=…`
+    line says, and why a filled-in block is documentation until the variables
+    are exported. A container that resolves at boot reads the block through
+    `env_file` (Zeus does); Atlas resolves at setup, so its block is inert until
+    `make vault-sync` runs with the variables set.
+  * **The pre-migration checkouts are still on `.46` and still hold secrets.**
+    `cerulean-dns-platform/`, `monarch-media-platform/`, `zeus-pbx-platform/`,
+    `capstone-voice-aiagent-platform/` and `rizzaura-platform/` each carry their
+    own `.env` beside the group dirs the migration moved everything into. Their
+    references resolve like any other (the check reads them, and says so), but
+    each is a second copy of a deployment's credentials outside its repo — worth
+    deleting once nothing points at them.
+
+  It is a **check** now, not a note: `ips/scripts/check-vault-refs.py` reads
+  both sides — every `vault://` reference in the estate, resolved with the
+  product's own scoped token, plus the retired grammar, a missing token and an
+  unreachable store — wired into this repo's CI, with a per-host run (`--root`)
+  where the `.env` files and the tokens live. Its first estate-wide run resolves
+  **15 references across `.30` (4), `.46` (8) and `.56` (3), none failing**;
+  Atlas's missing key is the case it would have caught, and
+  `ips/scripts/tests/test_check_vault_refs.py` covers its rules.
 
 **Phase 3 — one builder, one web UI, one terminal UI**
 - [x] Studio consumes the control plane (§5.2): per-user keys, quota, audit, and
