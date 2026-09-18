@@ -38,6 +38,14 @@ def _load():
 
 scan = _load()
 
+# Fixtures the scanner *must* catch are assembled from pieces rather than written
+# out. This file is committed, and the pre-commit hook runs this very scanner over
+# added lines — a provider key or a PEM header sitting here as a literal would
+# block the commit that adds its own test. Joined at run time they are the real
+# shapes again; split across a concatenation they match nothing.
+PROVIDER_KEY_LINE = 'key = "' + "sk-" + "abcdefghijklmnop1234" + '"'
+PRIVATE_KEY_LINE = "-" * 5 + "BEGIN OPENSSH PRIVATE KEY" + "-" * 5
+
 
 def findings(line: str, *, label: str = "src/thing.py") -> list[tuple[str, int, str, str]]:
     return scan.scan_text(label, line)
@@ -54,11 +62,11 @@ class FlagsLiteralCredentials(unittest.TestCase):
         self.assertEqual(len(findings("api_key = 'abcdef1234567890'")), 1)
 
     def test_provider_key_shape_is_caught_even_in_a_string(self):
-        result = findings('key = "sk-abcdefghijklmnop1234"')
+        result = findings(PROVIDER_KEY_LINE)
         self.assertIn("provider-api-key", [rule for _, _, rule, _ in result])
 
     def test_private_key_block(self):
-        result = findings("-----BEGIN OPENSSH PRIVATE KEY-----")
+        result = findings(PRIVATE_KEY_LINE)
         self.assertIn("private-key-block", [rule for _, _, rule, _ in result])
 
     def test_low_entropy_marker_is_not_enough_on_its_own(self):
@@ -99,7 +107,7 @@ class ToleratesTestFixtures(unittest.TestCase):
         self.assertEqual(findings('ADMIN_PASS = "hunter2hunter"', label="tests/test_api.py"), [])
 
     def test_provider_key_shape_is_still_caught_in_a_test(self):
-        result = findings('key = "sk-abcdefghijklmnop1234"', label="tests/test_api.py")
+        result = findings(PROVIDER_KEY_LINE, label="tests/test_api.py")
         self.assertIn("provider-api-key", [rule for _, _, rule, _ in result])
 
 
