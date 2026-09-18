@@ -60,15 +60,23 @@ jobs:
       - name: Bash syntax
         run: |
           set -euo pipefail
-          for f in stack.sh scripts/*.sh; do bash -n "$f"; done
-          echo "bash -n: ok"
+          mapfile -t files < <(git ls-files '*.sh' '.githooks/*')
+          for f in "${files[@]}"; do bash -n "$f"; done
+          echo "bash -n: ok (${#files[@]} script(s))"
 
+      # The member repos check every tracked script — the hooks and guard-lib
+      # included — at shellcheck's default severity, where a note fails the job.
+      # This job used to check fewer files at `-S warning`, which is how the
+      # canonical scripts/docker-cleanup.sh kept two notes while its byte-identical
+      # mirrors in capstone, distro and zeus failed CI for them. One bar, the same
+      # files, the same shellcheck build the mirrors run.
       - name: shellcheck
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck
-          shellcheck -S warning stack.sh scripts/*.sh
+          mapfile -t files < <(git ls-files '*.sh' '.githooks/*')
+          echo "checking ${#files[@]} script(s) at the mirrors' severity"
+          docker run --rm -v "$PWD":/mnt:ro -w /mnt \
+            koalaman/shellcheck:v0.10.0 -s bash "${files[@]}"
           echo "shellcheck: ok"
 
       # The migration tool's unit tests cover what moves: declared services,

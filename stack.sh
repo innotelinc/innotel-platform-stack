@@ -226,7 +226,8 @@ compose() {
   local dir="$1"; shift
   # Declared and assigned on separate lines: a `local x="$(cmd)"` masks the
   # command's exit status, which is what shellcheck's SC2155 is about, and CI
-  # runs shellcheck at warning severity.
+  # runs shellcheck at its default severity on every tracked script and hook —
+  # the same bar (and the same shellcheck build) the member repos run.
   local generated
   generated="${STACK_DIR}/groups/$(basename "${dir}").yml"
   if [ -f "$generated" ]; then
