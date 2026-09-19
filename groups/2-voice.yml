@@ -539,7 +539,19 @@ services:
       # reaches the two bindings above and nothing else needs the LAN.
       # See 5-dev/olympus/docs/gateway-sso.md.
     volumes:
-      - omniroute_data:/data
+      # MOUNT IT WHERE THE IMAGE READS IT — `/app/data`, not `/data`.
+      # The image sets `DATA_DIR=/app/data` and keeps every provider connection,
+      # its `server.env` and the SQLite store there. Mounting the volume at `/data`
+      # (as this file did) leaves the gateway reading its own container layer: it
+      # works, so nothing looks broken, but each recreate silently discards the
+      # credentials and auto/coding answers `503 No credentials for opencode` — the
+      # failure that made multi-turn app builds impossible. The volume beside it
+      # then holds a stale copy, and a backup pointed at that path would preserve
+      # the wrong thing and report success.
+      # `scripts/omniroute-vault-backup.py` asks the running container for this
+      # destination rather than assuming it, so the two cannot drift again without
+      # a nightly failure that names it.
+      - omniroute_data:/app/data
     networks: [interview-net]
 
   # ── Workflow automation: n8n (Community Edition) ──────────────────────────
