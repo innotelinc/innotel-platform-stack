@@ -183,6 +183,63 @@ class RuleTests(DriftCase):
         })
         self.assertNotIn("x-common", chk.parse_services(report.group_file).services)
 
+    def test_a_repo_on_its_own_host_is_reported_and_not_compared(self):
+        """`ontrak` sits under `5-dev/` because that is its group directory, but
+        its range runs on a host of its own from its own compose, and the group-5
+        host cannot open /dev/kvm — so declaring it here would start a second
+        range. Neither `SOURCES` nor the group file lists it, and that is
+        correct: the repo is named in `OWN_HOST_REPOS`, skipped, and printed."""
+        code, out = self.run_check({
+            "5-dev/docker-compose.yml": group_file(),
+            "5-dev/alpha/docker-compose.yml": repo("app", "db"),
+            "5-dev/ontrak/docker-compose.yml": repo("gateway", "guacd", "portal"),
+        })
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("MISSING", out)
+        self.assertIn("on its own host (1)", out)
+        self.assertIn("ontrak", out)
+
+    def test_an_own_host_entry_the_group_now_deploys_fails(self):
+        """The fail-open case the guard exists for: if the repo is added to the
+        group's sources while the entry still exempts it, the exemption would
+        skip a real member — so that is a violation, not a note (rule 9)."""
+        group = ("# Sources:\n"
+                 "#   5-dev/alpha/docker-compose.yml\n"
+                 "#   5-dev/ontrak/docker-compose.yml\n" + group_file())
+        code, out = self.run_check({
+            "5-dev/docker-compose.yml": group,
+            "5-dev/alpha/docker-compose.yml": repo("app", "db"),
+            "5-dev/ontrak/docker-compose.yml": repo("gateway", "portal"),
+        })
+        self.assertEqual(code, 1)
+        self.assertIn("OWN HOST (1)", out)
+        self.assertIn("ontrak", out)
+
+    def test_an_own_host_entry_with_no_repo_here_warns_and_does_not_fail(self):
+        """The table is a claim, so a checkout that moved away must not leave
+        the exemption silent — but nothing is being exempted, so it is a
+        warning and the run still passes."""
+        code, out = self.run_check({
+            "5-dev/docker-compose.yml": group_file(),
+            "5-dev/alpha/docker-compose.yml": repo("app", "db"),
+        })
+        self.assertEqual(code, 0, out)
+        self.assertIn("warning:", out)
+        self.assertIn("5-dev/ontrak", out)
+
+    def test_the_exemption_is_the_named_repo_not_the_group(self):
+        """A sibling in the same directory is still a member, so a repo the
+        group genuinely forgets is still a finding."""
+        code, out = self.run_check({
+            "5-dev/docker-compose.yml": group_file(),
+            "5-dev/alpha/docker-compose.yml": repo("app", "db"),
+            "5-dev/ontrak/docker-compose.yml": repo("gateway", "portal"),
+            "5-dev/omega/docker-compose.yml": repo("app", "db", "worker"),
+        })
+        self.assertEqual(code, 1)
+        self.assertIn("MISSING (1)", out)
+        self.assertIn("worker", out)
+
     def test_a_pointer_group_file_follows_its_include(self):
         """The estate's group files no longer declare the services at all — they
         include the generated compose in the stack repo, and a host deploys that.
@@ -289,6 +346,27 @@ class InvocationTests(DriftCase):
         self.assertEqual(payload["violations"], 1)
         self.assertEqual(payload["groups"][0]["group"], "9-group")
         self.assertEqual(payload["groups"][0]["findings"][0]["service"], "worker")
+
+    def test_json_names_the_own_host_repos(self):
+        """The machine-readable output carries the exemption too, so a dashboard
+        can tell `not compared on purpose` from `not checked`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("alpha", "ontrak"):
+                (root / "5-dev" / name).mkdir(parents=True)
+            (root / "5-dev" / "docker-compose.yml").write_text(group_file(), encoding="utf-8")
+            (root / "5-dev" / "alpha" / "docker-compose.yml").write_text(
+                repo("app", "db"), encoding="utf-8")
+            (root / "5-dev" / "ontrak" / "docker-compose.yml").write_text(
+                repo("portal"), encoding="utf-8")
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = chk.main(["--root", str(root), "--json"])
+            payload = json.loads(buffer.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["groups"][0]["own_host"],
+                         {"ontrak": chk.OWN_HOST_REPOS["5-dev/ontrak"]})
+        self.assertNotIn("ontrak", payload["groups"][0]["members"])
 
     def test_a_directory_that_is_not_a_group_is_ignored(self):
         with tempfile.TemporaryDirectory() as tmp:
