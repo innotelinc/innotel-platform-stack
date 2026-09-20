@@ -99,11 +99,13 @@ exist only in Capstone's compose, so `up 2` starts a shell of it.
   `monarch-init` configures all four (Whisparr/Bazarr alongside the other *arr
   apps, iptv for the XMLTV guide, the LDAP outpost for Jellyfin's LDAP-Auth
   plugin).
-- **Still absent:** **`homarr`**, **`requestrr`**, **`clipbucket`**,
-  **`monarch-recs`**, **`monarch-health`**. The first three are optional
-  library/support apps; the last two are built from `./ai-recs` and
-  `./health-analytics` and need the `JELLYFIN_API_KEY` handoff verified before
-  they are worth declaring.
+- ~~**Still absent:** **`homarr`**, **`requestrr`**, **`clipbucket`**,
+  **`monarch-recs`**, **`monarch-health`**.~~ **All five are declared now**
+  (2026-09-18): the group compose is generated from the repos, so nothing is
+  listed-but-absent any more and the drift check measures zero findings. The two
+  built from `./ai-recs` and `./health-analytics` are declared with the rest —
+  which is not the same as the `JELLYFIN_API_KEY` handoff being verified, the
+  question this bullet was waiting on before they were worth declaring.
 - ~~**`monarch-seed`**, **`monarch-init`**~~ **Done.** Both are declared, and so
   is the mount bridge that makes them work: every app config volume the group's
   services mount is mounted again in `monarch-init` at `/docker/appdata/<app>`,
@@ -304,7 +306,7 @@ verified by driving each name, not by reading config):
 | `media.innotel.us`, `media.magnate.innotel.us` | `192.168.1.56:14010` (`jellyfin-sso`) | `302` → Authentik, `client_id=monarch-media`, correct `redirect_uri` (was `502`) |
 | `tube.innotel.us` | `192.168.1.56:14011` (`clipbucket-sso`) | `302` → Authentik (was `502`) |
 | `tv.monarch.innotel.us` | `192.168.1.56:14012` (`iptv-sso`) | `302` → Authentik |
-| `requestrr.monarch.innotel.us` | `192.168.1.56:14013` (`requestrr-sso`) | **proxy host created**, but the name does not resolve and the gateway is not deployed yet — see below |
+| `requestrr.monarch.innotel.us` | `192.168.1.56:14013` (`requestrr-sso`) | `302` → Authentik, `client_id=monarch-media`, correct `redirect_uri` (was: no DNS record and no gateway — both closed 2026-09-18, below) |
 
 The provider `Monarch-media` (pk 37) now holds **16/16** redirect URIs; the one
 missing was `requestrr`'s. The zone script's own check agrees afterwards:
@@ -320,14 +322,19 @@ Two findings from that pass, both worth carrying:
   minutes, and the script now (a) carries an existing host's certificate over when
   a run resolves none and (b) reports `serves no TLS certificate` as drift unless
   `--skip-ssl` says the zone is deliberately cert-less.
-- **`requestrr` still needs two things, and neither is the edge.** Its DNS record
-  was never created — the script's Technitium step could not reach
-  `192.168.1.46:5380` from where it ran, and unlike its neighbours the name has no
-  record at all — and the gateway `requestrr-sso` is not running on `.56`, so
-  `4545` is still the one app port in this stack answering off-host with its own
-  password. Deploy the compose on the media host (which publishes `127.0.0.1:4545`
-  and adds `14013`) and add the A record; the proxy host and the redirect URI are
-  already in place.
+- ~~**`requestrr` still needs two things, and neither is the edge.**~~ **Closed
+  2026-09-18, by measurement rather than by the plan it carried.** Both halves
+  were genuinely missing when that pass ran: the script's Technitium step could
+  not reach `192.168.1.46:5380` from where it ran, so unlike its neighbours the
+  name had no DNS record at all, and `requestrr-sso` was not running on `.56` —
+  leaving `4545` as the one app port in this stack still answering off-host with
+  its own password. Both now hold: the name resolves to the edge, `14013` answers,
+  and the public name returns `302` to Cerulean Authentik with
+  `client_id=monarch-media` and its own
+  `redirect_uri=https://requestrr.monarch.innotel.us/oauth2/callback`, exactly
+  like `tv.` and `tube.` beside it. `4545` is closed off-host, so the gateway is
+  the only door. The proxy host and the redirect URI were already in place —
+  which is why what remained was the half no one could read out of the tree.
 
 Three things this leaves worth knowing, all of them easy to get wrong twice:
 
@@ -544,18 +551,23 @@ Two things it found that are not about generation:
    on the trust host (`.46`) or in the bundle — only `.env.example`. No OpenSign
    container runs anywhere, so this is not a live outage, but a host rebuilt from
    group 1 cannot start that service until someone writes the file.
-2. **`requestrr.monarch.innotel.us` has no DNS record** and
-   **`api.signara.innotel.us` answers 502 with no Signara container running** —
-   both recorded under the sign-in posture work, neither touched here.
-3. **One literal credential is now carried in two repos.** Monarch's clipbucket
-   service sets `MYSQL_PASSWORD: ClipDB!2026` in `docker-compose.yml` rather than
-   reading it from `.env`, so the generated `groups/3-media.yml` carries the same
-   literal. Both repos are private and in the same org, so this is not a new
-   exposure — but it is the one place where a *generated* file copies a secret
-   value instead of a `${VAR}` reference. The fix belongs in the source
-   (`${CLIPBUCKET_DB_PASSWORD}` + an `.env.example` entry), and until it is made,
-   this is what `grep` finds when someone asks "what literals did we duplicate".
-   It is the only such literal across all five generated files.
+2. ~~**`api.signara.innotel.us` answers 502 with no Signara container running**~~
+   **Closed 2026-09-19** — and it was not a Signara fault: the whole `.46`
+   estate apart from Cerulean had been stopped (see *The blanket stop on `.46`*
+   below). The other half of this line, `requestrr.monarch.innotel.us` having no
+   DNS record, closed on 2026-09-18 — see the media-host section above.
+3. ~~**One literal credential is now carried in two repos.**~~ **Fixed
+   2026-09-18**, the way this page proposed. Monarch's clipbucket service set
+   `MYSQL_PASSWORD: ClipDB!2026` in `docker-compose.yml` rather than reading it
+   from `.env`, so the generated `groups/3-media.yml` carried the same literal —
+   the one place a *generated* file copied a secret value instead of a `${VAR}`
+   reference, and the only such literal across all five generated files. It is
+   `MYSQL_PASSWORD: ${CLIPBUCKET_DB_PASSWORD}` now, with the variable documented
+   in `3-media/monarch/.env.example`, so the value lives in the gitignored `.env`
+   and `grep ClipDB ips/groups/` finds nothing. The variable's comment carries the
+   operational half: the password is baked into the `clipbucket_db` volume at
+   first boot, so changing it later means dropping that volume, not just editing
+   the value.
 
 | # | Action | Status |
 |---|---|---|
@@ -566,6 +578,103 @@ Two things it found that are not about generation:
 | 5 | Delete the stale `chef` from 5-dev (Atlas retired it) and add `convex-dashboard`, `certbot` | **done** |
 | 6 | Re-pack with the fixed `migrate-stack.py` before the next move — the old bundles cannot carry services that never had a container | **open** — `migrate-stack.py` records the declared set now; the bundles still have to be re-packed on the source host |
 | 7 | Re-check the group composes against the repos after the next repo-side service change — the drift this page records was invisible until someone ran both `config --services` sides | **now a check, and it measures 0 findings** — with the files generated (action 1) there is nothing left to drift, and the check now reads the group compose *through* its pointer, so it still fails the moment a repo adds a service the generated file does not declare. Before the generator: 52 findings, and `ips/scripts/check-group-compose-drift.py` compares each group compose with its member repos' service sets, reading *every* compose file a repo carries (`docker-compose.full.yml`, `compose.cerulean.yml`, the overlays) and pairing prefixed renames with the repo that owns them instead of calling them drift. Wired into this repo's CI. Its run over the estate on 2026-09-16: `4-social` **clean**; `1-primary` missing `app`, `backup-ui` (npm) and `client`, `mongo` (sign); `5-dev` missing `gateway-sso`, `gateway-sso-sessions` (the host-gateway overlay is newer than the group file); `3-media` missing `clipbucket`, `clipbucket-sso`, `homarr`, `iptv-sso`, `jellyfin-sso`, `monarch-health`, `monarch-recs`, `requestrr`, `requestrr-sso` and still declaring `monarch-api` no repo has; `2-voice` missing 35 — Capstone's 29 services and Zeus's `pbx`/`signoz` family — with `capstone-api` in no repo. It reports; closing it is action 1, and the reporting is what makes action 1 worth doing |
+
+### The blanket stop on `.46`, and what it left down (2026-09-19)
+
+`/root/.bash_history` in the `.46` `dev` container carries the line
+`docker stop $(docker ps -q)`, between Cerulean/Authentik work and edits to
+`1-primary/docker-compose.yml`. Timestamps are off in that shell, but the
+container exit times agree: everything on `.46` except Cerulean was stopped
+within about ten seconds of `2026-09-18T23:49:39Z`. The mixed exit codes are the
+fingerprint of `docker stop` — SIGTERM handled, exit `0`; not handled in ten
+seconds, SIGKILL, `137` — and `restart: unless-stopped` deliberately does **not**
+undo an explicit stop, which is why they stayed down for hours while `subscribe`,
+`magnate`, `atlas`, `olympus` and the Tutor/AthenIQ stack all answered `502`.
+
+Two halves were missing from the public names that looked like single-service
+faults, and both needed the other half first:
+
+- **`api.signara.innotel.us`** was a stopped `signara` stack **and** a stopped
+  ONYX: `SIGNARA_S3_ENDPOINT=http://192.168.1.46:2090` is ONYX's object store, and
+  the API's bootstrap does not degrade without it — it exits with
+  `connect ECONNREFUSED …:2090`, which is why starting Signara alone produced a
+  crash loop rather than an outage with a reason. ONYX first (`4-social/onyx`,
+  `docker compose up -d`, 12/12), then Signara (`docker-compose.prod.yml` +
+  `docker-compose.override.prod.yml`, the pair its own containers named) came up
+  healthy — `api.signara.innotel.us/health` `200`, `app.signara.innotel.us` `200`.
+- **`distro`** was the same stop, not a broken deployment: the control plane was
+  `Exited (137)` while its OIDC config was already complete and correct. See
+  below.
+
+Still to restore from that event, recorded rather than assumed: `atlas` (4),
+`olympus` (4), `magnate` (1), the Tutor/AthenIQ stack (12), `subscribe` (1),
+`capstone` (5) and `monarch` (2) all on `.46`. `ontrak` (5) is *supposed* to be
+stopped here — its range runs on `.57` (`5-dev/ONTRAK-DEPLOYMENT.md`).
+
+### Distro's SSO was configured, not enabled (2026-09-19)
+
+The console was stopped, so nothing exposed the SSO that was already built:
+Authentik already held the `Distro` application and provider (pk 31,
+`issuer_mode: per_provider`, all four redirect URIs in
+`OIDC_REDIRECT_URI`), and the deployed `.env` already set all four `OIDC_*`
+variables. Starting it was the whole fix, and it was verified by driving it:
+`/api/auth/oidc/config` → `{"enabled":true,"localLogin":false,"misconfigured":false}`,
+`/api/auth/oidc/start` → `302` to Authentik with `client_id=distro` and a
+`redirect_uri` per origin, and `POST /api/auth/login` → `403` (the password path
+is closed, as `sign-in-posture.md` records).
+
+One more name in that flow was broken by something else entirely, and is worth
+knowing because the symptom pointed at the wrong layer: **`distro.innotel.us`
+(`502`)** had a correct NPM record — `192.168.1.46:20140`, certificate 4 — but a
+**stale generated conf**: `proxy_host/72.conf` still set
+`$server "172.17.0.1"; $port 3050`, the retired builder front door that no longer
+runs anywhere. Its `location /cp` had been updated and its main location had not.
+Re-saving the host through the NPM API (a `PUT` of the record it already held,
+`certificate_id` carried explicitly because of the incident two sections above)
+regenerated the conf; `/admin` went from `502` to `200`, `/cp` survived, and all
+five distro hosts still carry certificate 4. `backend.api.capstone.innotel.us`
+was the same *class* of leftover and is **not** a fault — it is the documented
+HTTP-only duplicate with no `listen 443`.
+
+### The 13 edge hosts with no certificate: intended, legacy, and third-party (2026-09-19)
+
+185 proxy hosts on the edge, 13 without a `certificate_id`. None of them is a
+leftover of the incident recorded above — that one hit the
+`*.monarch.innotel.us` zone, and every host in it carries a certificate again.
+The 13 sort into three groups, and only the middle one is a question:
+
+| Group | Hosts | Why they have no certificate |
+|---|---|---|
+| `rizzaura.net` | 8 — `admin`, `api`, `app`, `auth`, `community`, `rankings`, the apex + `www`, `subscribe` | **Legacy duplicates.** Each one is the same upstream port as its `*.rizz.innotel.us` twin (3013, 3020, 3021, 9000, 3012, 3022, 3040), and the twins carry certificate 36 while these carry none. HTTPS on any of them fails with `tlsv1 unrecognized name`; `ssl_forced` is off, so HTTP works where the app is up. Rizz Aura's canonical zone is `rizz.innotel.us`, so these are a second domain that was proxied and never given a wildcard. Three of them `502` for a different reason — Rizz Aura is one of the stacks the blanket stop above left down. **Decision needed:** issue a `*.rizzaura.net` wildcard, or retire the hosts. |
+| `backend.api.capstone.innotel.us` | 1 | **Documented, not a fault** — the HTTP-only duplicate with no `listen 443` (two sections above). There is nothing to attach a certificate to. |
+| Third-party zones | 4 — `denovocredit.com` + `www`, `cattape.us` + `www`, `fomocoin.one` + `www`; plus `pi.denovocredit.com` / `pi.innotel.us` | **Not Innotel platforms.** They are proxied through this edge without TLS; `denovocredit.com` and `pi.denovocredit.com` have `ssl_forced` on with no certificate, so those two names redirect into an HTTPS that no certificate answers. Cerulean's DNS-01 cannot issue for a zone whose credentials it does not hold, so this is a policy question, not a Cerulean bug. |
+
+### A value a line builds at run time is not a stored secret (2026-09-19)
+
+`secret-scan.py` flagged `3-media/monarch/scripts/verify-sso.py`'s throwaway
+`"E2e-Sso-" + os.urandom(6).hex() + "!Aa1"` — the committed prefix of a value
+built around random bytes, which blocked the hook in the repo that carries the
+verifier. The scanner now spares that shape: the literal must be one operand of a
+concatenation **and** the line must draw on a random source, both halves required,
+so a secret merely split across two literals (`"hunter2hunter" + "tailtail"`)
+is still a stored secret. Two unit tests pin both directions.
+
+The scan is shared: 18 repos carried one copy, `ips` and `ontrak` a newer one,
+and the fix was mirrored to all twenty so there is one version of the tool again
+(`sha256` `11746905d257`, all 20 identical). The first cut of the fix flagged
+**itself** — the helper's docstring wrote the `name = "literal"` shape — which is
+rule 2 of the scanner in miniature, and is why the comment there says so.
+
+A tree-wide run of the fixed scanner over the estate still reports ~40 findings,
+all pre-existing and none moved by this change; they are the known benign classes
+(`*_test.go` fixtures that the test-path relaxation does not match, PEM headers in
+documentation examples, generated `state` values) plus one worth an owner's call —
+`3-media/plutus/.env.example` commits an `ADMIN_SECRET` whose default reads as a
+*good* secret rather than a placeholder, so the placeholder hints do not recognise
+it and the scanner flags it. That flag is arguably right: it would ship as a
+working default. It was left as it is. (Quoting the value here, as an earlier
+draft of this paragraph did, made the scanner flag this document too — the class
+of mistake the tool exists to catch, one layer up.)
 
 ### Every host's checkouts were still withholding commits (2026-09-18)
 
@@ -651,8 +760,79 @@ part that had no owner.
 Regenerating for this also picked up the repos' newer comments and the
 `MONARCH_SSO_*`/`MONARCH_SEERR_OWNER` environment in `3-media` (monarch had moved
 on since the files were written), which is the drift the generator exists to
-close. One finding is still open and not from this change: `5-dev`'s member repo
-`ontrak` declares 5 services (`gateway`, `guacamole`, `guacd`, `lab-setup`,
-`portal`) that `gen-group-compose.py`'s `SOURCES` does not list, so the drift
-check reports them MISSING — adding the repo to `SOURCES` is what closes it, and
-that changes what a rebuilt `5-dev` host deploys.
+close.
+
+### `ontrak` is in the group's directory, not in the group's compose (2026-09-18)
+
+One finding from that run is now closed, and **not** the way this page first
+proposed. `5-dev`'s `ontrak` checkout declares five services (`gateway`,
+`guacamole`, `guacd`, `lab-setup`, `portal`) that `SOURCES` does not list, so the
+drift check reported them MISSING. Adding the repo to `SOURCES` would have closed
+it — and would have been wrong. OnTrak's range runs on a host of its own
+(`192.168.1.57`, the workspace's own `5-dev/ONTRAK-DEPLOYMENT.md`, which is kept
+outside every checkout because it names LAN hosts) from its own compose, while
+the group-5 host (`.46`'s `dev` container) cannot open
+`/dev/kvm` and keeps its copy stopped on purpose — "two ranges answering one name
+is a coin-flip per request". No `stack.sh` registry entry names it either, so no
+group `download`/`verify` ever fetched it; only the directory placement put it
+under `5-dev/`.
+
+So the checker learned the distinction rather than the generator being told a
+half-truth. `OWN_HOST_REPOS` in `check-group-compose-drift.py` names a repo that
+lives in a group directory but is deployed by a host of its own. It is skipped in
+the comparison and **printed** — `on its own host (1) — in this group's
+directory, deployed elsewhere, never by this file` — so the omission stays
+visible instead of silent, and the exemption is the named repo: a sibling the
+group genuinely forgets is still a finding (both cases are unit-tested). With
+that, the check measures **0 findings** across all five groups.
+
+The general rule this leaves: rule 1 (every member repo's service is declared by
+its group) is what found the omission, and it should stay that strict. A repo
+that legitimately has its own host is recorded in one reviewable table with a
+reason, not inferred from its absence from `SOURCES` — which is exactly the
+signal rule 1 exists to raise.
+
+### OnTrak's sign-in moved to Cerulean Authentik (2026-09-19)
+
+The portal had only local password auth (scrypt hashes plus a signed cookie), and
+an `OIDC_*` block in `.env.example` described an SSO posture **with no code behind
+it**. It is now a relying party in the estate's sense: `ontrak/oidc.py` runs the
+authorization-code flow itself (stdlib discovery, authorize, token exchange and
+userinfo — taking identity from the userinfo endpoint the discovery document names
+rather than re-implementing JWKS, which is what Distro decided for the same
+reason), the login page offers only Authentik, and `POST /login` answers 403
+unless `ONTRAK_PORTAL__BREAKGLASS_LOGIN=1`.
+
+Registered on the IdP side as application/provider **OnTrak** (`ontrak`, pk 44)
+by Cerulean's own `scripts/authentik-setup.py ontrak`, with `issuer_mode:
+per_provider`, the `Innotel` email and groups mappings, an RSA signing key, and
+**three** strict callbacks — the sign-in returns to the origin it started on, so
+the base, `student.` and `admin.` names each need their own. Cerulean's `.env`
+now carries the `AUTHENTIK_ONTRAK_*` block. Instructor is membership of the
+Authentik group `range-instructors` (created empty), re-read on every sign-in; a
+platform admin is an instructor regardless, so the range's owner is not locked
+out by an empty group.
+
+Measured against the **live** IdP, from the `.46` checkout: the login page renders
+the Authentik button and no password field, `POST /login` is 403, and each of the
+three origins leaves for Authentik as client `ontrak` with its own callback
+accepted — HTTP 302, not the 400 an unregistered callback gets, which is the
+estate's most-quoted sign-in failure mode. OnTrak's suite: 322 passed, 40 of them
+the new `tests/test_oidc.py`.
+
+**Two items this leaves open.**
+
+1. **The range does not run it yet.** `.57` runs the range from its own checkout,
+   which has not seen this change, and `ssh root@192.168.1.57` is key-only — the
+   `.46` container holds no key for it, so the deploy could not be finished from
+   here. Until the code lands there and the five `ONTRAK_PORTAL__OIDC_*` /
+   `BREAKGLASS_LOGIN` values reach its `.env`, that host still serves the password
+   login (and, once the code lands without them, will serve a page that says it is
+   not configured). The exact list is in `5-dev/ONTRAK-DEPLOYMENT.md`.
+2. **No `scripts/verify-sso.py`, and not a zone in the runner.**
+   `check-sign-in-posture.sh` enumerates zones that each carry their own
+   verification, and OnTrak is not one of them — so nothing in the estate reports
+   its posture, and a later change to its routes or its provider would not be
+   caught by anything but its unit tests. Distro is the template: also
+   OIDC-native, and its script asserts the closed password path, the issuer
+   handshake and a real code flow against a throwaway identity.
