@@ -113,6 +113,21 @@ class IgnoresCodeThatOnlyMentionsCredentials(unittest.TestCase):
         self.assertEqual(len(findings('SECRET_PATH = "hunter2hunter"')), 1)
         self.assertEqual(len(findings('ADMIN_PASSWORD = "/run/ontrak"')), 1)
 
+    def test_a_value_the_line_builds_at_run_time_is_not_stored(self):
+        # verify-sso.py makes a throwaway password around random bytes, so the
+        # committed prefix is not a credential — flagging it blocked the hook in
+        # the repo that carries the verifier.
+        self.assertEqual(
+            findings('self.password = "E2e-Sso-" + os.urandom(6).hex() + "!Aa1"'), [])
+
+    def test_the_runtime_exemption_needs_both_halves(self):
+        # A secret merely split across two literals is still a secret ...
+        self.assertEqual(len(findings('ADMIN_PASS = "hunter2hunter" + "tailtail"')), 1)
+        # ... and a random source elsewhere on the line says nothing about a
+        # literal that is not itself an operand of a concatenation.
+        self.assertEqual(
+            len(findings('ADMIN_PASS = "hunter2hunter"; x = os.urandom(4)')), 1)
+
 
 class ToleratesTestFixtures(unittest.TestCase):
     def test_literal_assignment_is_relaxed_under_a_test_path(self):
