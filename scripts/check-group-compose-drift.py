@@ -59,6 +59,18 @@ THE RULES
    the three services that are genuinely absent, and nobody reads it.
 7. **Anchors are not services.** `x-*` keys are compose extensions
    (`x-common`, `x-sso-gateway`) and are ignored on both sides.
+8. **A repo on a host of its own is not a group member.** The directory a
+   checkout sits in says where it lives, not who starts it. `ontrak` is under
+   `5-dev/` because that is its group directory, but its range runs on its own
+   host from its own compose (`5-dev/ONTRAK-DEPLOYMENT.md`), and the group-5 host
+   has no `/dev/kvm` — so declaring it in the group compose would start a second
+   range, the failure those notes forbid. `OWN_HOST_REPOS` names it; the repo is
+   skipped and **printed**, so the omission is visible rather than silent.
+9. **An exemption is a claim, and a claim that stops being true is reported.**
+   A repo still named in `OWN_HOST_REPOS` that the group's own sources now
+   deploy is a *failure*, because the entry would skip a real member — the blind
+   spot this check exists to close. An entry naming a repo that is not in the
+   group's directory at all is a warning: nothing is being exempted.
 
 Only the `services:` keys are read; nothing here starts, configures or reaches a
 container, so it runs anywhere, including CI and on a host with no daemon.
@@ -123,6 +135,26 @@ GROUP_OWNED_PREFIXES = (
     # See above: Tutor/Open edX, deployed by `tutor local`, not from a repo here.
     "tutor-",
 )
+
+# A repo that lives in a group's directory but is deployed by a host of its own,
+# never by the group compose. The group file is what a *rebuilt group host*
+# deploys, so declaring such a repo there would start a second copy of it on the
+# wrong machine — a deployment decision, not drift.
+#
+# This is named per repo rather than inferred from a missing `SOURCES` entry, and
+# deliberately so: rule 1's whole value is that a repo someone forgot to list in
+# `SOURCES` is caught, and that safety net is what found this one. Each entry is
+# a claim that has to stay true (like `GROUP_OWNED`) — the repo is skipped in the
+# comparison and reported, so the omission is visible instead of silent.
+OWN_HOST_REPOS = {
+    # OnTrak (TrainingOps): the range runs on 192.168.1.57 from
+    # `5-dev/ontrak/docker-compose.yml`, while the group-5 host (`.46`'s `dev`
+    # container) cannot open `/dev/kvm` and keeps its copy stopped on purpose —
+    # "two ranges answering one name is a coin-flip per request". No `stack.sh`
+    # registry entry names it either, so `download`/`verify` never fetched it;
+    # only the directory placement put it under `5-dev/`.
+    "5-dev/ontrak": "its range runs on its own host — see 5-dev/ONTRAK-DEPLOYMENT.md",
+}
 
 # Every compose-shaped file a member repo may carry, not just the default one:
 # a repo's services are spread over overlays and variants by design (`npm`
@@ -407,7 +439,13 @@ class GroupReport:
     # Compose files a member repo carries but the group does not deploy
     # (a variant or an opt-in overlay): listed, never compared.
     variants: dict[str, int] = field(default_factory=dict)  # file -> services
+    # Repos in this directory that a host of its own deploys instead (see
+    # `OWN_HOST_REPOS`): repo -> why. Reported, never compared.
+    own_host: dict[str, str] = field(default_factory=dict)
     findings: list[Finding] = field(default_factory=list)
+    # Claims that stopped being true without being drift (see rule 9): said, not
+    # failed, so a table left behind for a checkout that moved is not silent.
+    warnings: list[str] = field(default_factory=list)
     # (repo service, group service) pairs that differ by a prefix or segment.
     renamed: list[tuple[str, str]] = field(default_factory=list)
     # Files the group compose includes (the generated compose, in the estate).
@@ -437,6 +475,12 @@ def compare(group_dir: Path) -> GroupReport:
             continue
         found = composes_in(child)
         if not found:
+            continue
+        own_host = OWN_HOST_REPOS.get(f"{group_dir.name}/{child.name}")
+        if own_host:
+            # Present, but this group does not start it — a host of its own does.
+            # Recorded so the omission is printed rather than left implicit.
+            report.own_host[child.name] = own_host
             continue
         wanted = deployed.get(child.name)
         if wanted:
@@ -534,6 +578,22 @@ def compare(group_dir: Path) -> GroupReport:
     for repo, compose in sorted(report.members.items()):
         for name in compose.opt_in:
             report.opt_in[name] = repo
+
+    # An `OWN_HOST_REPOS` entry is a claim, and the two ways it stops being one
+    # are not the same severity (rule 9). A repo the group deploys *now* fails:
+    # the exemption would skip a real member, which is the blind spot this check
+    # exists to close. A repo that is simply not here warns — nothing is being
+    # exempted, so there is no drift, but leaving it silent is how a table rots.
+    prefix = f"{group_dir.name}/"
+    for key in sorted(entry for entry in OWN_HOST_REPOS if entry.startswith(prefix)):
+        repo = key[len(prefix):]
+        if repo in deployed:
+            report.findings.append(Finding(group_dir.name, "own-host", repo,
+                                           str(group_file)))
+        elif repo not in report.own_host:
+            report.warnings.append(
+                f"OWN_HOST_REPOS names '{key}', which is not in {group_dir.name}/ — "
+                "nothing to exempt")
     return report
 
 
@@ -611,6 +671,8 @@ def main(argv: list[str] | None = None) -> int:
                     "file": str(report.group_file),
                     "members": sorted(report.members),
                     "included": report.included,
+                    "own_host": dict(sorted(report.own_host.items())),
+                    "warnings": report.warnings,
                     "group_owned": sorted(report.group_owned),
                     "variants": dict(sorted(report.variants.items())),
                     "opt_in": dict(sorted(report.opt_in.items())),
@@ -629,6 +691,11 @@ def main(argv: list[str] | None = None) -> int:
         for report_member, compose in sorted(report.members.items()):
             print(f"    {report_member:<16} {len(compose.always_on):>3} service(s)"
                   + (f", {len(compose.opt_in)} opt-in" if compose.opt_in else ""))
+        if report.own_host:
+            print(f"  on its own host ({len(report.own_host)}) — in this group's "
+                  "directory, deployed elsewhere, never by this file:")
+            for repo, why in sorted(report.own_host.items()):
+                print(f"    {repo:<16} ({why})")
         merged, _, _ = effective_compose(report.group_file)
         print(f"  group file {len(merged.always_on):>3} service(s)"
               + (f", via {len(report.included)} include(s)" if report.included else ""))
@@ -645,6 +712,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  EXTRA ({len(stale)}) — declared here, in no member repo")
             for finding in stale:
                 print(f"    {finding.service:<24} (no repo declares it)")
+        exempted = [f for f in report.findings if f.kind == "own-host"]
+        if exempted:
+            print(f"  OWN HOST ({len(exempted)}) — exempted as living on a host of "
+                  "its own, but this group deploys it now:")
+            for finding in exempted:
+                print(f"    {finding.service:<24} (remove its OWN_HOST_REPOS entry)")
+        for warning in report.warnings:
+            print(f"  warning: {warning}")
         if report.renamed:
             print(f"  renamed ({len(report.renamed)}) — the same service under the "
                   "group's own name, reported and not failed")
