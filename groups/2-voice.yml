@@ -466,7 +466,31 @@ services:
   # ⚠ Free-tier cloud providers need internet; for a fully-local LLM, add your
   # local Ollama / llama.cpp / vLLM as a provider in the dashboard and route to it.
 
-  omniroute:   # from capstone
+  omniroute:   # from capstone (profiles: "gateway")
+    # THE GATEWAY RUNS ON ITS OWN HOST — NOT ON EVERY HOST THAT RUNS THIS FILE.
+    #
+    # Everything that makes it *this* gateway — its provider connections, its
+    # settings, the dashboard password hash, and the `server.env` key that
+    # decrypts them — lives in one volume, and that volume sits beside the
+    # gateway, not beside the stack talking to it. A stack on another host does
+    # NOT start a second gateway; it pins the address of the identity-aware
+    # door in front of the real one (`OMNIROUTE_URL`, see .env.example). The
+    # gateway's host starts this service deliberately:
+    #
+    #     docker compose --profile gateway up -d omniroute
+    #
+    # MEASURED, and why this is a profile rather than only a comment. A second
+    # gateway started from this file on the app host answered requests exactly
+    # the way a working one does while holding *zero* connections:
+    # `provider_connections`=0, every key rejected `401 invalid_api_key`, and
+    # its data dir in the container's writable layer (volume mounted at `/data`
+    # while the image reads `DATA_DIR=/app/data`). It looked healthy, it
+    # published the same ports, and nothing downstream could tell it apart from
+    # the real gateway except by the answers it never routed. That is the
+    # `/data`-vs-`/app/data` failure one layer up; the cure is the same one —
+    # make the wrong configuration impossible to start, rather than detectable
+    # afterwards.
+    profiles: ["gateway"]
     image: ${OMNIROUTE_IMAGE:-diegosouzapw/omniroute:latest}
     container_name: omniroute
     restart: unless-stopped
@@ -1701,6 +1725,18 @@ services:
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
       # Magnate (RevenueOps) — source billing platform for all projects.
       MAGNATE_PUBLIC_URL: ${MAGNATE_PUBLIC_URL:-}
+      # Add-on entitlement gate (see src/lib/addons.ts). The policy matches
+      # Capstone's, which gates the same SKUs on the same Magnate: an unset
+      # SKU slug — like an unset MAGNATE_PUBLIC_URL — leaves that gate
+      # INACTIVE, and an entitlements outage fails open, so billing trouble
+      # never un-wires a paying customer's lines.
+      ENTITLEMENTS_API_TOKEN: ${ENTITLEMENTS_API_TOKEN:-}
+      MAGNATE_AGENTS_PLAN: ${MAGNATE_AGENTS_PLAN:-}
+      MAGNATE_CAPSTONE_PLAN: ${MAGNATE_CAPSTONE_PLAN:-}
+      MAGNATE_AGENT_PLAN: ${MAGNATE_AGENT_PLAN:-}
+      # Shared secret the PBX presents when it fetches this portal's routing
+      # plan (pbx/bootstrap-zeus-pbx.sh); see scripts/pbx.env.example.
+      PBX_SYNC_TOKEN: ${PBX_SYNC_TOKEN:-}
 
       # ── Email (SMTP for voicemail/invoice/fax notifications) ──
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@zeus.innotel.us}
