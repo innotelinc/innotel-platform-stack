@@ -822,15 +822,13 @@ services:
       api:
         condition: service_healthy
     healthcheck:
+      # 127.0.0.1 for the same reason as the API probe below: `localhost` also
+      # maps to ::1 and busybox wget prefers it, so this failed and the web app
+      # was reported unhealthy.
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/']
-      interval: 15s
+      interval: 30s
       timeout: 5s
-      retries: 10
-      start_period: 30s
-
-  # Public object-storage endpoint used by browser-facing presigned document
-  # URLs (S3_PUBLIC_ENDPOINT, e.g. https://storage.signara.innotel.us). Host
-  # port 9002 avoids the host 9000 taken by Cerulean's Authentik.
+      retries: 5
     deploy:
       resources:
         limits:
@@ -885,12 +883,16 @@ services:
       meilisearch:
         condition: service_healthy
     healthcheck:
+      # 127.0.0.1, not `localhost`: the container's /etc/hosts maps localhost to
+      # ::1 as well, busybox wget prefers IPv6, and Nest listens on 0.0.0.0
+      # (IPv4) — so `localhost` is refused and this reported unhealthy forever.
+      # That is not cosmetic: `frontend` waits on this service being healthy, so
+      # a full `up` deadlocked on the API rather than starting the web app.
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8000/ready']
       interval: 15s
       timeout: 5s
       retries: 10
       start_period: 30s
-
     deploy:
       resources:
         limits:
@@ -1117,6 +1119,10 @@ services:
       - ../../1-primary/signara/infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../../1-primary/signara/infra/monitoring/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
       - promdata:/prometheus
+    # Bound to loopback, not published: Prometheus has no authentication, and
+    # its UI and query API expose every metric in the estate.
+    ports:
+      - '${PROMETHEUS_BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_BIND_PORT:-9090}:9090'
     depends_on:
       - api
     logging: *logging-default
@@ -1157,12 +1163,23 @@ services:
   alertmanager:   # from signara (profiles: 'monitoring')
     image: prom/alertmanager:v0.27.0
     restart: unless-stopped
-    command:
-      - --config.file=/etc/alertmanager/alertmanager.yml
-      - --storage.path=/alertmanager
+    # The config carries ${...} placeholders that Alertmanager cannot expand
+    # itself, so the entrypoint renders it before exec'ing the binary — without
+    # that step the receiver silently sends nowhere. See the script's header.
+    entrypoint: ['/bin/sh', '/etc/alertmanager/entrypoint.sh']
+    environment:
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
     volumes:
       - ../../1-primary/signara/infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ../../1-primary/signara/infra/monitoring/alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
       - alertdata:/alertmanager
+    ports:
+      - '${ALERTMANAGER_BIND_ADDRESS:-127.0.0.1}:${ALERTMANAGER_BIND_PORT:-9093}:9093'
     logging: *logging-default
 
   # --------------------------------------------------------------- backup ---
@@ -1179,7 +1196,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-signara}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
       POSTGRES_DB: ${POSTGRES_DB:-signara}
-      AUTHENTIK_POSTGRES_HOST: ${AUTHENTIK_POSTGRES_HOST:-}
+      AUTHENTIK_POSTGRES_HOST: ${AUTHENTIK_POSTGRES_HOST:-cerulean-authentik-postgres}
       AUTHENTIK_POSTGRES_USER: authentik
       AUTHENTIK_POSTGRES_PASSWORD: ${AUTHENTIK_DB_PASSWORD:-}
       AUTHENTIK_POSTGRES_DB: authentik
@@ -1198,6 +1215,9 @@ services:
       BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-false}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       BACKUP_REQUIRE_REMOTE: ${BACKUP_REQUIRE_REMOTE:-false}
+      # Addresses that mean "this host", for the off-host check. The job cannot
+      # see them from inside the container, so they are declared here.
+      BACKUP_LOCAL_ADDRESSES: ${BACKUP_LOCAL_ADDRESSES:-}
     volumes:
       - ../../1-primary/signara/infra/backup:/backup:ro
       - backupcache:/backup-cache
@@ -1208,6 +1228,13 @@ services:
     logging: *logging-default
 
     profiles: ['monitoring']
+    # The identity plane on this host is Cerulean's Authentik, not a database in
+    # this stack, so the backup joins Cerulean's network to dump it. Without this
+    # the restore brings the documents back but not the logins — and the
+    # identity-coverage metric would be 0, which is what raises the alert.
+    networks:
+      - default
+      - cerulean
 
   backup-metrics:   # from signara (profiles: 'monitoring')
     image: python:3.12-alpine
@@ -1223,6 +1250,7 @@ services:
     logging: *logging-default
 
     profiles: ['monitoring']
+
 
   tutor-mysql:   # group-owned (extras/1-primary.yml)
     image: docker.io/mysql:8.4.11
@@ -1416,3 +1444,6 @@ networks:
     name: magnate-net
   app-network:
     driver: bridge
+  cerulean:
+    external: true
+    name: cerulean_default
