@@ -305,6 +305,11 @@ cmd_up() {
   # (STACK_SKIP_VERIFY=1 bypasses the check).
   if [ "${STACK_SKIP_VERIFY:-0}" != "1" ]; then
     verify_group_components "$target" || exit 1
+    # Group 1 hosts the DNS plane, so it also gets the NOTIFY preflight: a zone
+    # that notifies only itself is a state this stack must not be started into.
+    if [ "$target" = "1" ]; then
+      preflight_dns_notify "$dir" || exit 1
+    fi
   fi
 
   local info_str="${STACK_GROUPS[$target]}"
@@ -707,6 +712,58 @@ verify_group_components() {
     warn "Some Group ${group} checkouts are on a branch other than the registry's (starting anyway)"
   fi
   return 0
+}
+
+# The DNS NOTIFY preflight, run before group 1 starts.
+#   0 = nothing armed here (or nothing to judge) · 1 = stop the deploy
+#
+# A Primary zone told to notify its own name servers can only ever be refused on
+# a one-server estate: every NS the zone lists resolves back to the same box, so
+# Technitium NOTIFYs itself and, being the primary, refuses it — the console then
+# flags the zone `notifyFailed` every five minutes, forever. Nothing in the
+# estate chooses a zone's notify mode (Technitium's default for a new Primary
+# zone does), so a rebuilt or newly-created zone regresses silently; this is
+# where a stack refuses to be started into that.
+#
+# The judgement itself lives in the repo that owns Technitium —
+# `1-primary/cerulean/scripts/zone-notify-reconcile.py --preflight`, one
+# implementation of each — and its exit codes are honoured rather than
+# collapsed: 1 is a finding and stops the deploy, while 2 (no token, server
+# unreachable) only warns, because a host running part of the stack is not a
+# drifted host and a gate that fails when it cannot look is a gate people learn
+# to skip. A group-1 host with no cerulean checkout or no `.env` is skipped the
+# same way.
+preflight_dns_notify() {
+  local group_dir="$1"
+  local script="${group_dir}/cerulean/scripts/zone-notify-reconcile.py"
+  local env_file="${group_dir}/cerulean/.env"
+  [ -f "$script" ] && [ -f "$env_file" ] || return 0
+
+  local url token
+  url="$(sed -n 's/^TECHNITIUM_URL=//p' "$env_file" | head -1 | tr -d '\r')"
+  token="$(sed -n 's/^TECHNITIUM_TOKEN=//p' "$env_file" | head -1 | tr -d '\r')"
+  if [ -z "$token" ]; then
+    info "  DNS NOTIFY preflight skipped — no TECHNITIUM_TOKEN in ${env_file}"
+    return 0
+  fi
+
+  local rc=0 out=""
+  out="$(TECHNITIUM_URL="${url:-http://172.17.0.1:5380}" TECHNITIUM_TOKEN="$token" \
+    python3 "$script" --preflight 2>&1)" || rc=$?
+  case "$rc" in
+    0)
+      info "  ${out:-DNS NOTIFY preflight: no zone is armed to notify only this server}"
+      return 0 ;;
+    2)
+      warn "  $out"
+      warn "  DNS NOTIFY preflight could not run — starting anyway"
+      return 0 ;;
+    *)
+      err "  $out"
+      err "Group ${group_dir##*/}: a zone is armed to notify only this server — every NOTIFY can only be refused."
+      err "    fix: python3 ${script} --apply"
+      return 1 ;;
+  esac
 }
 
 cmd_verify_help() {
