@@ -1400,6 +1400,20 @@ services:
       # is loopback-only now, so this is the only path in — hence the extra
       # network rather than a host address.
       OAUTH2_PROXY_UPSTREAMS: http://zeus-freepbx:80
+      # The voice plane's screen, one click from the door a PBX-first operator
+      # already uses. FreePBX's admin menu is built from installed modules (its
+      # framework reads each module's `<menuitems>`), so a link *inside* the GUI
+      # is a module — deliberately not shipped here (see the Zeus repo,
+      # docs/ava-capstone-convergence.md §7). This page is the module-free
+      # surface, and it was measured against this exact image rather than
+      # assumed: `--banner` is the flag v7.8.2 has (`--signin-message` does not
+      # exist yet there, and setting it is silently ignored), and the value is
+      # rendered as unescaped HTML, so the anchor below is a real link:
+      #   <p class="block">Voice plane — <a href="...">…</a></p>
+      # Default is the same origin the Control Center publishes for the portal
+      # (ZEUS_PORTAL_URL, else ZEUS_API_URL, else the portal's own name) —
+      # override with PBX_SSO_BANNER, or "-" to disable it.
+      OAUTH2_PROXY_BANNER: '${PBX_SSO_BANNER:-Voice plane — <a href="https://app.zeus.innotel.us/dashboard/voice">agents, bindings and live calls</a>}'
     ports:
       - "${PBX_SSO_PORT:-14014}:4180"
     networks: [interview-net, pbx-net]
@@ -1682,6 +1696,11 @@ services:
       ASTERISK_AMI_PORT: "5038"
       ASTERISK_AMI_USERNAME: ${FREEPBX_AMI_USER:-pbxportal}
       ASTERISK_AMI_SECRET: ${FREEPBX_AMI_SECRET:-}
+
+      # ── Call-context read (GET /api/voice/context/{token}) ──
+      # Bearer credential for the machines that read a call's context: Capstone
+      # at the hand-off, AVA at the hand-back. Empty refuses every read.
+      VOICE_CONTEXT_SECRET: ${VOICE_CONTEXT_SECRET:-}
 
       # ── WebRTC / TURN ──
       # WSS URL the browser dials for the softphone. Prefer FREEPBX_WSS_URL
