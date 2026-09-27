@@ -4,8 +4,9 @@
 # `docker-compose.ext.yml` in this directory is the mesh-attached version: it
 # registers with Consul and joins `innotel-mesh-net`, so it only comes up on a
 # host that has joined the mesh. This file is the same idea with none of that
-# wiring, for the hosts that run a product stack but no mesh — `.50` (Olympus)
-# and `.56` (Monarch).
+# wiring, for the hosts that run a product stack but no mesh — `.50` (Olympus),
+# `.56` (Monarch) and `.71` (Cerulean, where it also watches the identity dump
+# through TEXTFILE_DIR).
 #
 # It is deliberately the small half of what Capstone runs: host-level metrics
 # (CPU, memory, disk, network) plus a metrics store and a dashboard. There is
@@ -28,6 +29,11 @@
 # 127.0.0.1:9090, so it sets PROMETHEUS_PORT=9095 instead.
 #
 # Copy `.env.host.example` to `.env.host` first; it is gitignored.
+#
+# On `.71` the same stack carries the estate's backup alerts: set
+# TEXTFILE_DIR=/root/cerulean-backup/authentik so node-exporter's textfile
+# collector picks up the dump's `status.prom`, and `./prometheus/rules/`
+# (mounted by the service below) is what turns it into alerts.
 
 services:
   node-exporter:
@@ -39,9 +45,19 @@ services:
     command:
       - "--path.rootfs=/host"
       - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+      # Textfile collector: any *.prom a scheduled job writes into TEXTFILE_DIR
+      # becomes scrapeable metrics, which is how a backup job's status file
+      # reaches the rules in ./prometheus/rules/ without either side knowing
+      # about the other. `--path.rootfs` does NOT prefix this directory (measured
+      # against this image, v1.9.1), so the mount below is what locates it.
+      - "--collector.textfile.directory=/var/lib/node_exporter/textfile"
     pid: host
     volumes:
       - "/:/host:ro,rslave"
+      # Defaults to an empty directory on a host that publishes no status file:
+      # the collector then reports no series, and the rules that key on those
+      # series stay quiet instead of firing about a job this host does not run.
+      - "${TEXTFILE_DIR:-/var/lib/node_exporter/textfile}:/var/lib/node_exporter/textfile:ro"
     networks: [metrics-net]
 
   prometheus:
@@ -63,6 +79,7 @@ services:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"   # loopback only
     volumes:
       - ./prometheus/prometheus.host.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
       - metrics_prometheus_data:/prometheus
     depends_on:
       - node-exporter

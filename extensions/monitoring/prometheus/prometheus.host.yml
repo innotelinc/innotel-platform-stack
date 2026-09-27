@@ -8,6 +8,12 @@ global:
   external_labels:
     stack: innotel-host
 
+# Alert rules for the dumps a host publishes through node-exporter's textfile
+# collector (TEXTFILE_DIR). The rules are keyed on the series being present, so a
+# host that does not take a given backup loads them and stays quiet.
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
 scrape_configs:
   - job_name: node
     static_configs:

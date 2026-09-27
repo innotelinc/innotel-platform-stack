@@ -1,0 +1,92 @@
+# ==========================================================================
+# Backup alert rules
+# ==========================================================================
+# These watch the dumps the estate takes, from the metrics the dump jobs publish
+# as Prometheus textfiles (`status.prom`), surfaced by node-exporter's textfile
+# collector from `TEXTFILE_DIR`.
+#
+# Every rule here is keyed on the series being PRESENT, and absent metrics do not
+# fire. That is deliberate: this rules file is loaded by the shared per-host
+# stack, which runs on hosts that do not all take the same backups. A host that
+# was never asked to dump Authentik stays quiet rather than paging about a job it
+# does not own. The host that *is* supposed to dump it is covered by the cron
+# checker that runs beside the job — see 1-primary/cerulean/docs/identity-backup.md
+# §4 for why a job that never starts needs a check that reads the artefact.
+#
+# The metric contract (written by Cerulean's scripts/authentik-db-backup.sh):
+#   cerulean_authentik_backup_last_status                 1 ok, 0 failed
+#   cerulean_authentik_backup_last_success_timestamp      unix seconds
+#   cerulean_authentik_backup_last_size_bytes             bytes
+#   cerulean_authentik_backup_remote_enabled              0/1
+#   cerulean_authentik_backup_mirror_offhost              0/1 — 1 = a copy is
+#                                                         proven to leave this host
+#   cerulean_authentik_backup_remote_last_success_timestamp
+# ==========================================================================
+groups:
+  - name: innotel-backups
+    rules:
+      - alert: AuthentikBackupFailed
+        expr: cerulean_authentik_backup_last_status == 0
+        for: 30m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'The Authentik identity dump failed'
+          description: >-
+            The most recent dump run ended in failure. Authentik holds the users,
+            groups and flows every platform federates to, so a restore without it
+            returns a stack nobody can log in to. Check the job's output on the
+            host that owns it, then
+            `authentik-backup-check.py` (1-primary/cerulean/docs/identity-backup.md).
+
+      # The failure the job cannot report about itself: a dump that is simply not
+      # being taken. A deleted cron entry, a moved container or a backup
+      # directory that changed owners produces no output anywhere, and this is
+      # what turns that silence into an alert.
+      - alert: AuthentikBackupStale
+        expr: (time() - cerulean_authentik_backup_last_success_timestamp) > 36 * 60 * 60
+        for: 30m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'No successful Authentik dump in 36 hours'
+          description: >-
+            The last successful identity dump was {{ $value | humanizeDuration }}
+            ago. The job either stopped running or stopped reporting — see
+            1-primary/cerulean/docs/identity-backup.md §4.
+
+      # A dump that only exists on the host it backs up passes every other check
+      # here: it runs, it is fresh, it is complete, and it dies with the box. That
+      # is how the estate lost a platform's entire history, so "no off-host copy"
+      # is stated rather than assumed away. A warning, not a page: the mirror is
+      # optional on this host, and no rclone remote exists in the estate yet.
+      - alert: AuthentikBackupMirrorIsLocalOnly
+        expr: cerulean_authentik_backup_mirror_offhost == 0
+        for: 6h
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'The Authentik dump is not proven to leave its host'
+          description: >-
+            No off-host mirror is configured, or the mirror resolves to an address
+            in BACKUP_LOCAL_ADDRESSES. These dumps do not survive losing the host.
+            Set BACKUP_S3_* on the host that owns Authentik.
+
+      # Covers the gap between "the file is written" and "the file is read": a
+      # status file that is truncated, hand-edited or mid-write when scraped
+      # yields no series at all, which would silently disarm every rule above.
+      - alert: AuthentikTextfileUnreadable
+        expr: node_textfile_scrape_error == 1
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'node-exporter cannot read the backup status textfiles'
+          description: >-
+            The textfile collector reported a read error on {{ $labels.instance }},
+            so the backup metrics this host publishes are missing entirely.
+            Check TEXTFILE_DIR and the permissions on the directory it mounts.
