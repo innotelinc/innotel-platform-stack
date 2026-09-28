@@ -22,6 +22,18 @@ records what each host is, what currently sits on it, and where it should sit.
   and the estate's real Gitea is `.46` `atlas-gitea` (`git.innotel.us`). i1 is
   back to 7 containers. See `security-incident-2026-09-27-git-miner.md`.
 - **`magnate` moved off `.46`** onto its own i3 container (`.57`, 2026-09-27).
+- **`atlas` moved off `.46`** onto its own i2 container (`.90`, 2026-09-27),
+  reusing the address the retired `git` container held. It is tiny (Gitea +
+  convex + postgres + dashboard, well under 0.5 GiB), so i2's remaining headroom
+  covers it.
+- **`rizzaura` moved off `.46`** onto its own i2 container (`.62`, 2026-09-27):
+  five small services (~50 MiB).
+- **`olympus` factory + Studio moved off `.46`** onto their own i3 container
+  (`olympus-gw`, `.64`, 2026-09-27). The `:20129` SSO proxy did **not** move: it
+  fronts `omniroute` on `127.0.0.1:20128` and the estate dials
+  `192.168.1.46:20129` by address, so it stays with `omniroute` on `.46` until
+  that pair relocates together. i3 was the right host for the factory/studio
+  because they consume the gateway over the LAN, not loopback.
 
 ## The three hosts
 
@@ -51,6 +63,8 @@ Memory is live usage; disk is the container rootfs.
 | i1 | vpn | `.43` | WireGuard | 218 MiB | 2.9 G |
 | i2 | atheniq | `.59` | Open edX / Tutor (11 svc) | **4.79 GiB** | 5.5 G |
 | i2 | capstone | `.30` | Zeus / capstone telephony | **4.41 GiB** | 23.7 G |
+| i2 | atlas | `.90` | Gitea + convex (moved from `.46`) | ~0.4 GiB | — |
+| i2 | rizzaura | `.62` | Rizz Aura (5 svc, moved from `.46`) | ~50 MiB | — |
 | i2 | cloud | `.146` | cloud storage | 299 MiB | 9.2 G |
 | i2 | development | `.46` | **the `dev` container** — every project's docker stack | 2.32 GiB | **156 G** |
 | i2 | voice | `.9` | voice | 777 MiB | 11.6 G |
@@ -62,6 +76,7 @@ Memory is live usage; disk is the container rootfs.
 | i3 | pi | `.70` | pi | 93 MiB | 1.1 G |
 | i3 | signara | `.44` | Signara | 516 MiB | 2.8 G |
 | i3 | slack | `.33` | Slack bridge | 285 MiB | 4.0 G |
+| i3 | olympus-gw | `.64` | Olympus factory + Studio (moved from `.46`) | ~290 MiB | — |
 | i3 | docs | `.125` | ONLYOFFICE Docs (moved from i2) | 467 MiB | 2.7 G |
 | i3 | ansible | `.35` | Ansible runner + postfix (moved from i2) | 37 MiB | 464 M |
 
