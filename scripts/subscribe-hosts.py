@@ -30,12 +30,12 @@ Usage
     python3 scripts/subscribe-hosts.py --check    # read-only drift check
     python3 scripts/subscribe-hosts.py            # create/update
 
-Environment (real env wins; defaults suit the .46 portal host)
-    NPM_API_URL             edge NPM                (http://192.168.1.46:81)
+Environment (real env wins; defaults suit the portal's own container)
+    NPM_API_URL             edge NPM                (http://192.168.1.71:81)
     NPM_ADMIN_EMAIL         edge NPM login email
     NPM_ADMIN_PASSWORD      edge NPM login password
     NPM_API_TOKEN           persistent NPM token    (skips the login)
-    SUBSCRIBE_PORTAL_HOST   host running the portal (192.168.1.46)
+    SUBSCRIBE_PORTAL_HOST   host running the portal (192.168.1.58)
     SUBSCRIBE_PORTAL_PORT   portal host port        (3040)
 """
 
@@ -52,8 +52,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PAGES = ROOT / "web" / "subscribe" / "pages"
 
-DEFAULT_API_URL = "http://192.168.1.46:81"
-DEFAULT_PORTAL_HOST = "192.168.1.46"
+DEFAULT_API_URL = "http://192.168.1.71:81"
+DEFAULT_PORTAL_HOST = "192.168.1.58"
 DEFAULT_PORTAL_PORT = 3040
 
 # The apex directory plus every service page, minus the services that serve

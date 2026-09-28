@@ -3,6 +3,16 @@
 Surveyed 2026-09-27. Three Incus hosts run every estate container. This page
 records what each host is, what currently sits on it, and where it should sit.
 
+## Changes applied 2026-09-27
+
+- **Limits set** on the unbounded heavies: i2 `atheniq`/`capstone` = 6 GiB,
+  `development` = 4 GiB; i1 `monarch`/`git` = 2 vCPU; i3 `olympus`/`onyx`/
+  `signara` = 1 GiB.
+- **`docs` and `ansible` moved i2 → i3**, keeping their IPs (`.125`/`.35`).
+  i2 free went from 0.4 GiB to ~0.8 GiB; i3 carries them comfortably.
+- The `.46` `distro-control-plane` duplicate was removed (see
+  `dev-container-migration.md`).
+
 ## The three hosts
 
 | Host | Address | vCPU | RAM | Load at survey | RAM free | Root disk | Pool | Pools' free |
@@ -30,12 +40,10 @@ Memory is live usage; disk is the container rootfs.
 | i1 | terminal | `.22` | web terminal | 328 MiB | 4.2 G |
 | i1 | vault | `.73` | HashiCorp Vault | 819 MiB | 4.3 G |
 | i1 | vpn | `.43` | WireGuard | 218 MiB | 2.9 G |
-| i2 | ansible | `.35` | Ansible runner | 37 MiB | 464 M |
 | i2 | atheniq | `.59` | Open edX / Tutor (11 svc) | **4.79 GiB** | 5.5 G |
 | i2 | capstone | `.30` | Zeus / capstone telephony | **4.41 GiB** | 23.7 G |
 | i2 | cloud | `.146` | cloud storage | 299 MiB | 9.2 G |
 | i2 | development | `.46` | **the `dev` container** — every project's docker stack | 2.32 GiB | **156 G** |
-| i2 | docs | `.125` | docs site | 467 MiB | 2.7 G |
 | i2 | voice | `.9` | voice | 777 MiB | 11.6 G |
 | i2 | www | `.80` | public website (+ `tun0`) | 235 MiB | 12.9 G |
 | i3 | distro | `.61` | distro control plane | 130 MiB | 1.2 G |
@@ -45,6 +53,8 @@ Memory is live usage; disk is the container rootfs.
 | i3 | pi | `.70` | pi | 93 MiB | 1.1 G |
 | i3 | signara | `.44` | Signara | 516 MiB | 2.8 G |
 | i3 | slack | `.33` | Slack bridge | 285 MiB | 4.0 G |
+| i3 | docs | `.125` | ONLYOFFICE Docs (moved from i2) | 467 MiB | 2.7 G |
+| i3 | ansible | `.35` | Ansible runner + postfix (moved from i2) | 37 MiB | 464 M |
 
 ## Findings
 
@@ -75,7 +85,7 @@ limits and a small relocation — no host has enough slack for a wholesale shuff
 | **i2** (apps, 8 vCPU / 16 GiB) | `capstone`, `atheniq`, `development`, `voice`, `www`, `cloud` | The heavy, RAM-hungry, CPU-workload set. `development` (`.46`) is where the projects run and is the target of the standalone-project migration. |
 | **i3** (light, 8 vCPU / 6 GiB) | `olympus`, `onyx`, `signara`, `distro`, `slack`, `patchmon`, `pi` **+ `docs`, `ansible`** | Small, self-contained services. Has CPU to spare; only RAM limits it. |
 
-### Actions (low-risk first)
+### Actions (applied 2026-09-27)
 
 1. **Set limits on the unbounded heavies** (prevents another wedge; no restarts
    needed for `limits.memory`/`limits.cpu`):

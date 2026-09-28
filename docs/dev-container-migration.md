@@ -8,6 +8,18 @@ image, a full rootfs (156 GiB) or a runaway stack takes them all down together.
 
 This is the plan to give each project its own Incus container.
 
+## Progress
+
+- **2026-09-27**: `.46` dead weight reclaimed — the `distro-control-plane`
+  duplicate, the OnTrak volumes and ~4 GB of build cache removed.
+- **2026-09-27**: **`subscribe` migrated** to its own container (`subscribe` on
+  i3, static `192.168.1.58:3040`); all 15 `subscribe.*` NPM hosts repointed and
+  the `.46` stack removed. The owner script
+  (`scripts/subscribe-hosts.py`) now defaults to `192.168.1.71` (edge NPM) and
+  `192.168.1.58` (portal).
+- Remaining: **atlas**, **rizzaura**, **olympus gateway**, **magnate**,
+  **clipbucket**, **omniroute**.
+
 ## What runs inside `.46` today
 
 19 containers across 8 Compose projects:
@@ -35,10 +47,10 @@ migrate blind:
 | Project | Also exists as | Serves the public name? |
 |---|---|---|
 | olympus | i3 `olympus` `.50` (`olympus.innotel.us`, `studio.olympus` → `.50:3050`) | split: the app is on i3, the **gateway** (`:20129`) is on `.46` |
-| distro | i3 `distro` `.61` (`distro.innotel.us` → `.61:20140`) | **no** — `.46`'s `distro-control-plane` is a duplicate |
+| distro | i3 `distro` `.61` (`distro.innotel.us` → `.61:20140`) | **no** — `.46`'s `distro-control-plane` was a duplicate and is **removed** (2026-09-27) |
 | monarch | i1 `monarch` `.56` | no — `clipbucket` on `.46` is internal-only |
 | capstone | i2 `capstone` `.30` | no — `omniroute` on `.46` is internal-only |
-| atlas / git | i1 `git` `.90` container exists | **no host points at `.90`**; `git.innotel.us` goes to `.46:3004` — the i1 container looks unused |
+| atlas / git | i1 `git` `.90` — a **live Gitea** (Postgres + MariaDB, ~16 000 CPU-s) | no NPM host points at `.90`; `git.innotel.us` goes to `.46:3004`. Decide which Gitea wins before touching either |
 
 ## Proposed target hosts
 
@@ -47,9 +59,9 @@ memory-tight; i3 has CPU to spare but only 5.4 GiB RAM; i1 is the edge.
 
 | Project | Proposed host | Why |
 |---|---|---|
-| subscribe | i3 | 1 nginx container, ~0 RAM |
+| subscribe | i3 | **done** — `subscribe` container, static `.58` |
 | magnate | i3 | small; subscription UI |
-| distro-control-plane | — | duplicate: delete, do not migrate |
+| distro-control-plane | — | duplicate; **removed 2026-09-27** |
 | atlas (gitea + convex) | i2 | needs a DB + build CPU; retire/reconcile the i1 `git` |
 | rizzaura (5 svc) | i2 | active app suite, needs CPU |
 | olympus gateway | i3 (next to `olympus` `.50`) | reunite gateway with the app it fronts |
@@ -75,7 +87,7 @@ memory-tight; i3 has CPU to spare but only 5.4 GiB RAM; i1 is the edge.
 1. **Tidy dead weight**: `distro-control-plane` (duplicate), i1 `git` `.90`
    (unused), the stopped *ontrak* volumes, stale capstone volumes, and
    `docker builder prune` (6.6 GB). No service depends on these.
-2. **subscribe** — single static nginx; a clean template for the rest.
+2. ~~**subscribe**~~ — **done 2026-09-27** (its own container on i3, `.58`).
 3. **magnate** — single container, live names.
 4. **atlas** — gitea + convex + db; watch the git remotes.
 5. **rizzaura** — 5 containers, the rizz suite.
