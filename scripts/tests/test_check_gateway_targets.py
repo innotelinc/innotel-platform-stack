@@ -66,20 +66,28 @@ class RuleTests(ScanCase):
     def test_the_gateway_hosts_lan_address_on_the_gateway_port_is_the_door(self):
         # The door moved onto the gateway's own default port, so this is now the one
         # target everything off that host should name.
-        self.assertEqual(self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.46:20128/v1\n"}), [])
+        self.assertEqual(self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.71:20128/v1\n"}), [])
+
+    def test_the_host_the_gateway_left_is_a_violation(self):
+        # `.46` was the door until 2026-09-28. The whole point of moving the gateway
+        # to `.71` is that this address stops working, so it has to be a failure and
+        # not merely a stale-looking line.
+        found = self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.46:20128/v1\n"})
+        self.assertEqual(len(found), 1)
+        self.assertIn("dial 192.168.1.71:20128", found[0].reason)
 
     def test_another_host_on_the_gateway_port_is_a_violation(self):
         # The port number alone is no longer the test — the address is.
         found = self.violations({"other/.env": "OMNIROUTE_URL=http://10.10.2.1:20128/v1\n"})
         self.assertEqual(len(found), 1)
         self.assertIn("10.10.2.1:20128", found[0].text)
-        self.assertIn("dial 192.168.1.46:20128", found[0].reason)
+        self.assertIn("dial 192.168.1.71:20128", found[0].reason)
 
     def test_the_retired_proxy_port_is_a_violation_whatever_the_host(self):
         found = self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.46:20129/v1\n"})
         self.assertEqual(len(found), 1)
         self.assertIn("20129", found[0].text)
-        self.assertIn("moved to 192.168.1.46:20128", found[0].reason)
+        self.assertIn("moved to 192.168.1.71:20128", found[0].reason)
 
     def test_loopback_is_the_gateway_s_actual_binding(self):
         # A host-mode process on the gateway's host dials this, and the gateway's own
@@ -146,17 +154,20 @@ class ConditionalTests(ScanCase):
     def test_loopback_is_conditional_never_a_violation(self):
         # olympus's SSO proxy dials the gateway's loopback and is right to: it runs
         # on the gateway's host. The same file's `host.docker.internal` value would
-        # be right there too — and `.46`'s shell export of this very value reached
-        # a container, where localhost is the container.
+        # be right there too — and a shell export of this very value reached a
+        # container, where localhost is the container.
         found = self.conditional({"gateway/.env": "GATEWAY_SSO_UPSTREAM=http://127.0.0.1:20128\n"})
         self.assertEqual(len(found), 1)
         self.assertIn("host-mode process on the gateway's host", found[0].note)
-        self.assertIn("192.168.1.46:20128", found[0].note)
+        self.assertIn("192.168.1.71:20128", found[0].note)
         self.assertEqual(self.violations({"gateway/.env": "GATEWAY_SSO_UPSTREAM=http://127.0.0.1:20128\n"}), [])
 
     def test_the_declaring_file_s_alias_is_conditional(self):
-        # capstone's compose declares the gateway, so the alias is legitimate — on
-        # `.46`. The same file runs on `.30`, where both of its targets were dead.
+        # Synthetic, and only the branch is under test: a file that declares the
+        # gateway may legitimately use the alias, on the host the gateway runs on.
+        # The same file deployed elsewhere would have dead targets. (Since the
+        # gateway became standalone no real file is both, which is why capstone's
+        # compose no longer declares `omniroute` at all.)
         compose = (
             "services:\n"
             "  omniroute:\n"
@@ -244,24 +255,34 @@ class ExclusionTests(ScanCase):
         self.assertEqual(names, [".env", "docker-compose.yml"])
 
     def test_noise_directories_are_skipped(self):
-        _, scanned = self.scan({"app/node_modules/dep/.env": "X=http://192.168.1.46:20128\n",
+        _, scanned = self.scan({"app/node_modules/dep/.env": "X=http://192.168.1.71:20128\n",
                                 "app/.env": "X=1\n"})
         self.assertEqual([p.name for p in scanned], [".env"])
 
 
 class ExemptionTests(ScanCase):
-    def test_an_exempt_path_is_reported_not_silently_passed(self):
-        # The distro control plane runs on the gateway's host and logs in with the
-        # management password, so its alias really is the right address.
-        found = self.exempt({"5-dev/distro/.env": "GATEWAY_API_URL=http://host.docker.internal:20128\n"})
-        self.assertEqual(len(found), 1)
-        self.assertIn("runs ON the gateway's host", found[0].exempt)
-        self.assertEqual(self.violations({"5-dev/distro/.env": "GATEWAY_API_URL=http://host.docker.internal:20128\n"}), [])
+    """The exemption list is empty, and that is a decision rather than an oversight.
 
-    def test_the_exemption_is_path_specific(self):
-        self.assertEqual(len(self.violations({"5-dev/distro/other.env": "GATEWAY_API_URL=http://host.docker.internal:20128\n"})), 1)
+    Its one entry — `5-dev/distro/.env`, exempted because distro ran on the same
+    host as the gateway — stopped being true when the gateway moved to `.71`. An
+    exemption is the one kind of wrong answer this check cannot report, because it
+    comes with a reason attached, so these tests guard the removal rather than the
+    mechanism.
+    """
+
+    def test_the_distro_exemption_is_gone_and_its_alias_now_fails(self):
+        # This is the exact line the exemption used to bless. It is a violation now,
+        # because `.71`'s docker0 is not `.46`'s and nothing listens on the latter.
+        found = self.violations({"5-dev/distro/.env": "GATEWAY_API_URL=http://host.docker.internal:20128\n"})
+        self.assertEqual(len(found), 1)
+        self.assertIn("dialer's own docker0", found[0].reason)
+        self.assertEqual(self.exempt({"5-dev/distro/.env": "GATEWAY_API_URL=http://host.docker.internal:20128\n"}), [])
+
+    def test_no_exemption_outlives_the_fact_it_names(self):
+        self.assertEqual(chk.EXEMPTIONS, ())
 
     def test_every_exemption_carries_a_reason(self):
+        # Vacuous while the list is empty; it is the guard for the next entry.
         for exemption in chk.EXEMPTIONS:
             with self.subTest(suffix=exemption.suffix):
                 self.assertGreater(len(exemption.why), 40)
@@ -312,7 +333,7 @@ class CliTests(unittest.TestCase):
             return chk.main(["--root", str(root), *args])
 
     def test_clean_tree_exits_zero(self):
-        self.assertEqual(self.run_cli({"app/.env": "X=http://192.168.1.46:20128/v1\n"}), 0)
+        self.assertEqual(self.run_cli({"app/.env": "X=http://192.168.1.71:20128/v1\n"}), 0)
 
     def test_a_violation_exits_one(self):
         self.assertEqual(self.run_cli({"app/.env": "X=http://192.168.1.46:20129/v1\n"}), 1)
@@ -323,13 +344,13 @@ class CliTests(unittest.TestCase):
 
         buffer = io.StringIO()
         with redirect_stdout(buffer):
-            code = self.run_cli({"5-dev/distro/.env": "GATEWAY_API_URL=http://host.docker.internal:20128\n",
-                                 "app/.env": "X=http://10.10.2.1:20128\n",
+            code = self.run_cli({"app/.env": "X=http://192.168.1.46:20128\n",
+                                 "other/.env": "X=http://10.10.2.1:20128\n",
                                  "gateway/.env": "UPSTREAM=http://127.0.0.1:20128\n"}, "--json")
         report = json.loads(buffer.getvalue())
         self.assertEqual(code, 1)
-        self.assertEqual(len(report["violations"]), 1)
-        self.assertEqual(len(report["exempt"]), 1)
+        self.assertEqual(len(report["violations"]), 2)
+        self.assertEqual(len(report["exempt"]), 0)
         self.assertEqual(len(report["conditional"]), 1)
         self.assertEqual(report["gateway"]["proxy_port"], 20128)
 

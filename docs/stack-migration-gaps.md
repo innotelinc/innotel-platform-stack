@@ -264,7 +264,7 @@ Still open on the hosts, all three needing a decision rather than a repair:
   no `node_modules`; `web` is nginx serving the export). `OMNIROUTE_BASE_URL` turned
   out never to have been set on the deployment — the Convex functions were falling
   back to `localhost:20128` *inside their own container* — and is now
-  `http://192.168.1.46:20128/v1`. Open: the storefront's own public name is still
+  `http://192.168.1.71:20128/v1`. Open: the storefront's own public name is still
   only `subscribe.plutus` / `auth.plutus` pointing at `.46`, so nothing routes the
   migrated app yet.
 - **Clipbucket is running but serving its installer.** Its DB volume has **0

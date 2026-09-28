@@ -331,7 +331,7 @@ services:
       - path: ../../5-dev/olympus/.env
         required: false
     environment:
-      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20128/v1}
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.71:20128/v1}
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       SPEC: ${SPEC:-}
@@ -383,7 +383,7 @@ services:
         required: false
     # See the OmniRoute caveat at the top of this file before changing the base URL.
     environment:
-      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20128/v1}
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.71:20128/v1}
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
       OMNIROUTE_MODEL: ${OMNIROUTE_MODEL:-auto/coding}
       STUDIO_ACCESS_TOKEN: ${STUDIO_ACCESS_TOKEN:-}
@@ -667,7 +667,7 @@ services:
       # and `/v1/models` but sends `/v1` itself to Authentik. That asymmetry is
       # invisible to a client that only ever POSTs a subpath, and breaks the one
       # that validates its base URL first: `OMNIROUTE_BASE_URL` is documented one
-      # section up as `http://192.168.1.46:20128/v1` — the bare prefix — and the
+      # section up as `http://192.168.1.71:20128/v1` — the bare prefix — and the
       # Asterisk AI voice engine probes exactly that before accepting a config.
       # It got a login page back, read the 400 as an API error, and reported its
       # whole pipeline unhealthy while every runtime call to the same gateway

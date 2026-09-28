@@ -14,8 +14,16 @@ cookie.
 **The door now listens on the gateway's own default port (`20128`), on the gateway
 host's LAN address** — it used to be `20129`, which was the proxy's alone. So the two
 are told apart by *address* rather than by port number: `127.0.0.1:20128` and
-`172.17.0.1:20128` are the gateway itself, `192.168.1.46:20128` is the door. A target
+`172.17.0.1:20128` are the gateway itself, `192.168.1.71:20128` is the door. A target
 still naming `20129` is stale and is failed by rule 5.
+
+The gateway's host is i1's `proxy` container (`.71`), and it moved there on 2026-09-28
+from `.46` when the whole stack — `omniroute`, its SSO proxy and the proxy's session
+store — became standalone under `ips/extensions/llm/`. That is why the door's address
+in this file is an address and not a port: the port never changed, the host did. It
+also folded the old two-owner split (the container declared by `2-voice/capstone`, the
+proxy by `5-dev/olympus`) into one stack, so nothing declares the gateway except the
+file that runs it.
 
 `5-dev/olympus/docs/gateway-sso.md` records what happened when the port stopped being
 bound on the LAN: five consumers were still pointing at it, and every one of them
@@ -64,15 +72,18 @@ were wrong in exactly one deployment and right in another, and both were found b
 hand because this check said nothing:
 
   * **A file that declares the gateway, that runs on more than one host.**
-    `2-voice/capstone/docker-compose.yml` declares it, so rule 2 makes its
-    `host.docker.internal:20128` targets legitimate — on `.46` they are, and on
-    `.30`, which also runs that compose, the alias is n8n's own docker0 and both
-    were dead. Read a declaring file as "right only where the gateway runs", never
-    as proof.
+    `2-voice/capstone/docker-compose.yml` declares it, so rule 2 makes its    `host.docker.internal:20128` targets legitimate — on the gateway's host they are,
+    and on `.30`, which also runs that compose, the alias is n8n's own docker0 and
+    both were dead. Read a declaring file as "right only where the gateway runs",
+    never as proof. **Since the gateway became standalone this case is empty**: no
+    file outside `ips/extensions/llm/` declares it any more, so every
+    `host.docker.internal:20128` in the estate is now a plain violation. The branch
+    is kept for the next stack that decides to bundle the gateway.
   * **Loopback** (rule 4). It is the gateway's real binding on its own host, so a
-    file that names it may be the correct one — `olympus`'s SSO proxy upstream does.
-    A container on that same host resolves it to itself, which is how `.46`'s shell
-    export of `http://localhost:20128` reached `onyx-ai`.
+    file that names it may be the correct one — `olympus`'s SSO proxy upstream does.    A container on that same host resolves it to itself, which is how `.46`'s shell
+export of `http://localhost:20128` reached `onyx-ai` — and is precisely why the
+gateway's move had to repoint consumers on *other* hosts rather than leave them on
+their own docker0.
 
 Neither list decides anything: the scan fails only on a *reason*. Printing them is
 the point — silence is what let both of these through.
@@ -108,7 +119,7 @@ from pathlib import Path
 # The platform's one gateway and the door in front of it. Both are recorded here
 # rather than discovered, because this has to run on a host that cannot reach the
 # gateway at all — which is exactly the host where a stale target does damage.
-GATEWAY_HOST = "192.168.1.46"
+GATEWAY_HOST = "192.168.1.71"
 # The gateway's own port, and now the door's too — on the LAN address above.
 GATEWAY_PORT = 20128
 PROXY_PORT = 20128
@@ -151,6 +162,13 @@ SKIP_DIRS = {
     ".pytest_cache",
     "site-packages",
     ".terraform",
+    # Build output, not configuration. `.next/standalone` is a whole copy of a
+    # service's source and config that Next.js emits, so scanning it reports the
+    # same finding once per stale build on disk — and a finding you cannot act on
+    # by editing it is noise that buries the ones you can. `2-voice/zeus` had six
+    # of these, all still naming the port the door left in 2026-09-27, none of
+    # them a file anybody edits. Fix the source; the next build carries it.
+    ".next",
 }
 
 
@@ -164,16 +182,16 @@ class Exemption:
 
 # Every entry is a claim that needs to stay true. Keys are path suffixes, so they
 # survive a checkout landing somewhere else.
-EXEMPTIONS: tuple[Exemption, ...] = (
-    Exemption(
-        "5-dev/distro/.env",
-        "the distro control plane runs ON the gateway's host, so its docker0 alias "
-        "is the right address, and it logs in with the management password before "
-        "every call (POST /api/auth/login still answers 200 with a cookie under "
-        "requireLogin=false — measured, because a 4xx there would break tenant key "
-        "provisioning)",
-    ),
-)
+#
+# EMPTY as of 2026-09-28, and the removal is the point rather than tidying. The one
+# entry was `5-dev/distro/.env`, exempted because "the distro control plane runs ON
+# the gateway's host" — which was true while both shared `.46`. The gateway moved to
+# `.71`, distro did not, and the exemption would have gone on blessing a
+# `host.docker.internal:20128` that now resolves to distro's own docker0 with
+# nothing listening on it. An exemption that outlives the fact it names is worse
+# than no exemption: it is the exact failure this check exists to catch, wearing a
+# reason.
+EXEMPTIONS: tuple[Exemption, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -49,9 +49,9 @@ This is the plan to give each project its own Incus container.
   (`olympus-gateway-sso` + its redis, `:20128`) deliberately did **not** move:
   it fronts the OmniRoute gateway at `127.0.0.1:20128`, which on `.46` is the
   *capstone* `omniroute` container, and — decisively — about ten consumers
-  across the estate dial `192.168.1.46:20128` by address. The proxy therefore
+  across the estate dial `192.168.1.71:20128` by address. The proxy therefore
   stays co-located with `omniroute` until that pair moves together. The factory
-  and studio now run on i3 and reach the door at `192.168.1.46:20128/v1` (the
+  and studio now run on i3 and reach the door at `192.168.1.71:20128/v1` (the
   intended cross-host pattern; verified studio → gateway 200). `gateway.olympus`
   and `gateway.studio` still resolve to `.46:20128`.
 - **2026-09-27**: `auth.monarch.innotel.us` (NPM host 39) pointed at dead
@@ -110,7 +110,7 @@ migrate blind:
 
 | Project | Also exists as | Serves the public name? |
 |---|---|---|
-| olympus | i3 `olympus` `.50` (`olympus.innotel.us`, `studio.olympus` → `.50:3050`) | **resolved 2026-09-27**: the factory + Studio run in their own container (`olympus-gw` i3 `.64`); the `:20128` SSO proxy stays on `.46`, because it fronts `omniroute` (`127.0.0.1:20128`) and the estate dials `192.168.1.46:20128` by address |
+| olympus | i3 `olympus` `.50` (`olympus.innotel.us`, `studio.olympus` → `.50:3050`) | **resolved 2026-09-27**: the factory + Studio run in their own container (`olympus-gw` i3 `.64`); the `:20128` SSO proxy stays on `.46`, because it fronts `omniroute` (`127.0.0.1:20128`) and the estate dials `192.168.1.71:20128` by address |
 | distro | i3 `distro` `.61` (`distro.innotel.us` → `.61:20140`) | **no** — `.46`'s `distro-control-plane` was a duplicate and is **removed** (2026-09-27) |
 | monarch | i1 `monarch` `.56` | **no, and `.46`'s was a strict subset** — i1 serves the name (`tube.innotel.us` → `.56:14011`) and holds 27 videos to `.46`'s 18. Retired 2026-09-27. |
 | capstone | i2 `capstone` `.30` | no — `omniroute` on `.46` is internal-only |
@@ -128,7 +128,7 @@ memory-tight; i3 has CPU to spare but only 5.4 GiB RAM; i1 is the edge.
 | distro-control-plane | — | duplicate; **removed 2026-09-27** |
 | atlas (gitea + convex) | i2 | **done** — `atlas` container, static `.90` |
 | rizzaura (5 svc) | i2 | **done** — `rizzaura` container, static `.62` |
-| olympus gateway | i3 (factory/studio) | **done** — `olympus-gw` `.64`; the `:20128` SSO proxy **cannot** move alone — it fronts `omniroute` at `127.0.0.1:20128` and ~10 consumers dial `192.168.1.46:20128` |
+| olympus gateway | i3 (factory/studio) | **done** — `olympus-gw` `.64`; the `:20128` SSO proxy **cannot** move alone — it fronts `omniroute` at `127.0.0.1:20128` and ~10 consumers dial `192.168.1.71:20128` |
 | clipbucket | — | **done 2026-09-27** — a duplicate, so it was retired rather than moved (volumes retained) |
 | omniroute | tbd | the last workload on `.46`; it moves *with* the olympus SSO proxy, and nothing else can be on the gateway's port while it does |
 

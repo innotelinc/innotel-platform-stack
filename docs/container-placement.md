@@ -31,7 +31,7 @@ records what each host is, what currently sits on it, and where it should sit.
 - **`olympus` factory + Studio moved off `.46`** onto their own i3 container
   (`olympus-gw`, `.64`, 2026-09-27). The `:20128` SSO proxy did **not** move: it
   fronts `omniroute` on `127.0.0.1:20128` and the estate dials
-  `192.168.1.46:20128` by address, so it stays with `omniroute` on `.46` until
+  `192.168.1.71:20128` by address, so it stays with `omniroute` on `.46` until
   that pair relocates together. i3 was the right host for the factory/studio
   because they consume the gateway over the LAN, not loopback.
 - **The gateway door moved from `20129` onto `20128`** (2026-09-27) — the

@@ -546,7 +546,7 @@ services:
       # Publishing on 0.0.0.0 also satisfied those two, and put the dashboard on the
       # LAN — where the only gate is its own password login, because Authentik and the
       # `cerulean-platform` group check live in the proxy that fronts this, not here.
-      # A client on another machine uses that door instead: `192.168.1.46:20128/v1`.
+      # A client on another machine uses that door instead: `192.168.1.71:20128/v1`.
       - "127.0.0.1:20128:20128"
       - "172.17.0.1:20128:20128"
       #
@@ -557,7 +557,7 @@ services:
       # has no gate of its own and this port's reachability IS the control — see
       # scripts/gateway-auth-mode.py, which refuses to make that change while the
       # port answers anywhere but this host. So the LAN door is the proxy that
-      # fronts this service (`oauth2-proxy`, `192.168.1.46:20128`), which exempts
+      # fronts this service (`oauth2-proxy`, `192.168.1.71:20128`), which exempts
       # `/v1` for inference clients and requires an Authentik session in
       # `cerulean-platform` for the dashboard. Same host as this container, so it
       # reaches the two bindings above and nothing else needs the LAN.
@@ -655,7 +655,7 @@ services:
       # resolves to *its own* docker0 where nothing listens.
       N8N_ENABLED_MODULES: "${N8N_ENABLED_MODULES:-instance-ai}"
       N8N_INSTANCE_AI_MODEL: "${N8N_INSTANCE_AI_MODEL:-auto}"
-      N8N_INSTANCE_AI_MODEL_URL: "${N8N_INSTANCE_AI_MODEL_URL:-http://host.docker.internal:20128/v1}"
+      N8N_INSTANCE_AI_MODEL_URL: "${N8N_INSTANCE_AI_MODEL_URL:-http://192.168.1.71:20128/v1}"
       N8N_INSTANCE_AI_MODEL_API_KEY: "${N8N_INSTANCE_AI_MODEL_API_KEY:-omniroute}"
       N8N_INSTANCE_AI_SANDBOX_ENABLED: "true"
       N8N_INSTANCE_AI_SANDBOX_PROVIDER: "n8n-sandbox"
@@ -1264,7 +1264,7 @@ services:
       # modal: the same route the Workflow Studio uses, through the SSO proxy
       # (20128) rather than the gateway's own port (20128, loopback + docker0
       # only — see the ports block under `omniroute`). Empty key is fine.
-      OMNIROUTE_URL: "${OMNIROUTE_URL:-http://host.docker.internal:20128}"
+      OMNIROUTE_URL: "${OMNIROUTE_URL:-http://192.168.1.71:20128}"
       OMNIROUTE_API_KEY: "${OMNIROUTE_API_KEY:-}"
       OMNIROUTE_MODEL: "${OMNIROUTE_MODEL:-auto}"
       # standalone (default): dashboard provisions FreePBX rows directly

@@ -1,0 +1,243 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Extension: llm — STANDALONE per-host variant (no mesh, no Consul)
+# ══════════════════════════════════════════════════════════════════════════════
+# The shared OmniRoute LLM gateway, its identity-aware door, and the door's
+# session store — all three, in one stack, on one host.
+#
+# WHY IT IS STANDALONE (2026-09-28)
+# The gateway used to be split across two product stacks: the container was a
+# `profile: gateway` service inside `2-voice/capstone/docker-compose.yml`, and the
+# proxy in front of it lived in `5-dev/olympus/compose.gateway-sso.yml`. Neither
+# owns it — it serves every group, and the capstone profile existed only to stop
+# the *app* hosts from starting a second gateway. That split is why the last
+# `.46`-emptying migration kept getting deferred: the two halves had to move
+# together. They are now one stack with one owner.
+#
+# `docker-compose.ext.yml` in this directory is the mesh-attached variant and does
+# NOT describe what runs: it mounts the volume at `/data` while the image reads
+# `DATA_DIR=/app/data` (the failure documented below), it publishes the dashboard
+# on 0.0.0.0 with no door at all, and it declares a `-data` volume this stack does
+# not use. This file is the real one; that one is left as the mesh shape.
+#
+# THE HOST IS i1 `proxy` (`.71`), and it is a resource decision.
+# The gateway caps itself at 3g and REFUSES WORK when its own cgroup runs near
+# that (its pressure guard trips at 85% => ~2.55 GiB), so it needs a host with
+# ~3 GiB to spare. Measured 2026-09-28: i1 has 3.4 GB free, i2 ~1.0 GB, i3 1.4 GB
+# — and i3's `.50` (the originally-requested target) is capped at `1GiB`, so it
+# cannot host it at all. The edge is also the right dependency: NPM on this same
+# host is what fronts `gateway.*.innotel.us`.
+#
+# DEPLOY (on the gateway's host):
+#   cd /usr/src/projects/complete/ips/extensions/llm
+#   docker compose -p innotel-gateway -f docker-compose.host.yml \
+#     --env-file .env.host up -d
+#
+# THE DOOR IS THE WHOLE CONTROL at the inference port. `requireLogin=false`
+# (`5-dev/olympus/scripts/gateway-auth-mode.py`) leaves the gateway with no gate
+# of its own, so whether `:20128` answers is the entire control. That is why the
+# gateway publishes on loopback + docker0 and NEVER on the LAN, and why the LAN
+# listener is the proxy: `/v1` is exempted for API clients (they send a bearer
+# key, not a session cookie), the dashboard needs an Authentik session in
+# `cerulean-platform`, and the public name additionally refuses `/v1` at the edge
+# (`make gateway-edge --deny-path /v1`). See `5-dev/olympus/docs/gateway-sso.md`.
+#
+# The container names stay `olympus-*`: they are the names the estate's own checks
+# and docs reference (`scripts/gateway-edge-check.py`'s `SSO_CONTAINER`,
+# `ips/groups/5-dev.yml`, `docs/sign-in-posture.md`). Renaming them is a follow-up
+# across those files, not a rename here.
+
+services:
+  omniroute:
+    image: ${OMNIROUTE_IMAGE:-diegosouzapw/omniroute:latest}
+    container_name: omniroute
+    restart: unless-stopped
+    # Cap ABOVE where it settles, because the guard watches the cgroup limit:
+    # measured at ~0.59 GiB just after a restart and past 1 GiB under combo load.
+    # At 1g it trips `reason=cgroup_ratio` and EVERY model call answers
+    # `503 Service temporarily unavailable due to resource pressure` in ~30 ms,
+    # which nothing downstream can tell apart from a broken provider.
+    mem_limit: 3g
+    memswap_limit: 3g
+    environment:
+      # The image ships a 1 GiB V8 heap; raise it with the cgroup, since the
+      # pressure guard also watches heap ratio (85% of the heap limit).
+      NODE_OPTIONS: --max-old-space-size=2048
+      OMNIROUTE_JWT_SECRET: "${OMNIROUTE_JWT_SECRET:-change-me-jwt-secret}"
+      OMNIROUTE_API_KEY_SECRET: "${OMNIROUTE_API_KEY_SECRET:-change-me-api-key-secret}"
+      # The image reads INITIAL_PASSWORD and ONLY that name — 114 references in
+      # its tree, none to OMNIROUTE_INITIAL_PASSWORD. Passing only the OMNIROUTE_
+      # name leaves the dashboard with no password at all: POST /api/auth/login
+      # answers 403 "No password configured. Complete onboarding first.", and
+      # everything that mints a key through the gateway then fails. The .env key
+      # stays OMNIROUTE_* (that is the name setup.sh and the distro control plane
+      # read), so only the name handed to the container is translated here.
+      INITIAL_PASSWORD: "${OMNIROUTE_INITIAL_PASSWORD:-change-me-admin-password}"
+      OMNIROUTE_WS_BRIDGE_SECRET: "${OMNIROUTE_WS_BRIDGE_SECRET:-change-me-ws-bridge-secret}"
+    ports:
+      # No LAN binding, deliberately — see the header. These two cover the
+      # callers that do NOT go through the door: a host-mode process on this host
+      # via 127.0.0.1 (dograh is the one), and a container *on this host* via
+      # `host.docker.internal:20128`, which `host-gateway` resolves to 172.17.0.1.
+      # A caller on any other host must use the proxy's LAN address instead: its
+      # own `host.docker.internal` is its own docker0, not this one.
+      - "127.0.0.1:20128:20128"
+      - "172.17.0.1:20128:20128"
+    volumes:
+      # /app/data, NOT /data. The image sets `DATA_DIR=/app/data` and keeps every
+      # provider connection, its `server.env` and the SQLite store there. Mounted
+      # at /data the gateway reads its own container layer instead — it works, so
+      # nothing looks broken, but each recreate silently discards the credentials
+      # and `auto`/`coding` answers `503 No credentials for opencode`. A backup
+      # pointed at the wrong path would preserve the stale copy and report success.
+      - omniroute-data:/app/data
+
+  gateway-sso:
+    # Pinned by tag, not digest: unlike the autoheal container this one holds no
+    # Docker socket, so a bad upstream release cannot restart anything — it can
+    # only fail closed behind the edge. `-alpine` specifically, because the
+    # default tag is distroless and has no shell, which makes the healthcheck
+    # below impossible to express (a `wget` probe reports it unhealthy forever).
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine
+    container_name: olympus-gateway-sso
+    restart: unless-stopped
+    # HOST NETWORKING IS NOT OPTIONAL. The gateway is published on this host's
+    # loopback and docker0, and Docker publishes a loopback binding to the
+    # loopback interface alone — a bridge container cannot reach it at all. The
+    # same namespace then gives the proxy both the upstream and a LAN-facing
+    # listener.
+    network_mode: host
+    ports: !override []
+    env_file:
+      - path: .env.host
+        required: false
+    environment:
+      # oauth2-proxy reads OAUTH2_PROXY_*; the repo-idiomatic GATEWAY_* names stay
+      # in .env.host. This block is the only place the two vocabularies meet, so
+      # the credentials are never repeated in `command` where `docker inspect`
+      # would show them.
+      OAUTH2_PROXY_CLIENT_ID: ${GATEWAY_OIDC_CLIENT_ID}
+      OAUTH2_PROXY_CLIENT_SECRET: ${GATEWAY_OIDC_CLIENT_SECRET}
+      OAUTH2_PROXY_COOKIE_SECRET: ${GATEWAY_SSO_COOKIE_SECRET}
+      OAUTH2_PROXY_REDIS_CONNECTION_URL: redis://:${GATEWAY_SSO_REDIS_PASSWORD:-}@127.0.0.1:${GATEWAY_SSO_REDIS_PORT:-16379}/0
+    command:
+      - --provider=oidc
+      # Trailing slash included: that is the issuer Authentik publishes in its
+      # discovery document. (OmniRoute's own OIDC mishandles exactly this value.)
+      - --oidc-issuer-url=${GATEWAY_OIDC_ISSUER_URL}
+      - --oidc-groups-claim=groups
+      - --scope=openid email profile
+      - --code-challenge-method=S256
+      - --upstream=${GATEWAY_SSO_UPSTREAM:-http://127.0.0.1:20128}
+      # THE LAN ADDRESS, NOT 0.0.0.0. `omniroute` already holds 127.0.0.1:20128
+      # (host-mode callers) and 172.17.0.1:20128 (containers on this host), so a
+      # wildcard bind overlaps both and fails EADDRINUSE — the proxy would not
+      # start at all. Binding the LAN address leaves those two answers untouched
+      # and makes the LAN address the door: one listener, two roles, told apart by
+      # address rather than by port number.
+      - --http-address=${GATEWAY_SSO_BIND:-0.0.0.0}:${GATEWAY_SSO_PORT:-20128}
+      # /v1 is exempted for inference clients (LAN only) — see the header. Both
+      # the subpaths and the bare prefix: oauth2-proxy matches the request URI, so
+      # `^/v1/` alone exempts `/v1/models` and sends `/v1` to Authentik, which
+      # broke the Asterisk voice engine's base-URL probe. `(\?.*)?$` because the
+      # match includes the query string.
+      - --skip-auth-route=^/v1/
+      - '--skip-auth-route=^/v1(\?.*)?$'
+      - --skip-auth-route=^/healthz$
+      # The read-only door Studio's provider set needs: exactly `^/api/providers$`,
+      # because which models a build may use is "whatever the gateway has
+      # *connected*". The rest of the management API stays behind the session.
+      - '--skip-auth-route=^/api/providers(\?.*)?$'
+      # No --redirect-url ON PURPOSE: left unset, oauth2-proxy derives the
+      # callback from the request Host, so each served name logs in on itself.
+      # This list is what turns "whatever Host arrived" into a decided set.
+      - --whitelist-domain=${GATEWAY_SSO_WHITELIST_DOMAIN:-.innotel.us}
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      # Honours X-Forwarded-Proto/Host, which is how the cookie stays `Secure` and
+      # the redirects come back on the public name instead of the LAN address.
+      - --reverse-proxy=true
+      - --email-domain=*
+      - --allowed-group=${GATEWAY_SSO_ALLOWED_GROUP:-cerulean-platform}
+      - --skip-provider-button=true
+      # Authentik sets `email_verified: false` (2025.10, deliberately — it has no
+      # authoritative source), and oauth2-proxy refuses such a token by default.
+      # Not a weak spot: the door is --allowed-group, and --email-domain=* means
+      # the address grants nothing on its own.
+      - --insecure-oidc-allow-unverified-email
+      # SERVER-SIDE SESSIONS, LOAD-BEARING. The cookie store puts the whole
+      # session in the browser — email, ID token, every group. An identity in a
+      # few dozen groups exceeds the 4KB cookie limit, oauth2-proxy splits it
+      # across several `Set-Cookie` headers, and nginx answers the login callback
+      # with `502 Bad Gateway` ("upstream sent too big header"). The login fails
+      # in the one place that looks like the gateway being down.
+      - --session-store-type=redis
+      - --set-xauthrequest=true
+      - --pass-user-headers=true
+      - --pass-access-token=false
+      - --pass-authorization-header=false
+      - --silence-ping-logging=true
+    healthcheck:
+      # /ping is oauth2-proxy's own unauthenticated liveness route. Probing the
+      # BIND and not loopback: on this host 127.0.0.1:20128 answers `omniroute`,
+      # so a loopback probe would test the gateway's dashboard and report this
+      # container unhealthy for somebody else's outage.
+      test: ["CMD", "wget", "-qO-", "http://${GATEWAY_SSO_BIND:-127.0.0.1}:${GATEWAY_SSO_PORT:-20128}/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # Deliberately NOT labelled autoheal: this container's job is to refuse
+    # traffic, and a restart loop would turn every closed door into something
+    # that looks like a crash.
+
+  # The session store. Neither the browser nor the edge sees it: the proxy writes
+  # the session here and hands the browser one opaque id, which is what keeps the
+  # callback's response header small enough for the edge to pass. Sessions are the
+  # only thing in it and losing them costs a re-login, so there is no volume.
+  gateway-sso-sessions:
+    image: redis:7-alpine
+    container_name: olympus-gateway-sso-sessions
+    restart: unless-stopped
+    labels:
+      # Unlike the proxy this one CAN be restarted usefully: it holds no state a
+      # restart would discard, and a wedged store fails every login. The label
+      # needs an autoheal watching THIS host's daemon — `ips/extensions/monitoring`
+      # is the per-host stack that does that here.
+      - "autoheal=true"
+    environment:
+      GATEWAY_SSO_REDIS_PASSWORD: ${GATEWAY_SSO_REDIS_PASSWORD:-}
+    # The password reaches redis through the environment rather than the command
+    # line, so `docker inspect` does not carry it. The refusal belongs at start-up.
+    command:
+      - sh
+      - -c
+      - |
+        if [ -z "$$GATEWAY_SSO_REDIS_PASSWORD" ]; then
+          echo "gateway-sso-sessions: GATEWAY_SSO_REDIS_PASSWORD is empty; refusing to start a session store with no password." >&2
+          exit 2
+        fi
+        exec redis-server \
+          --requirepass "$$GATEWAY_SSO_REDIS_PASSWORD" \
+          --save "" \
+          --appendonly no \
+          --maxmemory-policy noeviction
+    # noeviction on purpose: an LRU policy on a session store would silently log
+    # people out under memory pressure, which is worse than failing to write.
+    ports:
+      - "127.0.0.1:${GATEWAY_SSO_REDIS_PORT:-16379}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$GATEWAY_SSO_REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  # Pinned by name, not left to the project prefix: this volume holds the
+  # gateway's identity (its provider connections, `server.env`, and the
+  # STORAGE_ENCRYPTION_KEY that decrypts them), it was created by the capstone
+  # project as `capstone_omniroute_data`, and its data is what was migrated here.
+  # Recreating an empty one would leave a gateway that looks healthy and routes
+  # nothing. `scripts/omniroute-vault-backup.py` backs it up.
+  omniroute-data:
+    name: innotel-gateway_omniroute-data
