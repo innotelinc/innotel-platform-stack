@@ -54,6 +54,10 @@ This is the plan to give each project its own Incus container.
   and studio now run on i3 and reach the door at `192.168.1.46:20129/v1` (the
   intended cross-host pattern; verified studio → gateway 200). `gateway.olympus`
   and `gateway.studio` still resolve to `.46:20129`.
+- **2026-09-27**: `auth.monarch.innotel.us` (NPM host 39) pointed at dead
+  `192.168.1.46:9000` and answered **502**; repointed to `.71:9000` (Cerulean
+  Authentik), like every other `auth.*` host. After this the only forwards still
+  aimed at `.46` are the two gateway names (178/179), and that is deliberate.
 - Remaining: **clipbucket**, and **`omniroute`** — which must carry the olympus
   gateway proxy with it (see the note above and `container-placement.md`).
 
