@@ -608,8 +608,10 @@ faults, and both needed the other half first:
 
 Still to restore from that event, recorded rather than assumed: `atlas` (4),
 `olympus` (4), `magnate` (1), the Tutor/AthenIQ stack (12), `subscribe` (1),
-`capstone` (5) and `monarch` (2) all on `.46`. `ontrak` (5) is *supposed* to be
-stopped here — its range runs on `.57` (`5-dev/ONTRAK-DEPLOYMENT.md`).
+`capstone` (5) and `monarch` (2) all on `.46`. `ontrak` (5) is **retired** as of
+2026-09-27: the range, its `.57` host, the leftover `.42` placeholder on `i1`, its
+Authentik application/provider and its NPM hosts were all removed. See
+`5-dev/ONTRAK-DEPLOYMENT.md` for the tombstone.
 
 ### Distro's SSO was configured, not enabled (2026-09-19)
 
@@ -763,6 +765,8 @@ on since the files were written), which is the drift the generator exists to
 close.
 
 ### `ontrak` is in the group's directory, not in the group's compose (2026-09-18)
+
+> OnTrak has since been retired (2026-09-27). This section is kept as history.
 
 One finding from that run is now closed, and **not** the way this page first
 proposed. `5-dev`'s `ontrak` checkout declares five services (`gateway`,
