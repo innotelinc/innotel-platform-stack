@@ -7,7 +7,12 @@ records what each host is, what currently sits on it, and where it should sit.
 
 - **Limits set** on the unbounded heavies: i2 `atheniq`/`capstone` = 6 GiB,
   `development` = 4 GiB; i1 `monarch`/`git` = 2 vCPU; i3 `olympus`/`onyx`/
-  `signara` = 1 GiB.
+  `signara` = 1 GiB. The `limits.memory` values apply live; **`limits.cpu`
+  takes effect on the container's next restart** (i1's load is no longer CPU
+  pressure anyway — see below).
+- i1's survey-day `load average` of ~6 was **not** placement pressure: a
+  cryptominer was running in the `git` container (`security-incident-2026-09-27-git-miner.md`).
+  Once contained, i1 fell from load ~18 to ~4.8 and freed ~2.4 GiB.
 - **`docs` and `ansible` moved i2 → i3**, keeping their IPs (`.125`/`.35`).
   i2 free went from 0.4 GiB to ~0.8 GiB; i3 carries them comfortably.
 - The `.46` `distro-control-plane` duplicate was removed (see
