@@ -17,6 +17,11 @@ records what each host is, what currently sits on it, and where it should sit.
   i2 free went from 0.4 GiB to ~0.8 GiB; i3 carries them comfortably.
 - The `.46` `distro-control-plane` duplicate was removed (see
   `dev-container-migration.md`).
+- **i1 `git` (`.90`) was retired** (2026-09-27) after the cryptominer found in
+  it: it was a second, un-hardened Gitea with exploit-PoC repos and no NPM host,
+  and the estate's real Gitea is `.46` `atlas-gitea` (`git.innotel.us`). i1 is
+  back to 7 containers. See `security-incident-2026-09-27-git-miner.md`.
+- **`magnate` moved off `.46`** onto its own i3 container (`.57`, 2026-09-27).
 
 ## The three hosts
 
@@ -38,7 +43,6 @@ Memory is live usage; disk is the container rootfs.
 | Host | Container | IP | Role | Mem | Disk |
 |---|---|---|---|---|---|
 | i1 | acme | `.49` | ACME / certificate issue | 105 MiB | 1.7 G |
-| i1 | git | `.90` | Gitea | 2.53 GiB | 890 M |
 | i1 | mail | `.15` | mail (SMTP/IMAP) | 201 MiB | 1.8 G |
 | i1 | monarch | `.56` | media (Jellyfin etc.) | **3.82 GiB** | **161 G** |
 | i1 | proxy | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 2.66 GiB | 13.3 G |
@@ -75,9 +79,9 @@ Memory is live usage; disk is the container rootfs.
 4. **The wedge history is a placement/limits bug, not a hardware bug.** i3's
    earlier wedges were an *unbounded* `atheniq` saturating the guest CPU. It has
    since been moved to i2 (see below), which is why i3 is quiet now.
-5. **The three heaviest containers have no `limits.memory`/`limits.cpu`.**
-   `atheniq`, `capstone`, `development` (i2) and `git`, `monarch` (i1) are all
-   unbounded.
+5. **The three heaviest containers had no `limits.memory`/`limits.cpu`.**
+   `atheniq`, `capstone`, `development` (i2) and `monarch` (i1) — plus the now
+   retired `git` — were unbounded; limits were set in the changes above.
 
 ## Recommended target map
 
@@ -103,9 +107,10 @@ limits and a small relocation — no host has enough slack for a wholesale shuff
 2. **Free i2 headroom** by moving the two light, dependency-free services to i3:
    `docs` (467 MiB) and `ansible` (37 MiB). Optional third: `cloud` (299 MiB).
    That takes i2 from 0.4 GiB free to ~1.2 GiB, and i3 stays under 3 GiB used.
-3. **Do not move `monarch` or `git` off i1 yet.** Neither fits i2 (0.4 GiB free)
-   nor i3 (would need 2.5–3.8 GiB of its 2.6 GiB). If i1's CPU load stays high,
-   the real fix is more vCPUs on the pm3 VM, not a relocation.
+3. **Do not move `monarch` off i1 yet.** It fits neither i2 (0.4 GiB free) nor
+   i3 (would need 2.5–3.8 GiB of its 2.6 GiB). If i1's CPU load stays high, the
+   real fix is more vCPUs on the pm3 VM, not a relocation. (`git` is retired;
+   see the changes above.)
 4. **`atheniq` stays on i2.** It caused i3's CPU wedges and needs the RAM; i3's
    5.4 GiB cannot hold it. Moving it to i2 (done 2026-09-27) was correct. Cap it
    (action 1) so its growth cannot fill i2.

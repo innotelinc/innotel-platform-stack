@@ -17,7 +17,20 @@ This is the plan to give each project its own Incus container.
   the `.46` stack removed. The owner script
   (`scripts/subscribe-hosts.py`) now defaults to `192.168.1.71` (edge NPM) and
   `192.168.1.58` (portal).
-- Remaining: **atlas**, **rizzaura**, **olympus gateway**, **magnate**,
+- **2026-09-27**: **`magnate` migrated** to its own container (`magnate` on i3,
+  static `192.168.1.57:3002`); the three NPM hosts (`app`/`admin`/`billing`.
+  `magnate.innotel.us`, ids 6/23/53) were repointed from `.46:3002` to
+  `.57:3002`, the `.46` stack and image were removed, and `:3002` is no longer
+  listening on `.46`. The image was carried over as a saved artifact rather
+  than rebuilt (i3 is memory-tight and the Next.js build wants ~3 GB of heap);
+  the live data volume was copied while `.46`'s copy was quiescent, so no
+  writes were lost in the cut-over and the DB was verified readable after the
+  move. `magnate` was a single container with a bind-mounted `./data`
+  (SQLite), so nothing else travelled.
+- **2026-09-27**: the i1 `git` duplicate was **retired** (it was the
+  cryptominer's host; see `security-incident-2026-09-27-git-miner.md`). `.46`
+  `atlas-gitea` is the authoritative Gitea and stays where it is.
+- Remaining: **atlas** (gitea + convex), **rizzaura**, **olympus gateway**,
   **clipbucket**, **omniroute**.
 
 ## What runs inside `.46` today
@@ -30,7 +43,7 @@ This is the plan to give each project its own Incus container.
 | **rizzaura** | `rizz-api` (3020), `rizz-community` (3012), `rizz-admin` (3013), `rizz-app` (3021), `rizz-rankings` (3022) | all `0.0.0.0:30xx` | `api.rizz*` `community.rizz*` `admin.rizz*` `app.rizz*` `rankings.rizz*`, `rizzaura.net`, `www.rizzaura.net` |
 | **olympus** | `olympus`, `olympus-studio` (3050), `olympus-gateway-sso`, `olympus-gateway-sso-sessions` (16379), `olympus-autoheal` | `:20129` (gateway), `127.0.0.1:3050` | `gateway.studio.innotel.us`, `gateway.olympus.innotel.us` (→ `:20129`) |
 | **subscribe** | `subscribe-portal` (3040) | `0.0.0.0:3040` | `subscribe.innotel.us` + 16 `subscribe.*` names |
-| **magnate** | `magnate` (3002) | `0.0.0.0:3002` | `app.magnate`, `admin.magnate`, `billing.magnate` |
+| **magnate** | `magnate` (3002) — **migrated 2026-09-27** to i3 `.57` | `0.0.0.0:3002` | `app.magnate`, `admin.magnate`, `billing.magnate` |
 | **monarch** | `clipbucket` (8098) | `127.0.0.1:8098` | none (internal) |
 | **capstone** | `omniroute` (20128) | `127.0.0.1:20128`, `172.17.0.1:20128` | none (internal) |
 | **distro** | `distro-control-plane` (20140) | `0.0.0.0:20140` | none — `distro.innotel.us` is served by the **i3** container `.61`, so this one is a duplicate |
@@ -50,7 +63,7 @@ migrate blind:
 | distro | i3 `distro` `.61` (`distro.innotel.us` → `.61:20140`) | **no** — `.46`'s `distro-control-plane` was a duplicate and is **removed** (2026-09-27) |
 | monarch | i1 `monarch` `.56` | no — `clipbucket` on `.46` is internal-only |
 | capstone | i2 `capstone` `.30` | no — `omniroute` on `.46` is internal-only |
-| atlas / git | i1 `git` `.90` — a **live Gitea** (Postgres + MariaDB, ~16 000 CPU-s) | no NPM host points at `.90`; `git.innotel.us` goes to `.46:3004`. Decide which Gitea wins before touching either |
+| atlas / git | i1 `git` `.90` — **retired 2026-09-27** (compromised; PoC repos only) | **resolved** — `.46` `atlas-gitea` (`git.innotel.us`) is authoritative; no NPM host ever pointed at `.90`. See `security-incident-2026-09-27-git-miner.md`. |
 
 ## Proposed target hosts
 
@@ -60,9 +73,9 @@ memory-tight; i3 has CPU to spare but only 5.4 GiB RAM; i1 is the edge.
 | Project | Proposed host | Why |
 |---|---|---|
 | subscribe | i3 | **done** — `subscribe` container, static `.58` |
-| magnate | i3 | small; subscription UI |
+| magnate | i3 | **done** — `magnate` container, static `.57` |
 | distro-control-plane | — | duplicate; **removed 2026-09-27** |
-| atlas (gitea + convex) | i2 | needs a DB + build CPU; retire/reconcile the i1 `git` |
+| atlas (gitea + convex) | i2 | needs a DB + build CPU; the i1 `git` duplicate is **retired** (2026-09-27), so only atlas moves |
 | rizzaura (5 svc) | i2 | active app suite, needs CPU |
 | olympus gateway | i3 (next to `olympus` `.50`) | reunite gateway with the app it fronts |
 | clipbucket / omniroute | i2 | internal; low priority |
@@ -84,11 +97,12 @@ memory-tight; i3 has CPU to spare but only 5.4 GiB RAM; i1 is the edge.
 
 ## Suggested order (least risk first)
 
-1. **Tidy dead weight**: `distro-control-plane` (duplicate), i1 `git` `.90`
-   (unused), the stopped *ontrak* volumes, stale capstone volumes, and
-   `docker builder prune` (6.6 GB). No service depends on these.
+1. **Tidy dead weight**: `distro-control-plane` (duplicate), the stopped
+   *ontrak* volumes, stale capstone volumes, and `docker builder prune`
+   (6.6 GB). No service depends on these. (i1 `git` `.90` was retired
+   2026-09-27 — see `security-incident-2026-09-27-git-miner.md`.)
 2. ~~**subscribe**~~ — **done 2026-09-27** (its own container on i3, `.58`).
-3. **magnate** — single container, live names.
+3. ~~**magnate**~~ — **done 2026-09-27** (its own container on i3, `.57`).
 4. **atlas** — gitea + convex + db; watch the git remotes.
 5. **rizzaura** — 5 containers, the rizz suite.
 6. **olympus gateway** — reunite with i3 `olympus`.

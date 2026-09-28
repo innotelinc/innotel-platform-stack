@@ -4,8 +4,10 @@ Found 2026-09-27, incidentally, while surveying container CPU for
 `container-placement.md`: i1 (`192.168.1.51`) was at load ~18 on 4 vCPU, and the
 `git` container held a process `./linuxsys` burning ~208 % CPU and 2.3 GiB.
 
-**Status: contained** (payload killed, dropper cron removed). The container
-itself is *not* trusted and still needs rebuilding — see Remediation.
+**Status: resolved (2026-09-27).** The payload was killed and the dropper cron
+removed; the container was then **retired** rather than rebuilt — it held no
+production repositories and the estate's real Gitea is `.46` `atlas-gitea`. See
+Resolution below.
 
 ## What was found
 
@@ -57,23 +59,38 @@ crontab for the domain, the `/linuxsys` path, and known miner names
 
 **Clean everywhere except the i1 `git` container.** No lateral spread observed.
 
-## Remediation still required
+## Resolution (2026-09-27)
 
-The container is compromised, so nothing in it can be trusted:
+Retiring the container rather than rebuilding it was the right call once its
+data was examined: the instance held **no production repositories**. Its only
+repos were exploit-PoC artifacts — projects named `giteaa-<5 digits>` under the
+`gitea1337`/`giteaa1337` owners, and `poc-<5 digits>` under `testpoc34645`/
+`testpoc95173` — created by random-named users (`lioqmkgkjo`, `kleipjkxjd`,
+`zwilrdlohv`, `ywpqqzlgys`) between May and September 2026, with commit subjects
+`apply-1`/`apply-2`. That is automated tooling aimed at the Gitea instance, not
+the estate's work. The estate's actual Gitea is `.46` `atlas-gitea` (Gitea
+1.27.2, Postgres, registration off, sign-in required, `COOKIE_SECURE`), which
+*is* `git.innotel.us`; it was empty, and **no NPM host ever pointed at `.90`**
+(the only `.90` references in the tree are a certificate-test fixture).
 
-1. **Rebuild `git`.** Export the Gitea repositories and DB over a path that
-   does not run container code, then destroy and recreate the container. Do not
-   "clean" it in place.
-2. **Rotate everything that container could read**: the Gitea admin and DB
-   credentials, the `git` user's SSH keys, and any deploy keys / tokens stored in
-   Gitea. (`/home/git/.ssh/authorized_keys` was empty at discovery, but keys
-   elsewhere may have been read.)
-3. **Find the entry vector.** The `git` container runs Gitea (`:3000`), Postgres,
-   MariaDB and Postfix on the LAN. Review Gitea's audit log and access log, and
-   its accounts, for the intrusion path. This container was never in NPM — it is
-   reachable on the LAN, which is itself worth revisiting.
-4. **Decide which Gitea is authoritative.** i1 `git` (`.90`, this container) and
-   `.46`'s `atlas-gitea` (`:3004`, which *is* `git.innotel.us`) are both live —
-   a duplicate that should be resolved (see `dev-container-migration.md`).
-5. **Delete the preserved sample** once analysis is done (it is a live binary,
-   stored mode 000).
+What was done:
+
+1. **Retired.** `incus stop git` + `incus delete git`. i1 is back to 7
+   containers, `.90` no longer answers, and `/var/log/incus/git` (plus the
+   already-stale `auth` log dir) was removed. This also resolves the
+   duplicate-Gitea item in `dev-container-migration.md`.
+2. **Credentials.** The container held **no SSH private keys** and
+   `/home/git/.ssh/authorized_keys` was empty; Gitea had **0** access tokens, so
+   there were no deploy keys or tokens to rotate. The one real exposure is that
+   `/etc/gitea/app.ini` carried the DB password **`DD@l1lama`** — the estate's
+   own SSH password — reused across the hosts. The compromise therefore has to
+   be treated as exposing it; rotating that estate-wide secret is a separate,
+   coordinated change (every host's access and the docs move together) and is
+   **not** done here. Felt as a leftover, not a closed item.
+3. **Authoritative Gitea.** `.46` `atlas-gitea` — no second Gitea remains.
+4. **Router reservation.** `.90` (GIT) is now stale; remove it from the router's
+   Address Reservation table (UI-only). Marked *(ret.)* in `router.md`.
+5. **Evidence kept.** The miner sample (`linuxsys.sample`, mode 000) and the
+   containment logs stay at i1 `/root/incident-20260927-git/`; the retired
+   container's config, users and repo list were saved beside them as
+   `gitea-forensics.txt`.
