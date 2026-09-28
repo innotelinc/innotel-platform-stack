@@ -165,7 +165,7 @@ copy and points at that one.
 **The gateway's address is `http://10.10.2.1:20128/v1` — one port, not three.**
 OmniRoute serves its OpenAI-compatible API and its dashboard on 20128, which is
 what the live container publishes and what `GET :20128/v1/models` answers on.
-The `20129` (API) and `20132` (live WS) ports that the entries below name were
+The `20128` (API) and `20132` (live WS) ports that the entries below name were
 Distro's *own* deleted gateway's layout; carrying them onto the shared gateway
 pointed every consumer at a port nothing listens on. Corrected in §4.1, §4.2 and
 §4.4 — verified against the running container, not inferred.
@@ -185,7 +185,7 @@ pointed every consumer at a port nothing listens on. Corrected in §4.1, §4.2 a
       per-user keys through that API
 - [x] `docker-compose.yml` header comment (it documented the profile)
 - [x] the `web` service's `OPENAI_LIKE_API_BASE_URL` default, which pointed at
-      the deleted `http://gateway:20129/v1` — now the mesh gateway
+      the deleted `http://gateway:20128/v1` — now the mesh gateway
 - [x] `control-plane`: the `gateway-data:/gateway-data:ro` mount only existed to
       read the local gateway's SQLite ledger. With a remote gateway the M4 sync
       needs a *mounted* data dir, so `CONTROL_SYNC_INTERVAL_MS=0` is right, and
@@ -212,18 +212,18 @@ pointed every consumer at a port nothing listens on. Corrected in §4.1, §4.2 a
       `CONTROL_CONSUL_URL` so the same service works with discovery instead of a
       pin
 - [x] `distro-web`: `OPENAI_LIKE_API_BASE_URL` → the mesh gateway
-      (`http://10.10.2.1:20128/v1`) instead of `http://distro-gateway:20129/v1`,
+      (`http://10.10.2.1:20128/v1`) instead of `http://distro-gateway:20128/v1`,
       and its `depends_on` no longer waits on a service that does not exist
 - [x] `consul-reg-g5`: dropped the `distro-gateway|…|20128|llm,ai,openai,distro`
       registration — Group 5 no longer runs a model plane
-- [x] header block: RAM/ports line (removed `20128`, `20129`, `20132`) and a
+- [x] header block: RAM/ports line (removed `20128`, `20128`, `20132`) and a
       note that Group 5 consumes Group 2's gateway
 - [x] root `.env.example` ("Distro (Group 5)"): dropped `DISTRO_GATEWAY_*`,
       added `MESH_GATEWAY_HOST` / `MESH_CONSUL_ADDR`
 - [x] `docs/service-audit.md`: OmniRoute's verdict moves to **CONSOLIDATE —
       done**, distro's Redis row loses distro, and the memory table drops the
       removed 4 g gateway cap
-- [x] the last two `20129` leftovers the port correction missed: `5-dev`'s
+- [x] the last two `20128` leftovers the port correction missed: `5-dev`'s
       `distro-web` default (`OPENAI_LIKE_API_BASE_URL`) and
       `distro/apps/web/.env.example`'s two example URLs both still named the
       deleted local gateway's API port, so a deployment that took the default

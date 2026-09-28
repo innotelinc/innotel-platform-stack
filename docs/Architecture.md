@@ -93,7 +93,7 @@ Any service can discover another by name:
 # Find where OmniRoute lives
 ./stack.sh discover omniroute
 # → the gateway host's mesh address. The dialable door is the SSO proxy in front
-#   of the gateway (:20129); the gateway's own :20128 answers on that host's
+#   of the gateway (:20128); the gateway's own :20128 answers on that host's
 #   loopback and bridge alone — see scripts/check-gateway-targets.py
 
 # Find where Authentik lives
@@ -244,7 +244,7 @@ mesh's Consul agent lives. Services on the same host reach Consul directly as
 | 2     | FreePBX          | 8083      | 10.10.2.1:8083          |
 | 2     | Zeus Portal      | 3001      | 10.10.2.1:3001          |
 | 2     | coturn           | 3478      | 10.10.2.1:3478          |
-| 2     | OmniRoute        | 20129     | 192.168.1.46:20129 (the SSO proxy; the gateway's own :20128 is that host's loopback + bridge only) |
+| 2     | OmniRoute        | 20128     | 192.168.1.46:20128 (the SSO proxy; the gateway's own :20128 is that host's loopback + bridge only) |
 | 1     | NPM edge         | 80/443    | 10.10.1.1:80            |
 | 3     | Jellyfin         | 8096      | 10.10.3.1:8096          |
 | 3     | Prowlarr         | 9696      | 10.10.3.1:9696          |

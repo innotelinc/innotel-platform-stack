@@ -223,7 +223,7 @@ boxes, and the one that catches a name pointed at where a stack used to live.
 | Host | Answers on the LAN | Silent | Consequence |
 |---|---|---|---|
 | `.30` Zeus + Capstone | `3001` portal, `3010` UI, `3478` coturn, `8089` ARI/WS, `8095` dashboard-api, `8096` dashboard, `14010`–`14015` the six app gateways | **`8000`** | `api.capstone.innotel.us` and `backend.api.capstone.innotel.us` both forward to `.30:8000` and reach nothing — dograh-api is not listening there |
-| `.50` Olympus | `3050` Studio, `20129` gateway-sso, `20130` site server | `16379` (its own store, loopback — by design) | no public name is broken |
+| `.50` Olympus | `3050` Studio, `20128` gateway-sso, `20130` site server | `16379` (its own store, loopback — by design) | no public name is broken |
 | `.56` Monarch | `3011`, `7575` homarr, `8097`, `8098` clipbucket, `4545` requestrr, `6881` peer port, `14001`–`14009` the nine gateways | **`3000`/`3210`/`3211`/`6791`** | PLUTUS is still not running (as recorded above); Clipbucket and requestrr are still ungated |
 
 Three more findings from the same pass:
@@ -264,7 +264,7 @@ Still open on the hosts, all three needing a decision rather than a repair:
   no `node_modules`; `web` is nginx serving the export). `OMNIROUTE_BASE_URL` turned
   out never to have been set on the deployment — the Convex functions were falling
   back to `localhost:20128` *inside their own container* — and is now
-  `http://192.168.1.46:20129/v1`. Open: the storefront's own public name is still
+  `http://192.168.1.46:20128/v1`. Open: the storefront's own public name is still
   only `subscribe.plutus` / `auth.plutus` pointing at `.46`, so nothing routes the
   migrated app yet.
 - **Clipbucket is running but serving its installer.** Its DB volume has **0
@@ -418,7 +418,7 @@ Moving the door is not the same as moving every reference to the old one, and th
 references still taught the closed port. `ips/scripts/check-gateway-targets.py` is the
 guard: a target naming `<host>:20128` is wrong whatever the host, because that port
 answers on the gateway host's loopback and bridge alone, while the door is the SSO
-proxy on `:20129`, which exempts `/v1` for API clients. It found ten, across the
+proxy on `:20128`, which exempts `/v1` for API clients. It found ten, across the
 templates and docs of every group:
 
 - `1-primary/atheniq`, `3-media/plutus`, `4-social/onyx`, `5-dev/atlas`,

@@ -331,7 +331,7 @@ services:
       - path: ../../5-dev/olympus/.env
         required: false
     environment:
-      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20129/v1}
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20128/v1}
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       SPEC: ${SPEC:-}
@@ -383,7 +383,7 @@ services:
         required: false
     # See the OmniRoute caveat at the top of this file before changing the base URL.
     environment:
-      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20129/v1}
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20128/v1}
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
       OMNIROUTE_MODEL: ${OMNIROUTE_MODEL:-auto/coding}
       STUDIO_ACCESS_TOKEN: ${STUDIO_ACCESS_TOKEN:-}
@@ -575,7 +575,7 @@ services:
     # shell, which makes the healthcheck below impossible to express (a `wget`
     # healthcheck on it reports the container unhealthy forever — measured). A
     # shell in the image is the price of a liveness signal; the container is the
-    # only thing on 20129 and it never runs the shell itself.
+    # only thing on 20128 and it never runs the shell itself.
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine
     container_name: olympus-gateway-sso
     restart: unless-stopped
@@ -615,7 +615,7 @@ services:
       - --code-challenge-method=S256
       - --upstream=${GATEWAY_SSO_UPSTREAM:-http://127.0.0.1:20128}
       # 0.0.0.0 because the edge is on another host and reaches this over the LAN.
-      - --http-address=0.0.0.0:${GATEWAY_SSO_PORT:-20129}
+      - --http-address=0.0.0.0:${GATEWAY_SSO_PORT:-20128}
       # THE LAN PATH FOR API CLIENTS, and the reason this listener is on 0.0.0.0
       # rather than loopback. The gateway itself stays on 127.0.0.1, so the only
       # way in from another machine is through here — which means one door, and it
@@ -667,7 +667,7 @@ services:
       # and `/v1/models` but sends `/v1` itself to Authentik. That asymmetry is
       # invisible to a client that only ever POSTs a subpath, and breaks the one
       # that validates its base URL first: `OMNIROUTE_BASE_URL` is documented one
-      # section up as `http://192.168.1.46:20129/v1` — the bare prefix — and the
+      # section up as `http://192.168.1.46:20128/v1` — the bare prefix — and the
       # Asterisk AI voice engine probes exactly that before accepting a config.
       # It got a login page back, read the 400 as an API error, and reported its
       # whole pipeline unhealthy while every runtime call to the same gateway
@@ -749,7 +749,7 @@ services:
       # `--trusted-ip` was tried here and REMOVED: oauth2-proxy warns on every
       # request that mixing it with `--reverse-proxy` is unsafe, and it is right —
       # with reverse-proxy on, the client IP is read from X-Forwarded-For, so a
-      # caller who can reach 20129 spoofs the trusted address and is believed.
+      # caller who can reach 20128 spoofs the trusted address and is believed.
       # It hardens nothing. The real control is who can reach the port: the
       # listener is on 0.0.0.0 so the edge can, which means the port should be
       # firewalled to the edge's address — see docs/gateway-sso.md.
@@ -809,7 +809,7 @@ services:
       # dashboard instead would make this container's health depend on the
       # gateway being up, which is how a healthy proxy gets restarted for
       # somebody else's outage.
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${GATEWAY_SSO_PORT:-20129}/ping"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${GATEWAY_SSO_PORT:-20128}/ping"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -925,7 +925,7 @@ services:
   # ═══ DISTRO (BuilderOps — in-browser AI app builder) ══════════════════════════
   # Distro's own compose (control plane + web). The AI plane is the shared
   # Group-2 OmniRoute on the mesh — no bundled gateway, so nothing here binds
-  # 20128/20129/20132. Distro env comes from the root .env (see .env.example,
+  # 20128/20128/20132. Distro env comes from the root .env (see .env.example,
   # "Distro (Group 5)"), plus the MESH_GATEWAY_HOST default below.
   # docs/convergence-onyx-olympus-distro-atlas.md §4.2.
 

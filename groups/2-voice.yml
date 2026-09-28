@@ -460,9 +460,9 @@ services:
   # diegosouzapw/omniroute. Model "auto" = zero-config routing across its free
   # connected providers with automatic failover; the dashboard also runs on
   # :20128, but it is no longer on the LAN — the dashboard is reached through the
-  # Authentik-fronted proxy on :20129 (5-dev/olympus/docs/gateway-sso.md) and the
+  # Authentik-fronted proxy on :20128 (5-dev/olympus/docs/gateway-sso.md) and the
   # gateway's own login is off. dograh (host mode) dials 127.0.0.1:20128; every
-  # other consumer dials the proxy on 20129.
+  # other consumer dials the proxy on 20128.
   # ⚠ Free-tier cloud providers need internet; for a fully-local LLM, add your
   # local Ollama / llama.cpp / vLLM as a provider in the dashboard and route to it.
 
@@ -541,12 +541,12 @@ services:
       # A consumer on ANY OTHER host is not covered here, and must not try to be: its
       # `host.docker.internal` is its own docker0. That is what n8n and this stack's
       # dashboard-api do from `.30`, and it is why the two defaults above name the
-      # proxy on 20129 rather than this port.
+      # proxy on 20128 rather than this port.
       #
       # Publishing on 0.0.0.0 also satisfied those two, and put the dashboard on the
       # LAN — where the only gate is its own password login, because Authentik and the
       # `cerulean-platform` group check live in the proxy that fronts this, not here.
-      # A client on another machine uses that door instead: `192.168.1.46:20129/v1`.
+      # A client on another machine uses that door instead: `192.168.1.46:20128/v1`.
       - "127.0.0.1:20128:20128"
       - "172.17.0.1:20128:20128"
       #
@@ -557,7 +557,7 @@ services:
       # has no gate of its own and this port's reachability IS the control — see
       # scripts/gateway-auth-mode.py, which refuses to make that change while the
       # port answers anywhere but this host. So the LAN door is the proxy that
-      # fronts this service (`oauth2-proxy`, `192.168.1.46:20129`), which exempts
+      # fronts this service (`oauth2-proxy`, `192.168.1.46:20128`), which exempts
       # `/v1` for inference clients and requires an Authentik session in
       # `cerulean-platform` for the dashboard. Same host as this container, so it
       # reaches the two bindings above and nothing else needs the LAN.
@@ -644,18 +644,18 @@ services:
       # The model is served by OmniRoute (OpenAI-compatible /v1); model "auto"
       # routes across its free/connected providers.
       #
-      # 20129, NOT 20128. 20128 is the gateway's own port and it is published on
+      # 20128, NOT 20128. 20128 is the gateway's own port and it is published on
       # loopback + this host's docker0 only — no LAN binding, because
       # `make gateway-auth-mode` leaves the gateway with no login of its own and
       # the reachability of that port is then the entire control (see the ports
-      # block under `omniroute`). 20129 is the oauth2-proxy in front of it, which
+      # block under `omniroute`). 20128 is the oauth2-proxy in front of it, which
       # exempts /v1 precisely so inference clients are unaffected. Through the
       # alias this is correct on the host running that proxy; a stack on another
       # host pins the LAN address of that host in .env instead, because the alias
       # resolves to *its own* docker0 where nothing listens.
       N8N_ENABLED_MODULES: "${N8N_ENABLED_MODULES:-instance-ai}"
       N8N_INSTANCE_AI_MODEL: "${N8N_INSTANCE_AI_MODEL:-auto}"
-      N8N_INSTANCE_AI_MODEL_URL: "${N8N_INSTANCE_AI_MODEL_URL:-http://host.docker.internal:20129/v1}"
+      N8N_INSTANCE_AI_MODEL_URL: "${N8N_INSTANCE_AI_MODEL_URL:-http://host.docker.internal:20128/v1}"
       N8N_INSTANCE_AI_MODEL_API_KEY: "${N8N_INSTANCE_AI_MODEL_API_KEY:-omniroute}"
       N8N_INSTANCE_AI_SANDBOX_ENABLED: "true"
       N8N_INSTANCE_AI_SANDBOX_PROVIDER: "n8n-sandbox"
@@ -1262,9 +1262,9 @@ services:
       DOGRAH_STASIS_APP_NAME: "${DOGRAH_STASIS_APP_NAME:-}"
       # "Describe it with AI" workflow authoring on the Workflows page / agent
       # modal: the same route the Workflow Studio uses, through the SSO proxy
-      # (20129) rather than the gateway's own port (20128, loopback + docker0
+      # (20128) rather than the gateway's own port (20128, loopback + docker0
       # only — see the ports block under `omniroute`). Empty key is fine.
-      OMNIROUTE_URL: "${OMNIROUTE_URL:-http://host.docker.internal:20129}"
+      OMNIROUTE_URL: "${OMNIROUTE_URL:-http://host.docker.internal:20128}"
       OMNIROUTE_API_KEY: "${OMNIROUTE_API_KEY:-}"
       OMNIROUTE_MODEL: "${OMNIROUTE_MODEL:-auto}"
       # standalone (default): dashboard provisions FreePBX rows directly

@@ -32,7 +32,7 @@ services:
   # ═══ DISTRO (BuilderOps — in-browser AI app builder) ══════════════════════════
   # Distro's own compose (control plane + web). The AI plane is the shared
   # Group-2 OmniRoute on the mesh — no bundled gateway, so nothing here binds
-  # 20128/20129/20132. Distro env comes from the root .env (see .env.example,
+  # 20128/20128/20132. Distro env comes from the root .env (see .env.example,
   # "Distro (Group 5)"), plus the MESH_GATEWAY_HOST default below.
   # docs/convergence-onyx-olympus-distro-atlas.md §4.2.
 

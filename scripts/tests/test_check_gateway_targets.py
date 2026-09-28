@@ -63,14 +63,23 @@ class ScanCase(unittest.TestCase):
 
 
 class RuleTests(ScanCase):
-    def test_a_lan_address_on_the_gateway_port_is_a_violation(self):
-        found = self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.46:20128/v1\n"})
-        self.assertEqual(len(found), 1)
-        self.assertIn("192.168.1.46:20128", found[0].text)
-        self.assertIn("20129", found[0].reason)
+    def test_the_gateway_hosts_lan_address_on_the_gateway_port_is_the_door(self):
+        # The door moved onto the gateway's own default port, so this is now the one
+        # target everything off that host should name.
+        self.assertEqual(self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.46:20128/v1\n"}), [])
 
-    def test_the_proxy_port_is_what_it_asks_for(self):
-        self.assertEqual(self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.46:20129/v1\n"}), [])
+    def test_another_host_on_the_gateway_port_is_a_violation(self):
+        # The port number alone is no longer the test — the address is.
+        found = self.violations({"other/.env": "OMNIROUTE_URL=http://10.10.2.1:20128/v1\n"})
+        self.assertEqual(len(found), 1)
+        self.assertIn("10.10.2.1:20128", found[0].text)
+        self.assertIn("dial 192.168.1.46:20128", found[0].reason)
+
+    def test_the_retired_proxy_port_is_a_violation_whatever_the_host(self):
+        found = self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.46:20129/v1\n"})
+        self.assertEqual(len(found), 1)
+        self.assertIn("20129", found[0].text)
+        self.assertIn("moved to 192.168.1.46:20128", found[0].reason)
 
     def test_loopback_is_the_gateway_s_actual_binding(self):
         # A host-mode process on the gateway's host dials this, and the gateway's own
@@ -142,7 +151,7 @@ class ConditionalTests(ScanCase):
         found = self.conditional({"gateway/.env": "GATEWAY_SSO_UPSTREAM=http://127.0.0.1:20128\n"})
         self.assertEqual(len(found), 1)
         self.assertIn("host-mode process on the gateway's host", found[0].note)
-        self.assertIn("20129", found[0].note)
+        self.assertIn("192.168.1.46:20128", found[0].note)
         self.assertEqual(self.violations({"gateway/.env": "GATEWAY_SSO_UPSTREAM=http://127.0.0.1:20128\n"}), [])
 
     def test_the_declaring_file_s_alias_is_conditional(self):
@@ -172,7 +181,7 @@ class ConditionalTests(ScanCase):
             self.assertEqual(chk.main(["--root", str(root)]), 0)
 
     def test_a_sanctioned_target_is_not_even_conditional(self):
-        self.assertEqual(self.conditional({"app/.env": "X=http://192.168.1.46:20129/v1\n"}), [])
+        self.assertEqual(self.conditional({"app/.env": "X=http://192.168.1.46:20128/v1\n"}), [])
 
     def test_a_service_name_the_file_declares_is_not_conditional_either(self):
         # Same project, same network: unambiguous, so nothing to report.
@@ -303,10 +312,10 @@ class CliTests(unittest.TestCase):
             return chk.main(["--root", str(root), *args])
 
     def test_clean_tree_exits_zero(self):
-        self.assertEqual(self.run_cli({"app/.env": "X=http://192.168.1.46:20129/v1\n"}), 0)
+        self.assertEqual(self.run_cli({"app/.env": "X=http://192.168.1.46:20128/v1\n"}), 0)
 
     def test_a_violation_exits_one(self):
-        self.assertEqual(self.run_cli({"app/.env": "X=http://192.168.1.46:20128/v1\n"}), 1)
+        self.assertEqual(self.run_cli({"app/.env": "X=http://192.168.1.46:20129/v1\n"}), 1)
 
     def test_json_output_names_all_three_lists(self):
         import io
@@ -315,14 +324,14 @@ class CliTests(unittest.TestCase):
         buffer = io.StringIO()
         with redirect_stdout(buffer):
             code = self.run_cli({"5-dev/distro/.env": "GATEWAY_API_URL=http://host.docker.internal:20128\n",
-                                 "app/.env": "X=http://192.168.1.46:20128\n",
+                                 "app/.env": "X=http://10.10.2.1:20128\n",
                                  "gateway/.env": "UPSTREAM=http://127.0.0.1:20128\n"}, "--json")
         report = json.loads(buffer.getvalue())
         self.assertEqual(code, 1)
         self.assertEqual(len(report["violations"]), 1)
         self.assertEqual(len(report["exempt"]), 1)
         self.assertEqual(len(report["conditional"]), 1)
-        self.assertEqual(report["gateway"]["proxy_port"], 20129)
+        self.assertEqual(report["gateway"]["proxy_port"], 20128)
 
     def test_no_root_to_scan_is_a_refusal(self):
         with mock.patch.object(chk, "default_roots", return_value=[]):

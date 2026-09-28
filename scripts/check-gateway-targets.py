@@ -3,13 +3,19 @@
 
 WHY THIS EXISTS
 ---------------
-The platform runs one OmniRoute gateway, and its own port (`20128`) is published on
-its host's loopback and docker0 only. That is not tidiness: `make gateway-auth-mode`
-sets `requireLogin=false` so Cerulean Authentik is the gateway's only gate, and after
-that the reachability of that port *is* the control — a LAN binding would publish a
-dashboard that can read every provider credential. The door for everything else is
-the identity-aware proxy in front of it (`20129`), which exempts `/v1` for API
-clients because they send a key, not a session cookie.
+The platform runs one OmniRoute gateway, published on its host's loopback and docker0
+only. That is not tidiness: `make gateway-auth-mode` sets `requireLogin=false` so
+Cerulean Authentik is the gateway's only gate, and after that the reachability of that
+port *is* the control — a LAN binding would publish a dashboard that can read every
+provider credential. The door for everything else is the identity-aware proxy in front
+of it, which exempts `/v1` for API clients because they send a key, not a session
+cookie.
+
+**The door now listens on the gateway's own default port (`20128`), on the gateway
+host's LAN address** — it used to be `20129`, which was the proxy's alone. So the two
+are told apart by *address* rather than by port number: `127.0.0.1:20128` and
+`172.17.0.1:20128` are the gateway itself, `192.168.1.46:20128` is the door. A target
+still naming `20129` is stale and is failed by rule 5.
 
 `5-dev/olympus/docs/gateway-sso.md` records what happened when the port stopped being
 bound on the LAN: five consumers were still pointing at it, and every one of them
@@ -29,9 +35,10 @@ estate-wide half, kept in the estate-wide repo, like `check-sign-in-posture.sh`.
 
 THE RULES
 ---------
-1. **The gateway's own port is not a routable target.** Any target naming
-   `<host>:20128` is wrong, whatever the host is: the port answers on loopback and
-   on the gateway host's docker0, and nowhere else.
+1. **The port has two meanings, separated by address.** `<the gateway host's LAN
+   address>:20128` is the door and is right. The same port on the gateway's loopback
+   or its docker0 is the gateway itself, and is right only for a caller *on that
+   host*. Any other host is wrong.
 2. **Not under a docker alias from another host.** `host.docker.internal:20128`
    resolves to the *dialer's* docker0, so it is right only in a file that declares
    the gateway itself (its compose, on the gateway's host) — or on the gateway's
@@ -42,6 +49,10 @@ THE RULES
 4. **Loopback is conditional.** `127.0.0.1:20128` is the gateway's actual binding —
    on the gateway's own host, for a host-mode process. Inside a container, and on
    any other host, it is the caller itself. Reported, not failed.
+
+5. **The door is not on `20129` any more.** It was the proxy's own port and nothing
+   else used it, so the proxy moved onto the gateway's default port and `20129` is
+   closed. Any target naming `<host>:20129` is stale, whatever the host.
 
 Ports *bindings* (`- "172.17.0.1:20128:20128"`, `${OMNIROUTE_PORT:-20128}:20128`)
 are where a port is listened on, not where a service is dialled, so they are
@@ -98,8 +109,12 @@ from pathlib import Path
 # rather than discovered, because this has to run on a host that cannot reach the
 # gateway at all — which is exactly the host where a stale target does damage.
 GATEWAY_HOST = "192.168.1.46"
+# The gateway's own port, and now the door's too — on the LAN address above.
 GATEWAY_PORT = 20128
-PROXY_PORT = 20129
+PROXY_PORT = 20128
+# Where the door used to listen. Kept so a target that never got updated is failed
+# rather than silently ignored now that nothing scans that port for any other reason.
+RETIRED_PROXY_PORT = 20129
 
 # The names the gateway answers to inside its own project. `2-voice/capstone` declares
 # the service as `omniroute` and names the container `omniroute`, which compose makes a
@@ -241,6 +256,10 @@ def classify(host: str, declared: set[str]) -> tuple[str, str]:
     gateway only where the gateway is. Both empty means silence — a sanctioned
     address (the door), or a name this very file's project defines.
     """
+    if host == GATEWAY_HOST:
+        # The door. Same port number as the gateway's own, different address — this
+        # is the one target everything off the gateway's host should name.
+        return "", ""
     if host in LOOPBACK:
         return "", (
             f"`{host}` is the gateway's own binding, so it is right for a host-mode "
@@ -268,9 +287,10 @@ def classify(host: str, declared: set[str]) -> tuple[str, str]:
             f"proxy at {GATEWAY_HOST}:{PROXY_PORT}"
         ), ""
     return (
-        f"port {GATEWAY_PORT} is bound to the gateway host's loopback and docker0 only "
-        f"(no LAN binding, because that port's reachability is the entire control once "
-        f"its own login is off); dial the proxy at {GATEWAY_HOST}:{PROXY_PORT}"
+        f"port {GATEWAY_PORT} answers only on the gateway's host — its own loopback "
+        f"and docker0 (the gateway, whose reachability is the entire control once its "
+        f"own login is off) and that host's LAN address (the SSO door); from any other "
+        f"host dial {GATEWAY_HOST}:{PROXY_PORT}"
     ), ""
 
 
@@ -291,9 +311,21 @@ def scan_file(path: Path, root: Path) -> list[Finding]:
         if not code or BINDING.match(code):
             continue
         for match in TARGET.finditer(code):
-            if int(match.group("port")) != GATEWAY_PORT:
-                continue
+            port = int(match.group("port"))
             host = match.group("host")
+            if port == RETIRED_PROXY_PORT:
+                # Rule 5. Not exempt-able: the door moved for every consumer, and an
+                # exemption here would be a file still pointing at a closed port.
+                findings.append(Finding(
+                    shown, number, match.group(0),
+                    f"the gateway's door moved to {GATEWAY_HOST}:{PROXY_PORT} — the "
+                    f"gateway's own default port, on that host's LAN address — and "
+                    f"`{host}:{port}` answers nothing now (see "
+                    f"5-dev/olympus/docs/gateway-sso.md)",
+                ))
+                continue
+            if port != GATEWAY_PORT:
+                continue
             reason, note = classify(host, declared)
             if not reason and not note:
                 continue

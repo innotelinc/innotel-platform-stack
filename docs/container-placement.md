@@ -29,11 +29,21 @@ records what each host is, what currently sits on it, and where it should sit.
 - **`rizzaura` moved off `.46`** onto its own i2 container (`.62`, 2026-09-27):
   five small services (~50 MiB).
 - **`olympus` factory + Studio moved off `.46`** onto their own i3 container
-  (`olympus-gw`, `.64`, 2026-09-27). The `:20129` SSO proxy did **not** move: it
+  (`olympus-gw`, `.64`, 2026-09-27). The `:20128` SSO proxy did **not** move: it
   fronts `omniroute` on `127.0.0.1:20128` and the estate dials
-  `192.168.1.46:20129` by address, so it stays with `omniroute` on `.46` until
+  `192.168.1.46:20128` by address, so it stays with `omniroute` on `.46` until
   that pair relocates together. i3 was the right host for the factory/studio
   because they consume the gateway over the LAN, not loopback.
+- **The gateway door moved from `20129` onto `20128`** (2026-09-27) — the
+  gateway's own default port, on `.46`'s LAN address. `omniroute` keeps
+  `127.0.0.1:20128` and `172.17.0.1:20128`; the proxy takes the LAN address
+  because a wildcard bind on that port overlaps them. Edge hosts 178/179 and all
+  five live consumer stacks were repointed in the same change, and
+  `ips/scripts/check-gateway-targets.py` now fails a stale `20129` by name.
+- **`.46`'s `clipbucket` was retired rather than moved** (2026-09-27): it was a
+  strict subset of i1 `.56`'s live one (`tube.innotel.us` → `.56:14011`), so only
+  the container and image went; its 29 GB volume is retained. That leaves
+  `omniroute` plus the gateway's SSO proxy/redis as the only things on `.46`.
 
 ## The three hosts
 

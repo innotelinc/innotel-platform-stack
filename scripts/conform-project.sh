@@ -748,7 +748,7 @@ BASE_DOMAIN=${domain}
 # Reach it over the mesh on :20128 — OmniRoute serves its OpenAI-compatible API
 # and its dashboard from that single port. Never 127.0.0.1: inside a container
 # that is the container itself, which is how this default used to fail silently.
-# (Olympus fronts its own gateway with an Authentik SSO proxy on :20129 for the
+# (Olympus fronts its own gateway with an Authentik SSO proxy on :20128 for the
 # loopback-published deployment; over the mesh the direct address is this one.)
 MESH_GATEWAY_HOST=10.10.2.1
 OMNIROUTE_BASE_URL=http://10.10.2.1:20128/v1

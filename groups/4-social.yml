@@ -247,12 +247,12 @@ services:
       # may be a `vault://<mount>/<path>#<key>` reference, resolved at startup by
       # the same Cerulean Vault client onyx-objectstore uses; an unresolvable
       # reference stops the service instead of becoming an empty credential.
-      # The door is the proxy in front of the gateway (:20129), not the
+      # The door is the proxy in front of the gateway (:20128), not the
       # gateway's own port: Cerulean SSO is the gateway's only gate, so 20128
       # answers on the gateway host's loopback and bridge alone. What matters
       # here is that it is a routable address: the image's own default is
       # `http://localhost:20128`, which inside this container is itself.
-      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20129/v1}
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-http://192.168.1.46:20128/v1}
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
       OMNIROUTE_MODEL: ${OMNIROUTE_MODEL:-}
       # Documented BYO-key escape hatch (local-first; docs/design/07). The
@@ -506,7 +506,7 @@ services:
   # The LLM API proxy behind the AI recommendations is the platform's one
   # gateway (Group 2, `2-voice`), on its own host; this project declares no
   # service for it, so `omniroute` never resolves on rizz-net. AI_BASE_URL points
-  # at the SSO proxy in front of that gateway (:20129).
+  # at the SSO proxy in front of that gateway (:20128).
 
   # ── Authentik — identity provider + SSO (auth.<domain>) ───────────────────
 
