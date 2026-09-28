@@ -55,8 +55,14 @@ records what each host is, what currently sits on it, and where it should sit.
 
 `i2` and `i3` are the same `tank` profile set (`default`, `docker`, `large`,
 `medium`, `small`), so export/import between them works unchanged. Both are
-`incus` containers' hosts reached with `DD@l1lama40`; `i2` runs on pm3 (VM200),
-`i3` on pm4 (VM200).
+`incus` containers' hosts, reached over SSH as `root` with the estate's incus
+root password; `i2` runs on pm3 (VM200), `i3` on pm4 (VM200).
+
+That password is **not written down here** — golden rule 4 (no credential in any
+repo file) applies to documentation as much as to code, and a literal in a doc
+ships in every clone. A provisioning script takes it from the environment or from
+its own gitignored `.env` instead (`ONTRAK_INCUS_PASSWORD` in Ontrak Sync's
+`scripts/setup.sh` is the reference implementation).
 
 ## What is on each host now
 
