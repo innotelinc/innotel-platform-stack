@@ -174,7 +174,7 @@ edge host itself, where it names the store directly; anywhere else it names that
 host's *own* empty docker0 and every gateway exits on
 `dial tcp 172.17.0.1:16380: connect: connection refused`. Olympus is the one
 zone that does not share this store at all: it runs its own
-(`olympus-gateway-sso-sessions`) with its own cookie secret, so a sign-in there
+(`gateway-sso-sessions`) with its own cookie secret, so a sign-in there
 is a second sign-in.
 
 ### The gateway inventory
@@ -305,7 +305,7 @@ configuration change.
 | **n8n · Grist · Grafana · Workflow Studio · FreePBX/AvantFax · Technitium** | own local login | **Fronted by an `oauth2-proxy` gateway** (`innotel-app-gateway`) — see §1. Authentik is the only door on the public name |
 | **The media stack** (Radarr, Sonarr, Lidarr, Whisparr, Bazarr, Prowlarr, qBittorrent, SABnzbd) | own local login | **Fronted by an `oauth2-proxy` gateway** (`monarch-media`); the apps run `AuthenticationMethod=External`, i.e. they trust the proxy and have no login of their own. **(Seerr is the exception** — its gateway publishes the app's own sign-in page, because Seerr cannot hold an OIDC session and has no TV-less client to protect; see below.) |
 | **Jellyfin · Clipbucket · the IPTV guide · Requestrr** | own login (Jellyfin through the LDAP outpost, the other three their own forms) | **Fronted by a gateway since 2026-09-16** — the three names that answered with no gate at all (`media.*`, `tube.*`, `tv.monarch.*`) plus the Discord bot's console. Each app is bound to `127.0.0.1` on the media host, so its gateway is the only door, not one of two |
-| **OmniRoute gateway** | local dashboard password | Fronted by `olympus-gateway-sso` at `gateway.olympus.innotel.us` (see `5-dev/olympus/docs/gateway-sso.md`); OmniRoute's own OIDC cannot be enabled — it strips the trailing slash from the issuer and Authentik's `iss` always ends with one |
+| **OmniRoute gateway** | local dashboard password | Fronted by `gateway-sso` at `gateway.olympus.innotel.us` (see `5-dev/olympus/docs/gateway-sso.md`); OmniRoute's own OIDC cannot be enabled — it strips the trailing slash from the issuer and Authentik's `iss` always ends with one |
 | **MinIO** | access keys | Native OIDC exists (`MINIO_IDENTITY_OPENID_*`); object-store API keys are not a user login |
 | **searxng · iptv · subscribe-portal · workflow-studio** | no login | n/a — nothing to convert (workflow-studio now has a gateway because the *app* it hangs off does) |
 
@@ -523,7 +523,7 @@ login form is reachable off its own host.** What that rests on, per surface:
 | `n8n`, `grist`, `grafana`, `workflow-studio`, FreePBX/AvantFax, Technitium | fronted by their gateway on `14010`–`14015`; the upstream is loopback or a container name, never a published port |
 | First-party apps (Magnate, Cerulean, Distro, Studio, Zeus portal, Rizz Aura, Capstone dashboard) | password path refuses unless `BREAKGLASS_LOGIN=1` is set **on that app's own host** (Zeus: `AUTH_MODE`); Studio has no local path at all |
 | NPM Edge admin UI | `cameFromEdge()` + `identityAllowed()` gate `POST /tokens/sso`, and `passwordGrantAllowed()` refuses `POST /tokens` on every edge request — a password grant from inside the edge returns 401 (verified: it is what stops a scripted edge edit without the SSO route) |
-| Vault, Jellyfin, Homarr, Dograh, OmniRoute dashboard | Vault via native OIDC (group-bound role); Jellyfin via the **Cerulean LDAP outpost** so only Cerulean identities exist; Homarr and Dograh OIDC-only; the gateway dashboard behind `olympus-gateway-sso` |
+| Vault, Jellyfin, Homarr, Dograh, OmniRoute dashboard | Vault via native OIDC (group-bound role); Jellyfin via the **Cerulean LDAP outpost** so only Cerulean identities exist; Homarr and Dograh OIDC-only; the gateway dashboard behind `gateway-sso` |
 
 ### Two surfaces still present a form, and why that is a decision, not a gap
 
@@ -639,7 +639,7 @@ posture choice, not a config typo:
   the whole office network, where its gateway can be bypassed.
 
 **Olympus is unaffected by any of this.** It runs its own gateway and its own
-session store (`olympus-gateway-sso-sessions`, its own cookie secret), so a sign-in
+session store (`gateway-sso-sessions`, its own cookie secret), so a sign-in
 there is a second sign-in rather than a shared one — the one zone that deliberately
 does not ride this store, and the reason its gateway still works with the edge on
 another host.

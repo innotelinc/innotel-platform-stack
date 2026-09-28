@@ -41,10 +41,18 @@
 # `cerulean-platform`, and the public name additionally refuses `/v1` at the edge
 # (`make gateway-edge --deny-path /v1`). See `5-dev/olympus/docs/gateway-sso.md`.
 #
-# The container names stay `olympus-*`: they are the names the estate's own checks
-# and docs reference (`scripts/gateway-edge-check.py`'s `SSO_CONTAINER`,
-# `ips/groups/5-dev.yml`, `docs/sign-in-posture.md`). Renaming them is a follow-up
-# across those files, not a rename here.
+# THE CONTAINERS ARE NAMED `gateway-sso*`, NOT `olympus-gateway-sso*` (2026-09-28).
+# The old names were carried over from the olympus overlay that used to declare
+# them, and they made a naming claim that stopped being true: nothing here belongs
+# to the Olympus product, and `olympus-*` is how the estate names that product's
+# own containers. That mattered beyond tidiness — "migrate all olympus-* onto
+# `.50`" is a request these two would have matched while living on `.71`, and the
+# honest answer was to rename them, because they cannot move: they must share a
+# host with a gateway that is loopback-published, and `.50` cannot host it (1 GiB
+# cap against a gateway that refuses work below ~2.55 GiB). The rename is total —
+# this file, `5-dev/olympus/compose.gateway-sso.yml`, `scripts/gateway-edge-check.py`'s
+# `SSO_CONTAINER`, `ips/groups/5-dev.yml` and the docs — so no `olympus-*` name is
+# left outside the Olympus container.
 
 services:
   omniroute:
@@ -98,7 +106,7 @@ services:
     # default tag is distroless and has no shell, which makes the healthcheck
     # below impossible to express (a `wget` probe reports it unhealthy forever).
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine
-    container_name: olympus-gateway-sso
+    container_name: gateway-sso
     restart: unless-stopped
     # HOST NETWORKING IS NOT OPTIONAL. The gateway is published on this host's
     # loopback and docker0, and Docker publishes a loopback binding to the
@@ -196,7 +204,7 @@ services:
   # only thing in it and losing them costs a re-login, so there is no volume.
   gateway-sso-sessions:
     image: redis:7-alpine
-    container_name: olympus-gateway-sso-sessions
+    container_name: gateway-sso-sessions
     restart: unless-stopped
     labels:
       # Unlike the proxy this one CAN be restarted usefully: it holds no state a

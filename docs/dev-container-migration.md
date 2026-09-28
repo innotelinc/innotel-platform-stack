@@ -46,7 +46,7 @@ This is the plan to give each project its own Incus container.
   `certificate_id` 0. That is pre-existing, not the move.)
 - **2026-09-27**: **`olympus` factory + studio moved** to their own container
   (`olympus-gw` on i3, static `192.168.1.64`). The **gateway SSO proxy**
-  (`olympus-gateway-sso` + its redis, `:20128`) deliberately did **not** move:
+  (`gateway-sso` + its redis, `:20128`) deliberately did **not** move:
   it fronts the OmniRoute gateway at `127.0.0.1:20128`, which on `.46` is the
   *capstone* `omniroute` container, and — decisively — about ten consumers
   across the estate dial `192.168.1.71:20128` by address. The proxy therefore
@@ -81,7 +81,7 @@ This is the plan to give each project its own Incus container.
 
 ## What runs inside `.46` today
 
-`.46` is down to **3 containers in 2 projects** — `olympus-gateway-sso` and its
+`.46` is down to **3 containers in 2 projects** — `gateway-sso` and its
 redis (they stay because they front `omniroute`, which is loopback-published),
 and `omniroute` itself. The table below is the original inventory:
 
@@ -89,7 +89,7 @@ and `omniroute` itself. The table below is the original inventory:
 |---|---|---|---|
 | **atlas** | `atlas-gitea` (3004, 2222), `atlas-convex` (3210-3211), `atlas-convex-dashboard` (6791), `atlas-gitea-db` — **migrated 2026-09-27** to i2 `.90` | `0.0.0.0:3004`, `0.0.0.0:3210-3211`, `0.0.0.0:2222` | `atlas.innotel.us`, `git.innotel.us`, `gitlab.innotel.us`, `git.atlas.innotel.us` (→ `:3004`); `convex.innotel.us` (→ `:3210`) |
 | **rizzaura** | `rizz-api` (3020), `rizz-community` (3012), `rizz-admin` (3013), `rizz-app` (3021), `rizz-rankings` (3022) — **migrated 2026-09-27** to i2 `.62` | all `0.0.0.0:30xx` | `api.rizz*` `community.rizz*` `admin.rizz*` `app.rizz*` `rankings.rizz*`, `rizzaura.net`, `www.rizzaura.net` |
-| **olympus** | `olympus`, `olympus-studio` (3050), `olympus-autoheal` — **factory+studio migrated 2026-09-27** to i3 `.64`; `olympus-gateway-sso` + `-sessions` stay on `.46` (paired with `omniroute`) | `:20128` (gateway), `127.0.0.1:3050` | `gateway.studio.innotel.us`, `gateway.olympus.innotel.us` (→ `.46:20128`) |
+| **olympus** | `olympus`, `olympus-studio` (3050), `olympus-autoheal` — **factory+studio migrated 2026-09-27** to i3 `.64`; `gateway-sso` + `-sessions` stay on `.46` (paired with `omniroute`) | `:20128` (gateway), `127.0.0.1:3050` | `gateway.studio.innotel.us`, `gateway.olympus.innotel.us` (→ `.46:20128`) |
 | **subscribe** | `subscribe-portal` (3040) | `0.0.0.0:3040` | `subscribe.innotel.us` + 16 `subscribe.*` names |
 | **magnate** | `magnate` (3002) — **migrated 2026-09-27** to i3 `.57` | `0.0.0.0:3002` | `app.magnate`, `admin.magnate`, `billing.magnate` |
 | **monarch** | `clipbucket` (8098) — **retired 2026-09-27** (duplicate of i1 `.56`'s live one; both volumes retained) | `127.0.0.1:8098` | none (internal) |
