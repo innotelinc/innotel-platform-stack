@@ -456,6 +456,24 @@ this pattern so re-running them never re-issues or detaches certs.
 - **Does not own:** identity, secrets, certificates/DNS, storage, billing, or signing.
   AthenIQ emits completion evidence only — Signara remains the sole signer.
 
+#### OnTrak — TrainingOps
+- **Owns:** hands-on IT support training (scenarios, timed attempts, automatic
+  grading, training evidence), the service desk (ticketing, queues, tenants,
+  SLA), and incident evidence from detection through resolution (Sentinel).
+- **Provides:** the training loop for the support desk — an incident, a ticket,
+  or a manual entry becomes the material for a graded attempt, and a resolution
+  becomes a knowledgebase article. Also provides the Network's host and
+  container update view (Sync): what is out of date, and the install a person
+  approved.
+- **Consumes:** Authentik · Cerulean Vault · Cerulean · ONYX · NPM Edge.
+- **Does not own:** identity, secrets, certificates/DNS, storage, or billing.
+  It captures training and support evidence — it is not the signer of record.
+- **Integrates with:** AthenIQ (LearningOps) — OnTrak produces the practical,
+  graded attempt and AthenIQ carries the course delivery and completion record;
+  Signara remains the sole signer of a certificate. Sentinel, the service desk
+  and Sync are one family with one front door and one identity, not three
+  separate products to sign into.
+
 #### Atlas — CodeOps
 - **Owns:** repositories, forks, pull requests, code review, issues/boards, wikis,
   releases, package registry, Actions CI/CD, and AI-assisted application generation
@@ -464,11 +482,11 @@ this pattern so re-running them never re-issues or detaches certs.
   the AI app builder that scaffolds new platform applications.
 - **Consumes:** Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge.
 - **Does not own:** identity, secrets, certificates/DNS, storage, or the
+  production runtime of the platforms it helps build — Atlas holds the source.
 - **Integrates with:** Atlas (CodeOps) — the build plane (Studio + Distro's
-tenancy) builds apps; Atlas ships them via Gitea + Convex. Studio exports to
-Atlas git remotes; packaging can target Atlas's self-hosted Convex. Both share
-OmniRoute, Magnate, Authentik, Cerulean Vault, Cerulean, and NPM Edge.
-production runtime of the platforms it helps build — Atlas holds the source.
+  tenancy) builds apps; Atlas ships them via Gitea + Convex. Studio exports to
+  Atlas git remotes; packaging can target Atlas's self-hosted Convex. Both share
+  OmniRoute, Magnate, Authentik, Cerulean Vault, Cerulean, and NPM Edge.
 
 #### Distro — BuilderOps
 - **Owns:** multi-tenant builder tenancy (Distro control plane): accounts with
@@ -712,6 +730,7 @@ Rules that hold in both:
 | Rizz Aura (CommunityOps) | [innotelinc/rizzaura](https://github.com/innotelinc/rizzaura) | [docs/stack.md](https://github.com/innotelinc/rizzaura/blob/main/docs/stack.md) |
 | zapit (TransferOps) | [innotelinc/zapit](https://github.com/innotelinc/zapit) | [docs/stack.md](https://github.com/innotelinc/zapit/blob/main/docs/stack.md) |
 | AthenIQ (LearningOps) | [innotelinc/atheniq](https://github.com/innotelinc/atheniq) | [docs/stack.md](https://github.com/innotelinc/atheniq/blob/main/docs/stack.md) |
+| OnTrak (TrainingOps) | [innotelinc/OnTrak](https://github.com/innotelinc/OnTrak) | [docs/stack.md](https://github.com/innotelinc/OnTrak/blob/family/docs/stack.md) |
 | Atlas (CodeOps) | [innotelinc/atlas](https://github.com/innotelinc/atlas) | [docs/stack.md](https://github.com/innotelinc/atlas/blob/main/docs/stack.md) |
 | Distro (BuilderOps) | [innotelinc/distro](https://github.com/innotelinc/distro) | [docs/stack.md](https://github.com/innotelinc/distro/blob/main/docs/stack.md) |
 | Olympus (FactoryOps) | [innotelinc/olympus](https://github.com/innotelinc/olympus) | [docs/stack.md](https://github.com/innotelinc/olympus/blob/main/docs/stack.md) |

@@ -87,6 +87,7 @@ declare -A STACK_COMPONENTS=(
   [rizzaura]="innotelinc/rizzaura|4-social/rizzaura|4|main|CommunityOps — leaderboards and reputation"
   [onyx]="innotelinc/onyx|4-social/onyx|4|main|StorageOps — object storage, backups, snapshots"
   [zapit]="innotelinc/zapit|4-social/zapit||main|TransferOps — ephemeral P2P transfer (no group)"
+  [ontrak]="innotelinc/OnTrak|1-primary/ontrak||family|TrainingOps — training, service desk, incident evidence; deploys as its own family stack"
   [atlas]="innotelinc/atlas|5-dev/atlas|5|main|CodeOps — Gitea, Convex, CI"
   [oasis]="innotelinc/oasis|5-dev/oasis|5|master|MailOps — mail, calendar, contacts"
   [distro]="innotelinc/distro|5-dev/distro|5|main|BuilderOps — in-browser AI app builder"
@@ -94,7 +95,7 @@ declare -A STACK_COMPONENTS=(
 )
 
 # `download all` order — bash associative arrays are unordered, so keep a list.
-STACK_COMPONENT_ORDER="cerulean atheniq magnate signara sign verifier npm capstone zeus monarch plutus rizzaura onyx zapit atlas oasis distro olympus"
+STACK_COMPONENT_ORDER="cerulean atheniq magnate signara sign verifier npm capstone zeus monarch plutus rizzaura onyx zapit ontrak atlas oasis distro olympus"
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 info()  { echo -e "${BLUE}[info]${NC}  $*"; }
