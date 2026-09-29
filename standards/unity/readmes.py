@@ -85,7 +85,29 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", nargs="?", default=".")
     parser.add_argument("--dry-run", action="store_true")
+    # A repo that lives outside the platform tree (OnTrak is its own clone) still gets
+    # the badge; only the slug needs saying, because a checkout directory is not always
+    # named after its repository.
+    parser.add_argument("--repo", help="a single repository directory")
+    parser.add_argument("--slug", help="its GitHub repository name")
     args = parser.parse_args()
+
+    if args.repo:
+        if not args.slug:
+            print("--repo needs --slug", file=sys.stderr)
+            return 2
+        directory = pathlib.Path(args.repo).resolve()
+        readme = directory / "README.md"
+        if not readme.is_file():
+            print(f"no README.md in {directory}", file=sys.stderr)
+            return 1
+        text = readme.read_text()
+        new_text, notes = transform(text, args.slug, directory.name, THEME_DOC, args.dry_run)
+        touched = new_text != text
+        print(f"{'~' if touched else '='} {args.slug:<26} " + "; ".join(notes))
+        if touched and not args.dry_run:
+            readme.write_text(new_text)
+        return 0
 
     root = pathlib.Path(args.root).resolve()
     changed = 0
