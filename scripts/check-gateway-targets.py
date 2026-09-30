@@ -145,6 +145,14 @@ DOCKER_ALIASES = {"host.docker.internal", "gateway.docker.internal", "docker.for
 # `${OMNIROUTE_PORT:-20128}:20128`, optionally quoted, optionally a `- ` list item.
 BINDING = re.compile(r"^\s*-?\s*[\"']?[^\s/\"'=]+:\d+(?::\d+)?(?:/(?:udp|tcp))?[\"']?\s*$")
 
+# A publish flag inside a command: `docker run -p 20128:20128 …`. That is a binding
+# in the one place the line-shaped form above cannot see it — a `package.json`
+# script or a shell one-liner, where the line is a JSON value or a command rather
+# than a list item — so it is blanked before the target scan for the same reason:
+# it says where a port is listened on, not dialled. Covers `-p`, `-p=`, `--publish`
+# and `--publish=`.
+PUBLISH = re.compile(r"(?:^|\s)--?p(?:ublish)?[=\s]+\S+")
+
 # `host:port`, in a value or a URL, with or without a scheme.
 TARGET = re.compile(r"(?P<host>[A-Za-z0-9_.-]+):(?P<port>\d{2,5})(?![0-9])")
 
@@ -328,6 +336,7 @@ def scan_file(path: Path, root: Path) -> list[Finding]:
         code = raw.split("#", 1)[0].rstrip()
         if not code or BINDING.match(code):
             continue
+        code = PUBLISH.sub(" ", code)
         for match in TARGET.finditer(code):
             port = int(match.group("port"))
             host = match.group("host")

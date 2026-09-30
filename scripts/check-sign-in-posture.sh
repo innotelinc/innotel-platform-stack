@@ -48,6 +48,12 @@ ZONES=(
   # (no oauth2-proxy gateway), so its test asserts the issuer handshake and a
   # real code flow rather than the gateway hop the six above do.
   "distro|5-dev/distro"
+  # Genie is the console Olympus's studio was replaced by, and it is OIDC-native
+  # like Distro: the check drives a real code flow rather than a gateway hop. Its
+  # repo is the OnTrak family checkout, which lives beside ontrak-sync rather than
+  # inside a group directory because the family runs on its own host — so this is
+  # also the entry that grades the family checkout the estate keeps.
+  "genie|1-primary/ontrak/ontrak-genie"
 )
 
 SCRIPT="scripts/verify-sso.py"

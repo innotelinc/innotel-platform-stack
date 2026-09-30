@@ -154,6 +154,15 @@ OWN_HOST_REPOS = {
     # registry entry names it either, so `download`/`verify` never fetched it;
     # only the directory placement put it under `5-dev/`.
     "5-dev/ontrak": "its range runs on its own host — see 5-dev/ONTRAK-DEPLOYMENT.md",
+    # The OnTrak family (CodeOps) — portal, training, Tix, Sentinel, Sync and Genie.
+    # The six run on the `ontrak` incus container on i1 (`192.168.1.21`), each from
+    # the family repo's own stack (`docker-compose.all.yml` for the family together,
+    # the product's own compose for one of them) — never from a group-1 host, and no
+    # `stack.sh` entry fetches it. The estate keeps the checkout because estate
+    # tooling grades it: `check-sign-in-posture.sh` runs `ontrak-genie`'s
+    # `scripts/verify-sso.py` from here. Not the retired training range above: that
+    # was `5-dev/ontrak`, a different thing with the same name.
+    "1-primary/ontrak": "the family runs on the ontrak container (i1, .21), not from a group host",
 }
 
 # Every compose-shaped file a member repo may carry, not just the default one:

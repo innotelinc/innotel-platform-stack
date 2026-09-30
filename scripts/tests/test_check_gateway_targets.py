@@ -237,6 +237,13 @@ class ExclusionTests(ScanCase):
             with self.subTest(line=line):
                 self.assertEqual(self.violations({"gateway/docker-compose.yml": line}), [])
 
+    def test_a_publish_flag_inside_a_command_is_a_binding_too(self):
+        # The line is not a binding (it is a JSON value), but the flag is: a
+        # `docker run -p 20128:20128 …` dev script is where a port is *listened on*,
+        # so it must not read as a dial. Found on `ontrak-genie/package.json`.
+        line = '    "gateway:docker": "docker run --rm -p 20128:20128 diegosouzapw/omniroute",\n'
+        self.assertEqual(self.violations({"ontrak-genie/package.json": line}), [])
+
     def test_comments_are_not_configuration(self):
         self.assertEqual(self.violations({"app/.env": "# was http://192.168.1.46:20128/v1 before the split\n"}), [])
 
@@ -378,6 +385,12 @@ class BindingAndTargetTests(unittest.TestCase):
         for line in ('- "172.17.0.1:20128:20128"', "20128:20128", '- "${X:-20128}:20128"', '- "127.0.0.1:20128:20128/udp"'):
             with self.subTest(line=line):
                 self.assertIsNotNone(chk.BINDING.match(line))
+
+    def test_a_publish_flag_is_recognised_in_its_several_shapes(self):
+        for line in ("docker run --rm -p 20128:20128 img", "docker run --publish 20128:20128 img",
+                     "docker run --publish=20128:20128 img", "docker run -p=20128:20128 img"):
+            with self.subTest(line=line):
+                self.assertNotIn("20128:20128", chk.PUBLISH.sub(" ", line))
 
     def test_targets_are_not_mistaken_for_bindings(self):
         for line in ("OMNIROUTE_URL=http://192.168.1.46:20128", "host: 192.168.1.46", "url: http://omniroute:20128/v1"):
