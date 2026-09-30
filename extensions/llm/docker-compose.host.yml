@@ -155,6 +155,18 @@ services:
       # because which models a build may use is "whatever the gateway has
       # *connected*". The rest of the management API stays behind the session.
       - '--skip-auth-route=^/api/providers(\?.*)?$'
+      # The two calls Distro's control plane mints a per-user gateway key with: it
+      # signs in to the dashboard (`/api/auth/login`, with the dashboard's own
+      # password) and then creates the key (`/api/keys`), and it revokes one by id
+      # (`/api/keys/<id>`). It is a service rather than a browser, so it has no
+      # Authentik session to present — and `host.docker.internal` is its own docker0
+      # since the gateway moved to its own host, so there is nothing else left for it
+      # to dial. What is lifted here is the SSO hop, not the credential: OmniRoute's
+      # own password still covers `/api/auth/login`, and `/api/keys` still needs the
+      # session that call returns. Nothing else under `/api/` is exempt.
+      - '--skip-auth-route=^/api/auth/login(\?.*)?$'
+      - '--skip-auth-route=^/api/keys(\?.*)?$'
+      - --skip-auth-route=^/api/keys/
       # No --redirect-url ON PURPOSE: left unset, oauth2-proxy derives the
       # callback from the request Host, so each served name logs in on itself.
       # This list is what turns "whatever Host arrived" into a decided set.
