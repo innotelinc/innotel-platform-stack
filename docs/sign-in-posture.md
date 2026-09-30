@@ -102,7 +102,7 @@ gets wrong:
 | Role | Variable | Value |
 | --- | --- | --- |
 | where the store **binds** (on its own host) | `SSO_SESSION_REDIS_BIND` / `SSO_SESSION_REDIS_DOCKER_BIND` / `SSO_SESSION_REDIS_LAN_BIND` | `127.0.0.1` / `172.17.0.1` / that host's LAN IP |
-| where a **client stack** dials it | `SSO_SESSION_REDIS_HOST` | the store host's routable LAN IP (`192.168.1.46`) |
+| where a **client stack** dials it | `SSO_SESSION_REDIS_HOST` | the store host's routable LAN IP (`192.168.1.71`) |
 
 `172.17.0.1` is docker0 **of whichever host is asking** — right only on the host
 that runs the store. A gateway that cannot reach the store does not degrade: it
@@ -129,9 +129,9 @@ that runs the store. A gateway that cannot reach the store does not degrade: it
 ## 1. How a gateway works, and the three things that make it work
 
 ```
-browser ──https──▶ NPM edge (192.168.1.46)
+browser ──https──▶ NPM edge (192.168.1.71)
                      │  e.g. n8n.capstone.innotel.us
-                     ▼  http://192.168.1.46:14010
+                     ▼  http://192.168.1.71:14010
                n8n-sso (oauth2-proxy)
                      │   ──▶ Authentik: /application/o/authorize/  (code + PKCE)
                      │   ──▶ redis: cerulean-sso-sessions (the session lives here)
@@ -161,7 +161,7 @@ browser holds one opaque id.
 **One store, three networks — and now three hosts.** The gateways live in three
 different Docker networks (the edge's own, Monarch's, Capstone's), so the session
 store is published on the edge host — `cerulean-sso-sessions`,
-`192.168.1.46:16380`, on loopback, docker0 *and* the LAN address — with a
+`192.168.1.71:16380`, on loopback, docker0 *and* the LAN address — with a
 password that is the whole control on that listener (an empty one refuses to
 start). Sessions are the only thing in it, there is no volume, and losing it
 costs a re-login.
@@ -169,7 +169,7 @@ costs a re-login.
 The LAN bind is not decoration. Capstone, Monarch and Olympus were split onto
 servers of their own, and **neither the edge's loopback nor its docker0 gateway
 is reachable across a host boundary** — so each zone that moved away must set
-`SSO_SESSION_REDIS_HOST` to `192.168.1.46`. `172.17.0.1` is correct only on the
+`SSO_SESSION_REDIS_HOST` to `192.168.1.71`. `172.17.0.1` is correct only on the
 edge host itself, where it names the store directly; anywhere else it names that
 host's *own* empty docker0 and every gateway exits on
 `dial tcp 172.17.0.1:16380: connect: connection refused`. Olympus is the one
@@ -200,8 +200,8 @@ is a second sign-in.
 | `grist.capstone.innotel.us` | `grist-sso` | `14011` | `http://grist:8484` | `innotel-app-gateway` |
 | `grafana.capstone.innotel.us` | `grafana-sso` | `14012` | `http://grafana:3000` | `innotel-app-gateway` |
 | `workflow.capstone.innotel.us` | `workflow-sso` | `14013` | `http://workflow-studio:8090` | `innotel-app-gateway` |
-| `pbx.capstone`, `pbx.innotel.us`, `pbx.zeus`, `fax.zeus` | `pbx-sso` | `14014` | `http://192.168.1.46:8083` (FreePBX) | `innotel-app-gateway` |
-| `dns.internal.innotel.us` | `technitium-sso` | `14015` | `http://192.168.1.46:5380` | `innotel-app-gateway` |
+| `pbx.capstone`, `pbx.innotel.us`, `pbx.zeus`, `fax.zeus` | `pbx-sso` | `14014` | `http://192.168.1.30:8083` (FreePBX) | `innotel-app-gateway` |
+| `dns.internal.innotel.us` | `technitium-sso` | `14015` | `http://192.168.1.71:5380` | `innotel-app-gateway` |
 
 Host ports are *per host*, and `14010`–`14013` are now used twice: they are
 Capstone's app gateways on `.30` and the four media gateways above on `.56`. The
@@ -421,7 +421,7 @@ committed test behind it (the table in §4).
    is what broke.
 3. **The shared SSO session store is password-guarded, and published where it
    has to be.** `cerulean-sso-sessions` listens on the edge host's loopback,
-   its docker0 and its LAN address (`192.168.1.46:16380`). The LAN bind is what
+   its docker0 and its LAN address (`192.168.1.71:16380`). The LAN bind is what
    lets a stack that moved to another server keep the same session: the other
    two bindings are unreachable from there, and a zone whose gateways were left
    on `172.17.0.1` (Monarch's were — see the live audit below) never reaches the
@@ -591,8 +591,8 @@ store showed:
 ```
 
 and it read as "Monarch's gateways cannot reach the store". They can: a bare `nc`
-run inside `radarr-sso`'s own network namespace reaches `192.168.1.46:16380`, and
-`.56`'s `.env` already carried `SSO_SESSION_REDIS_HOST=192.168.1.46`. The `.30`
+run inside `radarr-sso`'s own network namespace reaches `192.168.1.71:16380`, and
+`.56`'s `.env` already carried `SSO_SESSION_REDIS_HOST=192.168.1.71`. The `.30`
 connections are the ones that had been *used*; the media gateways had simply not
 stored a session since they were restarted. What settles the question is the
 zone's own test, which drives a real authorization-code flow per target — and
@@ -602,7 +602,7 @@ Where that leaves the config: `SSO_SESSION_REDIS_HOST` must be the edge host's L
 address on every zone that does not run the store. Monarch's `.env.example`
 shipped the wrong value (`172.17.0.1` — that zone's own docker0, which holds no
 store) and Capstone's template said nothing host-specific needed pinning; both now
-carry `192.168.1.46` with the reason. Both zones' `verify-sso.py` asserted the
+carry `192.168.1.71` with the reason. Both zones' `verify-sso.py` asserted the
 store was *off* the LAN and answering on loopback — true only while every stack
 shared one box, and false in both directions now — and instead assert it answers
 where their gateways dial and refuses an unauthenticated `PING`.
@@ -628,7 +628,7 @@ where their gateways dial and refuses an unauthenticated `PING`.
 fronts stayed on `.46`: `cerulean-technitium` is `network_mode: host` and binds
 `127.0.0.1` and `172.17.0.1` only, refusing the LAN address by design (§5.2), and
 there is no mesh network between the hosts — so `.30` cannot reach it at all
-(`192.168.1.46:5380` and its own `172.17.0.1:5380` both refuse). Closing this is a
+(`192.168.1.71:5380` and its own `172.17.0.1:5380` both refuse). Closing this is a
 posture choice, not a config typo:
 
 - run `technitium-sso` on `.46`, where its upstream lives on loopback and docker0,

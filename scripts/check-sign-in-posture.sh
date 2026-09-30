@@ -21,7 +21,7 @@
 #
 # Usage:
 #   ./scripts/check-sign-in-posture.sh                  # every zone
-#   ./scripts/check-sign-in-posture.sh --only olympus capstone
+#   ./scripts/check-sign-in-posture.sh --only capstone distro
 #   ./scripts/check-sign-in-posture.sh --list
 #
 # Exit codes: 0 = every zone passed (skips are allowed), 1 = at least one FAILED.
@@ -40,7 +40,10 @@ ZONES=(
   "signara|1-primary/signara"
   "capstone|2-voice/capstone"
   "monarch|3-media/monarch"
-  "olympus|5-dev/olympus"
+  # Olympus is decommissioned (its i3 `.50` and the `.64` factory/studio
+  # container were removed 2026-09-30, replaced by Genie), so it is no longer a
+  # zone this runner can grade. The `5-dev/olympus` repo still exists — only the
+  # deployment is gone.
   # Distro joined when its console was made Authentik-only; it is OIDC-native
   # (no oauth2-proxy gateway), so its test asserts the issuer handshake and a
   # real code flow rather than the gateway hop the six above do.

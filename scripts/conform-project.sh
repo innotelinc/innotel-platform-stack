@@ -729,7 +729,10 @@ MAKEFILE_EOF
 }
 
 write_env_example() {
-  local dir="$1" name="$2" domain="$3"
+  # $4 is the repo slug the Vault policy path is named for. It defaults to the
+  # repo name, which is what every current caller passes — without the default
+  # the heredoc's `${4}` is unbound and `set -u` aborts the scaffold midway.
+  local dir="$1" name="$2" domain="$3" slug="${4:-$2}"
   cat > "${dir}/.env.example" <<ENV_EOF
 [TEMPLATE]
 # ==========================================================================
@@ -768,15 +771,15 @@ CERULEAN_ZONE=innotel.us
 
 # --- Cerulean Vault (SecretOps — HashiCorp Vault, KV v2) --------------------
 # The platform runs it as \`cerulean-vault\`; this repo gets a path-scoped
-# \`${4}\` policy. Values in this file may be \`vault://<mount>/<path>#<key>\`
+# \`${slug}\` policy. Values in this file may be \`vault://<mount>/<path>#<key>\`
 # references resolved at startup, e.g.
-#   OMNIROUTE_API_KEY=vault://cerulean/${4}#OMNIROUTE_API_KEY
+#   OMNIROUTE_API_KEY=vault://cerulean/${slug}#OMNIROUTE_API_KEY
 VAULT_ADDR=
 VAULT_TOKEN=
 # Preferred over VAULT_TOKEN: a file both the Vault CLI and this stack read.
-VAULT_TOKEN_FILE=./data/vault/token/${4}.token
+VAULT_TOKEN_FILE=./data/vault/token/${slug}.token
 VAULT_PREFIX=cerulean
-VAULT_PATH=${4}
+VAULT_PATH=${slug}
 VAULT_NAMESPACE=
 # "1" accepts a self-signed certificate; VAULT_CACERT pins a CA instead.
 VAULT_SKIP_VERIFY=

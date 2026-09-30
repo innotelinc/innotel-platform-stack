@@ -16,7 +16,7 @@ stack doc, same license posture, same env template, same CI posture. Use
 > wildcard certificate (one `*.<base>.innotel.us` per stack), writes the BIND zone records,
 > and creates/updates the NPM proxy host through `POST /npm/hosts` and `PUT /npm/hosts/:id`.
 > The NPM admin UI and raw REST API are operator-recovery tooling only — no stack script,
-> setup helper, or automation calls `192.168.1.46:81` (or any NPM API endpoint) directly.
+> setup helper, or automation calls `192.168.1.71:81` (or any NPM API endpoint) directly.
 > When a new service appears, add its DNS `A` record and its NPM proxy host via Cerulean,
 > attach the stack's existing wildcard cert, and force SSL. Cert material is never stored in
 > a repo `.env` or mounted into a business container.
