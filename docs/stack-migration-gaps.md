@@ -840,3 +840,42 @@ the new `tests/test_oidc.py`.
    caught by anything but its unit tests. Distro is the template: also
    OIDC-native, and its script asserts the closed password path, the issuer
    handshake and a real code flow against a throwaway identity.
+
+### A host move leaves the plane's gateway address, and its password, behind (2026-09-30)
+
+Genie's tenancy went on, which means a signed-in turn now resolves the subject to
+a Distro account and spends *that account's* gateway key — Distro is the only
+component that mints one. That is what surfaced this. Sign-in succeeded, the
+tenancy gate refused to fall back to the shared key (correctly), and then
+`/api/workspace` and `/api/chat` both answered `503` with
+`The tenancy service could not identify this account … gateway unreachable: fetch failed.`
+
+Three separate leftovers of the `.46`→`.71`/`.61` move were stacked behind that
+one message, and any of them alone would have produced a different symptom:
+
+- **The address.** The live plane's baked environment still held
+  `GATEWAY_API_URL`/`GATEWAY_DASHBOARD_URL=http://host.docker.internal:20128`, and
+  `/opt/distro/.env` carried no override, so the compose default stood. On the
+  gateway's own host that default *is* the gateway; anywhere else it is the
+  plane's own docker0, which answers nothing — `ECONNREFUSED`. The plane runs on
+  `.61`; the gateway moved to `.71`.
+- **The door.** Even with the address corrected, the gateway's SSO proxy
+  (oauth2-proxy on `192.168.1.71:20128`) was gating `/api/auth/login` and
+  `/api/keys`, so a service presenting no Authentik session got an HTML login page
+  instead of the dashboard. Exactly those two routes are now exempt (see
+  `extensions/llm/docker-compose.host.yml`); OmniRoute's own password still covers
+  the first, and the session it returns still covers the second.
+- **The password.** `GATEWAY_ADMIN_PASSWORD` interpolates `INITIAL_PASSWORD`, and
+  the `.env` value had drifted from the gateway's own `OMNIROUTE_INITIAL_PASSWORD`.
+  Reading both byte-for-byte (base64 through the pipe, never a shell-quoted
+  variable) showed the gateway's own value was the right one.
+
+The part worth keeping: **`env_file` is read when the container is created.**
+Editing `/opt/distro/.env` and restarting changes nothing — the plane kept serving
+`CHANGEME` and the dead URL until it was re-created (`docker compose -p distro
+--env-file .env -f docker-compose.yml up -d --force-recreate control-plane`). So
+the check after a host move is not "is the variable set in the file" but "does the
+plane log in and mint a key": from inside the container `POST /api/auth/login`
+answered `200 {"success":true}`, and a real signed-in turn then resolved
+`accounts/<id>` and answered. The throwaway identity used to prove that, and the
+key the plane minted for it, were both removed afterwards.
