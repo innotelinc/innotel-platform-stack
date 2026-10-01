@@ -12,6 +12,7 @@
 #   1-primary/magnate/docker-compose.yml
 #   1-primary/sign/docker-compose.yml
 #   1-primary/signara/docker-compose.prod.yml, docker-compose.override.prod.yml
+#   1-primary/genesis/docker-compose.yml
 
 name: innotel-group1
 
@@ -165,7 +166,11 @@ services:
       # Server-side sessions, the platform-wide store this host already runs: the
       # gateways share ONE store so one sign-in covers them all.
       OAUTH2_PROXY_SESSION_STORE_TYPE: redis
-      OAUTH2_PROXY_REDIS_CONNECTION_URL: redis://:${SSO_SESSION_REDIS_PASSWORD:-}@cerulean-sso-sessions:6379/0
+      # SSO_SESSION_REDIS_URL carries the whole connection string so the shared
+      # store can be moved to the edge's own host (its canonical home) without
+      # every gateway here having to know. Default keeps the in-project service
+      # name for a self-contained deployment.
+      OAUTH2_PROXY_REDIS_CONNECTION_URL: ${SSO_SESSION_REDIS_URL:-redis://:${SSO_SESSION_REDIS_PASSWORD:-}@cerulean-sso-sessions:6379/0}
       OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
       OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
       OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
@@ -184,9 +189,9 @@ services:
     # SSO door, so there is nothing behind it for a loopback bind to protect.
     ports:
       - "${TECHNITIUM_SSO_PORT:-14015}:4180"
-    depends_on:
-      cerulean-sso-sessions:
-        condition: service_started
+    # No depends_on cerulean-sso-sessions: the session store lives with the NPM
+    # edge (its own compose), and this gateway may reach it over the LAN via
+    # SSO_SESSION_REDIS_URL instead of a project-local service name.
 
   # ── Authentik (OPT-IN: docker compose --profile authentik up -d) ────────
 
@@ -337,12 +342,12 @@ services:
     # the Authentik forward-auth sign-in (`backend/lib/sso.js`), which the
     # upstream image does not have. NPM is no longer a second user directory:
     # the admin UI signs in with the identity the edge already authenticated.
-    image: innotel/npm-edge:2.15.1
+    image: innotel/npm-edge:2.16.0
     build:
       context: ../../1-primary/npm
       dockerfile: docker/Dockerfile.sso
       args:
-        BUILD_VERSION: '2.15.1'
+        BUILD_VERSION: '2.16.0'
     container_name: cerulean-npm
     profiles: ["npm"]
     restart: unless-stopped
@@ -577,12 +582,12 @@ services:
     # Authentik forward-auth sign-in the upstream image does not have — see
     # docs/stack.md. Leave AUTH_SSO_ENABLED unset for a plain upstream-like
     # install (the password form behaves exactly as before).
-    image: 'innotel/npm-edge:2.15.1'
+    image: 'innotel/npm-edge:2.16.0'
     build:
       context: ../../1-primary/npm
       dockerfile: docker/Dockerfile.sso
       args:
-        BUILD_VERSION: '2.15.1'
+        BUILD_VERSION: '2.16.0'
     restart: unless-stopped
     ports:
       - '${NPM_HTTP_PORT:-80}:80'   # Public HTTP Port
@@ -723,8 +728,9 @@ services:
       AUTHENTIK_BASE_URL: "${AUTHENTIK_BASE_URL:-}"
       AUTHENTIK_BOOTSTRAP_TOKEN: "${AUTHENTIK_BOOTSTRAP_TOKEN:-}"
       # SecretOps (Cerulean Vault) — the entrypoint resolves vault:// refs
-      # (Stripe keys) through these before boot. The path-scoped token file is
-      # minted by the platform: data/vault/token/magnate.token on .46.
+      # (Stripe keys) through these before boot. Point VAULT_ADDR at whichever
+      # host runs Cerulean's Vault and copy the path-scoped token the platform
+      # mints for this stack into ./data/vault/token/magnate.token.
       VAULT_ADDR: "${VAULT_ADDR:-}"
       VAULT_TOKEN: "${VAULT_TOKEN:-}"
       VAULT_TOKEN_FILE: "${VAULT_TOKEN_FILE:-}"
@@ -1196,9 +1202,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-signara}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
       POSTGRES_DB: ${POSTGRES_DB:-signara}
-      AUTHENTIK_POSTGRES_HOST: ${AUTHENTIK_POSTGRES_HOST:-cerulean-authentik-postgres}
+      AUTHENTIK_POSTGRES_HOST: ${AUTHENTIK_POSTGRES_HOST:-}
       AUTHENTIK_POSTGRES_USER: authentik
-      AUTHENTIK_POSTGRES_PASSWORD: ${AUTHENTIK_DB_PASSWORD:-}
+      AUTHENTIK_POSTGRES_PASSWORD: ""
       AUTHENTIK_POSTGRES_DB: authentik
       # Backs up whatever the API is actually using, so it follows the storage
       # profile rather than naming MinIO.
@@ -1228,13 +1234,16 @@ services:
     logging: *logging-default
 
     profiles: ['monitoring']
-    # The identity plane on this host is Cerulean's Authentik, not a database in
-    # this stack, so the backup joins Cerulean's network to dump it. Without this
-    # the restore brings the documents back but not the logins — and the
-    # identity-coverage metric would be 0, which is what raises the alert.
-    networks:
-      - default
-      - cerulean
+    # The identity plane is not in this stack: Authentik is Cerulean's, and it
+    # runs on the host that owns it (192.168.1.71), where Cerulean dumps it
+    # (1-primary/cerulean/scripts/authentik-db-backup.sh). Signara used to reach
+    # that database by joining Cerulean's docker network, which worked only while
+    # Signara ran on the same host; it now runs on 192.168.1.44, and a docker
+    # network does not span hosts. Rather than fail every run trying to reach an
+    # unreachable database, the identity dump is explicitly out of scope here:
+    # the empty password switches it off in backup.sh, and
+    # `signara_backup_identity_expected` reports 0 so the identity-coverage alert
+    # does not fire for a host that does not hold the identity plane.
 
   backup-metrics:   # from signara (profiles: 'monitoring')
     image: python:3.12-alpine
@@ -1250,6 +1259,41 @@ services:
     logging: *logging-default
 
     profiles: ['monitoring']
+
+  genesis:   # from genesis
+    build:
+      context: ../../1-primary/genesis
+    image: ghcr.io/innotelinc/genesis:latest
+    container_name: genesis
+    restart: unless-stopped
+    env_file:
+      - ../../1-primary/genesis/.env
+    environment:
+      # The Docker host's LAN address, not a bridge address: the edge reaches
+      # this port from outside the compose network (see the platform stack's
+      # "LAN IPs only" rule). Bind to all interfaces and publish on the host.
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    ports:
+      # Host port configurable via GENESIS_PORT (default 3000), so the portal can
+      # sit beside the other :3000 services on a shared group-1 host — the same
+      # reason Magnate exposes MAGNATE_PORT. The container always listens on 3000.
+      - "${GENESIS_PORT:-3000}:3000"
+    volumes:
+      # The SQLite database and its WAL live here; losing the container must not
+      # lose the record.
+      - genesis-data:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 
   tutor-mysql:   # group-owned (extras/1-primary.yml)
@@ -1434,6 +1478,7 @@ volumes:
   lokidata:
   alertdata:
   backupcache:
+  genesis-data:
 
 networks:
   default:
@@ -1444,6 +1489,3 @@ networks:
     name: magnate-net
   app-network:
     driver: bridge
-  cerulean:
-    external: true
-    name: cerulean_default

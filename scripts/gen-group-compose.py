@@ -113,6 +113,13 @@ SOURCES: dict[str, dict[str, list[str]]] = {
         # Both: the trust host runs Signara as `docker-compose.prod.yml` *with*
         # its prod override applied — that is the pair its containers report.
         "signara": ["docker-compose.prod.yml", "docker-compose.override.prod.yml"],
+        # Genesis (BusinessOps): intake, the launch workflow and the assisted EIN
+        # filing. One service, one SQLite volume; it reaches the rest of the stack
+        # over the network and nothing depends on it. It was under `1-primary/`
+        # but absent from this table, which is why the drift check reported
+        # `genesis` as a service a member repo declares and the group file does
+        # not — the same blind spot rule 1 exists to catch.
+        "genesis": ["docker-compose.yml"],
         # atheniq is Tutor-managed (`tutor local`), so its compose carries only
         # profile-gated extras; the LMS itself is group-owned (see the extras).
     },

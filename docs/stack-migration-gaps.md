@@ -879,3 +879,93 @@ plane log in and mint a key": from inside the container `POST /api/auth/login`
 answered `200 {"success":true}`, and a real signed-in turn then resolved
 `accounts/<id>` and answered. The throwaway identity used to prove that, and the
 key the plane minted for it, were both removed afterwards.
+
+### Two guard defects, the probe accounts, and the repos the group files never declared (2026-09-30)
+
+A full pass over the estate's own checkers — gateway targets, group drift, Vault
+references, the credential audit, the secret scan, sign-in posture, attribution
+and the conformity audit — turned up three classes of thing: the leftovers of
+testing, two checks that reported the *opposite* of the truth, and a repo living
+in a group's directory that the group's compose had never heard of.
+
+**The probes were retired, on both sides.** Four accounts from the sign-in and
+tenancy proofs (`e2e-probe`, `e2e-olympus-sso`, `e2e-distro-sso` and
+`diagnostic`) were still in Distro's control plane and still holding gateway
+keys. Deleting the plane rows alone would have left the keys live — the gateway
+has its own store — so both were done: two keys deleted live through the admin
+API (the other three had already gone), and 20 rows across `gateway_keys`,
+`quotas`, `sessions` and `users` removed from `/data/control.sqlite`. Live keys
+went 6 → 4 and users 3 → 2, and the account workspace directories under the
+Genie container were checked rather than assumed. A retirement that only cleans
+the database leaves a working credential behind, which is the worse half.
+
+**Two checkers were wrong in the same direction: they looked configured and
+verified nothing.**
+
+- **`check-vault-refs.py` skipped a quoted reference.** `olympus` writes
+  `AUTHENTIK_TOKEN='vault://cerulean/olympus/authentik#AUTHENTIK_TOKEN'`, and the
+  scanner matched the raw line — a value that starts with `'` is not `vault://`,
+  so the reference was silently *not* checked. Quoting a reference is not exotic;
+  every shell and dotenv parser strips the quotes before the value is used, so
+  the reference is real and the blind spot was the check's, not the file's. The
+  scanner now unquotes a matching pair before matching, and re-running it against
+  the live Vault resolves **9 references, exit 0** — the olympus one included.
+- **`env-credential-audit.py` read a reference as a credential.** A value like
+  `vault://cerulean/zeus#STRIPE_SECRET` contains a `#`, which the audit measures
+  as a URL fragment that would swallow what follows — eight false `WARN`s across
+  the estate. The store was the *fix* for those secrets, not the bug. The audit is
+  now reference-aware (`vault://` / `infisical://`) and the run is **17 files, 0
+errors, 0 warnings**.
+- **The other direction still fails, deliberately.** A raw secret containing `#`
+  is still an error, and a URL with a trailing comment is still reported — so the
+  fix is "a *reference* is resolved before use", not "`#` is fine in a URL". The
+  tests pin both, because a guard loosened until it stops complaining is worse
+  than the false positive it replaced.
+
+**A repo can sit in a group's directory and still not be in the group's compose.**
+This is the finding the drift check exists for (rule 1), and it was three
+services:
+
+- **`genesis`** — the BusinessOps platform — lived under `1-primary/` and was
+  declared by `gen-group-compose.py` nowhere, so a host rebuilt from the group
+  file would have come up without it. It is in `SOURCES` now and the generated
+  compose carries it.
+- **`ontrak-api` / `ontrak-web`** are `1-primary/ontrak-sync`, and the answer is
+  not to declare them: both services bind `192.168.1.21` (`ONTRAK_API_BIND`
+  :8420, `ONTRAK_WEB_BIND` :8421) — the OnTrak family container on i1, an address
+  a group-1 host does not have. That is rule 8's case exactly, so the repo is
+  recorded in `OWN_HOST_REPOS` with the measurement, and the drift check now
+  reports every group compose as declaring what its member repos run (**exit 0**,
+  down from three findings).
+
+What the pass left alone, and why:
+
+- **The group-1 host publishes port 3000 five times by default** (`cerulean`,
+  `client`, `frontend`, `genesis`, `magnate`). The generator reports that rather
+  than picking an owner, correctly — but two of the five are configurable now
+  (`MAGNATE_PORT`, and `GENESIS_PORT` after this pass), which is how a host
+  settles it without a code change.
+- **`OWN_HOST_REPOS` still names `5-dev/ontrak`, a directory that is gone.** The
+  entry is a stale *claim*, and the check says so as a warning rather than a
+  failure (rule 9). It was left in place: the drift test relies on that key, and
+  removing a pin is a separate change with its own review.
+- **Four sign-in posture zones fail from this host** (`cerulean`, `capstone`,
+  `monarch`, `distro`) because each zone's script asserts *host-local*
+  reachability. That is the documented caveat, not a regression: run a zone's
+  check on the zone's own host for the real answer.
+- **`1-primary/sign` still fails the conformity audit** — its landing is not
+  published on GitHub Pages. That is a one-setting fix on the repo, not a code
+  change here.
+- **`1-primary/ontrak` carries nine in-history attribution violations** (all
+  2026-09-30). The hooks and CI stop new ones; nothing removes old ones. The
+  audit itself is explicit that fixing history is a deliberate, reviewed act —
+  rewrite the message, then force-push with a lease — so it is recorded and not
+  done.
+
+Genesis, the repo this pass was mostly about, is now published and conforms:
+`innotelinc/genesis` on `main`, its landing live at
+`https://innotelinc.github.io/genesis/`, its guard and CI green, and the
+conformity audit reporting every check passed — including the Pages check `sign`
+fails. CI builds the container image and asserts `/api/health` from a running one,
+which is how the missing `better-sqlite3` toolchain was found: the image had not
+built at all before this pass, and nothing had ever tried.
