@@ -55,6 +55,13 @@ CREDENTIAL = re.compile(r"(PASS|PASSWORD|PWD|SECRET|TOKEN|APIKEY|API_KEY|_KEY$|^
 CREDENTIAL_LIST = re.compile(r"_(TOKENS|KEYS|SECRETS|PASSWORDS|TOKEN_LIST)$", re.I)
 URL_VALUE = re.compile(r"^(.*_URL|.*_URI|.*_DSN|.*_ENDPOINT|.*_ENDPOINTS)$", re.I)
 REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+# A value that is a *reference* to the secret store, not the secret. The resolver
+# fetches the real value at boot, so the `#` in `vault://<mount>/<path>#<KEY>` is
+# the reference's key separator, not a fragment a URL would swallow. Reading it as
+# a credential is a false positive: the store was the fix, not the bug. `infisical`
+# is included because a leftover reference is reported by check-vault-refs.py, not
+# here, and this audit must not be the second thing to shout about it.
+REFERENCE_VALUE = re.compile(r"^(vault|infisical)://", re.I)
 ASSIGNMENT = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
 
 # The characters that break a query string / userinfo when embedded raw.
@@ -109,6 +116,9 @@ def problems(env: dict[str, str]) -> list[tuple[str, str, str]]:
 
     for key, value in env.items():
         if not value:
+            continue
+        if REFERENCE_VALUE.match(value):
+            # Resolved before use: the `#` belongs to the reference grammar.
             continue
         if URL_VALUE.match(key):
             # A URL may carry its credential inline (scheme://user:pw@host) rather

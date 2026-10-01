@@ -91,6 +91,12 @@ from pathlib import Path
 REF_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=vault://([^#\s]+)#(\S+)$")
 NO_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=vault://([^#\s]+)$")
 LEGACY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=infisical://(\S+)$")
+# A value may be wrapped in a matching pair of quotes: `KEY='vault://…'`. dotenv
+# and every shell parser strip them, so the reference is real and has to be
+# checked — a quoted reference this scanner skipped would be the same blind spot
+# as an unresolvable one: it looks configured everywhere and is never verified.
+# The quote is removed before matching, never treated as part of the reference.
+QUOTED_VALUE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(['\"])(.*)\2$")
 
 DEFAULT_MOUNT = "cerulean"
 DEFAULT_ADDR = "http://127.0.0.1:8200"
@@ -173,9 +179,22 @@ def relative(path: Path, roots: list[Path]) -> str:
     return str(path)
 
 
+def unquote_value(text: str) -> str:
+    """`KEY='vault://…'` → `KEY=vault://…`; anything else is returned unchanged.
+
+    Only a *matching* pair of quotes is stripped, and only when the first
+    character after `=` is the quote, so a value that merely starts and ends with
+    the same character (a path like `KEY=/a/`) is left alone.
+    """
+    match = QUOTED_VALUE.match(text)
+    if not match:
+        return text
+    return f"{match.group(1)}={match.group(3)}"
+
+
 def scan_env(path: Path, line_no: int, line: str) -> list[Finding]:
     """The findings a single line produces, before any call to Vault."""
-    text = line.strip()
+    text = unquote_value(line.strip())
     if not text or text.startswith("#"):
         return []
 

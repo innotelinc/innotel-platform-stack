@@ -243,6 +243,43 @@ class StoredValues(ScanCase):
         self.assertEqual(len(self.violations(self.files(), vault)), 1)
 
 
+class QuotedValues(ScanCase):
+    """A quoted value is the value, not a different thing.
+
+    dotenv and every shell parser strip a matching pair of quotes, so
+    `KEY='vault://…'` is the same reference as `KEY=vault://…` and resolves the
+    same way. Skipping the quoted form silently was the real failure: olympus's
+    `AUTHENTIK_TOKEN` sat quoted in its `.env`, so the estate sweep reported it
+    as nothing to check and never verified the secret behind it.
+    """
+
+    def files(self, quote="'"):
+        return {
+            "1-primary/x/.env": f"TOKEN={quote}vault://cerulean/x#TOKEN{quote}\n",
+            "1-primary/x/data/vault/token/x.token": "s.x-token\n",
+        }
+
+    def test_a_single_quoted_reference_resolves(self):
+        vault = FakeVault({("cerulean", "x"): ("ok", {"TOKEN": "a-value"})})
+        findings = self.scan(self.files("'"), vault)[0]
+        self.assertEqual([f.status for f in findings], ["ok"])
+        self.assertEqual(vault.asked[0][:2], ("cerulean", "x"))
+
+    def test_a_double_quoted_reference_resolves(self):
+        vault = FakeVault({("cerulean", "x"): ("ok", {"TOKEN": "a-value"})})
+        self.assertEqual([f.status for f in self.scan(self.files('"'), vault)[0]], ["ok"])
+
+    def test_a_quoted_reference_without_a_key_is_still_missing(self):
+        findings = self.scan({"1-primary/x/.env": "TOKEN='vault://cerulean/x'\n"})[0]
+        self.assertEqual([f.status for f in findings], ["missing"])
+        self.assertIn("#key", findings[0].detail)
+
+    def test_a_value_that_only_looks_quoted_is_untouched(self):
+        # `/a/` starts and ends with `/`: stripping it would be a bug of its own.
+        self.assertEqual(chk.unquote_value("KEY=/a/"), "KEY=/a/")
+        self.assertEqual(chk.unquote_value("KEY='x'"), "KEY=x")
+
+
 class LegacyStore(ScanCase):
     """Rule 5 — Infisical is retired, so a leftover reference fails."""
 
