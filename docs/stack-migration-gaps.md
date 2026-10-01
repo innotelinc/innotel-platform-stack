@@ -495,8 +495,12 @@ until someone asks. Two consequences worth acting on:
 `ips/scripts/gen-group-compose.py` builds `ips/groups/<group>.yml` from the
 member repos named in its `SOURCES` table, and `--check` fails when the
 checked-in file is stale. Both the drift check and `--check` are wired into
-CI (`.github/workflows/ci.yml`); each skips cleanly in a checkout that stands
-alone, so a host with the estate is where they do the real work. The hand-written files it replaces are gone: each group
+CI (`.github/workflows/ci.yml`). The drift check still skips cleanly in a
+checkout that stands alone, so a host with the estate is where it does the real
+work; `--check` no longer needs one — `scripts/fetch-group-members.py`
+shallow-clones the members into a scratch root and `--root` points the check at
+it, so it fails in CI the moment a member repo's compose changes without the
+group file being regenerated. The hand-written files it replaces are gone: each group
 dir's `docker-compose.yml` is a pointer, and `stack.sh` runs the generated file.
 
 Four decisions in it are worth knowing, because each one was a measured call and
@@ -962,24 +966,34 @@ What the pass left alone, and why:
   rewrite the message, then force-push with a lease — so it is recorded and not
   done.
 
-**And the group composes for `2-voice` and `5-dev` are stale, with the check that
-should say so unable to.** Regenerating them from the working trees rewrites
-about 150 lines — capstone's `ZEUS_RETURN_ENABLED`, coturn's `--no-stun` — because
-capstone, zeus, olympus and atlas all carry uncommitted work right now. Two
-things follow, and the second is the one worth keeping:
+**The group composes for `2-voice`, `4-social` and `5-dev` were stale — and the
+check that should have said so could not.** Both halves are fixed, and the shape
+matters more than the three files:
 
-- **Regenerating would publish unreviewed work.** The generated file is what a
-group host is rebuilt from, so folding another stack's in-flight changes into it
-is a decision with an owner, not a chore to sweep up in passing. It was reverted
-and left for whoever owns those changes.
-- **The check cannot catch it where the check runs.** `gen-group-compose.py
---check` is a CI step (`ci.yml`), and CI checks out `ips` alone — the group
-directories are not beside it, so the script correctly reports "this checkout
-stands alone … nothing to generate" and passes. The guard runs, and can never
-fail. That is the same shape as the two defects above: a check that looks like
-coverage and is not. Making it real means either generating the groups in a CI
-checkout that has the repos, or checking in just the member repos' headers — a
-change to the pipeline, recorded here rather than made silently.
+- **The check runs where the repos are now.** `gen-group-compose.py --check`
+  compares a generated group compose against the member repos, so it can only
+  work where those repos are — and CI checks out `ips` alone, where it reported
+  "this checkout stands alone … nothing to generate" and passed. A guard that
+  looks like coverage and can never fail, the same shape as the two defects
+  above. The CI step now shallow-clones every repo `SOURCES` names into a scratch
+  root (`scripts/fetch-group-members.py`) and points the check at it with a new
+  `--root` option; the checked-in files are still read from, and compared
+  against, this repo. A member repo's compose change now fails this job until
+  the group file is regenerated and committed — which is the point, since the
+  generated file is what a host is rebuilt from.
+- **Regenerating from the working trees would publish unreviewed work.** The
+  generated file is a deployment decision with an owner, so folding another
+  stack's in-flight changes into it is not a chore to sweep up in passing — and
+  capstone, zeus, olympus and atlas all carry uncommitted work right now. But the
+  staleness was not *only* the dirty trees: the committed capstone, zeus, olympus
+  and onyx had moved on too (`.30`→`.46`, `ZEUS_RETURN_ENABLED`, coturn's
+  `--no-stun`, the OmniRoute move to `extensions/llm`, the gateway-sso bind). A
+  clean clone is therefore the right source — it is what a host pulls, it carries
+  only reviewed-and-committed work, and it is exactly what CI sees. Regenerating
+  from a `git archive HEAD` of the members brought all three files current;
+  `4-social` was stale by a single `.71`→`.46` comment, so the drift is not only
+  the big hunks. The dirty trees on this host still differ from their own commits
+  and are left for their owners; the group files now track the commits.
 
 Genesis, the repo this pass was mostly about, is now published and conforms:
 `innotelinc/genesis` on `main`, its landing live at

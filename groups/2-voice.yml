@@ -127,7 +127,7 @@ services:
       # browsers fetch recordings/transcripts straight from MinIO through that
       # route — and the edge can only reach the host's LAN address, never its
       # loopback. See npm-proxy-hosts.py MEDIA_* and MINIO_PUBLIC_ENDPOINT.
-      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.30}:9200:9000"
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:9200:9000"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -204,6 +204,11 @@ services:
       ENABLE_ARI_MANAGER: "true"
       ENABLE_ARI_STASIS: "true"
       ENABLE_CAMPAIGN_ORCHESTRATOR: "false"
+      # On the Zeus shared voice plane, a completed interview channel is
+      # redirected to [zeus-ai-return] instead of being deleted. Keep this
+      # false for standalone Capstone; set it on the shared Zeus deployment
+      # only after the Zeus dialplan and VOICE_CONTEXT_SECRET are configured.
+      ZEUS_RETURN_ENABLED: "${ZEUS_RETURN_ENABLED:-false}"
 
       # ── OpenTelemetry → the stack's collector ─────────────────────────────
       # Standard OTel SDK auto-config vars (used by any exporter that reads them)
@@ -297,6 +302,15 @@ services:
       - --no-tls
       - --fingerprint
       - --lt-cred-mech
+      # STUN is OFF on purpose. TURN is authenticated (--lt-cred-mech), but a
+      # bare STUN Binding request is unauthenticated *by design*, so an open
+      # 3478 on the WAN is a public STUN reflector — which is what happened on
+      # the shared box (an internet scanner drove it as one). Nothing here needs
+      # coturn's STUN: Asterisk's client is RFC 3489 and coturn is RFC 5389 (see
+      # pbx/rtp_settings_guard.py), and the browsers get their server-reflexive
+      # candidates from PJSIP_WEBRTC_STUN_ADDR. TURN relay is untouched —
+      # zeus/docker-compose.full.yml carries the same flag; keep the two in step.
+      - --no-stun
       - --user=${TURN_USERNAME:-turnuser}:${TURN_PASSWORD:-change-me-turn-password}
       - --realm=${TURN_REALM:-turn.example.com}
       - --listening-port=3478
@@ -355,11 +369,16 @@ services:
     memswap_limit: 8g
     # Torch/OpenMP size their thread pools (and thread-local arenas) from the
     # core count; on an 8-core host that multiplies the load-time allocation
-    # spike past even 6 GiB. Two threads per pool keeps the boot allocation
-    # bounded — synthesis stays well under 1.5 GiB either way.
+    # spike past even 6 GiB. Two threads per pool kept the boot allocation
+    # bounded, but it also pinned synthesis to two of the host's eight cores,
+    # where one interview-sized sentence took ~5-9 s to generate ~7 s of audio
+    # (RTF ~1.25) — slower than playback, so the caller heard the audio
+    # underrun. Four threads measured 2.3x faster (3.0-3.5 s, RTF ~0.48) and
+    # still boots clean at ~1.1 GiB steady-state. The spike scales with the
+    # pool, so raise this further only against a measurement, not a core count.
     environment:
-      OMP_NUM_THREADS: "2"
-      MKL_NUM_THREADS: "2"
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
       KMP_INIT_AT_FORK: "FALSE"
       KMP_AFFINITY: "granularity=fine,compact,1,0"
     # GPU? Use ghcr.io/remsky/kokoro-fastapi-gpu:latest and add:
@@ -455,128 +474,46 @@ services:
       start_period: 180s
     networks: [interview-net]
 
-  # ── LLM gateway: OmniRoute (OpenAI-compatible, port 20128) ────────────────
-  # MIT-licensed AI gateway (github.com/diegosouzapw/OmniRoute), official image
-  # diegosouzapw/omniroute. Model "auto" = zero-config routing across its free
-  # connected providers with automatic failover; the dashboard also runs on
-  # :20128, but it is no longer on the LAN — the dashboard is reached through the
-  # Authentik-fronted proxy on :20128 (5-dev/olympus/docs/gateway-sso.md) and the
-  # gateway's own login is off. dograh (host mode) dials 127.0.0.1:20128; every
-  # other consumer dials the proxy on 20128.
-  # ⚠ Free-tier cloud providers need internet; for a fully-local LLM, add your
-  # local Ollama / llama.cpp / vLLM as a provider in the dashboard and route to it.
+  # ── LLM gateway: OmniRoute — NOT DEFINED HERE (moved 2026-09-28) ──────────
+  # The gateway, the Authentik-fronted proxy in front of it and that proxy's
+  # session store are one standalone stack now: `ips/extensions/llm/`
+  # (`docker-compose.host.yml`, project `innotel-gateway`), running on i1's
+  # `proxy` container (`.71`). Consumers dial the door —
+  # `http://192.168.1.71:20128/v1` — and the gateway's own `:20128` binding stays
+  # on that host's loopback and docker0.
+  #
+  # The `omniroute` service used to live here behind `profiles: ["gateway"]`, and
+  # that is exactly the split that made this stack look like the gateway's owner
+  # while `5-dev/olympus` declared the proxy: two files, two hosts, one thing to
+  # move. It is gone for the reason the profile existed — a second gateway started
+  # from an app host answers like a working one while holding *zero* provider
+  # connections (measured: `provider_connections`=0, every key `401
+  # invalid_api_key`), so the wrong configuration should be impossible to start
+  # rather than detectable afterwards. `GATEWAY_DO_NOT_START_ME_HERE` below is how
+  # the footgun fails instead of starting.
+  #
+  # `ips/scripts/check-gateway-targets.py` fails any target that still names the
+  # old host, and no longer counts this file as one that declares the gateway —
+  # which is what used to let a stale `host.docker.internal:20128` here read as
+  # legitimate (see the two defaults it is guarding).
 
-  omniroute:   # from capstone (profiles: "gateway")
-    # THE GATEWAY RUNS ON ITS OWN HOST — NOT ON EVERY HOST THAT RUNS THIS FILE.
-    #
-    # Everything that makes it *this* gateway — its provider connections, its
-    # settings, the dashboard password hash, and the `server.env` key that
-    # decrypts them — lives in one volume, and that volume sits beside the
-    # gateway, not beside the stack talking to it. A stack on another host does
-    # NOT start a second gateway; it pins the address of the identity-aware
-    # door in front of the real one (`OMNIROUTE_URL`, see .env.example). The
-    # gateway's host starts this service deliberately:
-    #
-    #     docker compose --profile gateway up -d omniroute
-    #
-    # MEASURED, and why this is a profile rather than only a comment. A second
-    # gateway started from this file on the app host answered requests exactly
-    # the way a working one does while holding *zero* connections:
-    # `provider_connections`=0, every key rejected `401 invalid_api_key`, and
-    # its data dir in the container's writable layer (volume mounted at `/data`
-    # while the image reads `DATA_DIR=/app/data`). It looked healthy, it
-    # published the same ports, and nothing downstream could tell it apart from
-    # the real gateway except by the answers it never routed. That is the
-    # `/data`-vs-`/app/data` failure one layer up; the cure is the same one —
-    # make the wrong configuration impossible to start, rather than detectable
-    # afterwards.
-    profiles: ["gateway"]
-    image: ${OMNIROUTE_IMAGE:-diegosouzapw/omniroute:latest}
-    container_name: omniroute
-    restart: unless-stopped
-    # Memory posture: the gateway buffers model streams; cap it so it never
-    # crowds the rest of the stack — but cap it ABOVE where it settles, because
-    # this gateway refuses work when its own cgroup runs near the limit.
-    #
-    # MEASURED. At 1g the container sits at ~0.59 GiB right after a restart and
-    # climbs past 1 GiB under combo load; OmniRoute's resource-pressure guard
-    # (highRatio .85, criticalRatio .92 of the cgroup limit) then trips with
-    # `reason=cgroup_ratio` — 56 times in 35 minutes here — and *every* model
-    # call gets
-    #
-    #   503 Service temporarily unavailable due to resource pressure. Retry shortly.
-    #
-    # in ~30 ms. Nothing downstream can tell that apart from a broken provider,
-    # so an app build stalls and the edge turns the wait into a 504. 3g keeps
-    # the guard's own threshold (~2.55 GiB) clear of the working set the gateway
-    # actually needs; the host has the headroom (15 GiB, ~9 GiB available).
-    mem_limit: 3g
-    memswap_limit: 3g
-    environment:
-      # The image ships a 1 GiB V8 heap; raise it with the cgroup, since the
-      # pressure guard also watches heap ratio (85% of the heap limit).
-      NODE_OPTIONS: --max-old-space-size=2048
-      OMNIROUTE_JWT_SECRET: "${OMNIROUTE_JWT_SECRET:-change-me-jwt-secret}"
-      OMNIROUTE_API_KEY_SECRET: "${OMNIROUTE_API_KEY_SECRET:-change-me-api-key-secret}"
-      # The image reads INITIAL_PASSWORD, and only INITIAL_PASSWORD: 114
-      # references to process.env.INITIAL_PASSWORD in its tree, and none at all
-      # to OMNIROUTE_INITIAL_PASSWORD. Passing only the OMNIROUTE_ name (as this
-      # file used to) leaves the dashboard with no password configured at all —
-      # POST /api/auth/login answers 403 "No password configured. Complete
-      # onboarding first.", which is not an error anyone can act on. Everything
-      # that mints a key through this gateway then fails: setup.sh's grader key,
-      # and the distro control plane, which disables the account it could not
-      # provision and never revisits it. The .env key stays OMNIROUTE_* — that
-      # is the name setup.sh and the control plane read — so only the name
-      # handed to the container is translated here.
-      INITIAL_PASSWORD: "${OMNIROUTE_INITIAL_PASSWORD:-change-me-admin-password}"
-      OMNIROUTE_WS_BRIDGE_SECRET: "${OMNIROUTE_WS_BRIDGE_SECRET:-change-me-ws-bridge-secret}"
-    ports:
-      # Two bindings, and deliberately not the LAN. The consumers of this port reach
-      # the host by one of two names and these cover both: a container *on this host*
-      # via `host.docker.internal:20128`, which `host-gateway` resolves to 172.17.0.1
-      # (olympus-studio, cerulean and the distro control plane all use it), and a
-      # host-mode process via 127.0.0.1:20128 (dograh).
-      #
-      # A consumer on ANY OTHER host is not covered here, and must not try to be: its
-      # `host.docker.internal` is its own docker0. That is what n8n and this stack's
-      # dashboard-api do from `.30`, and it is why the two defaults above name the
-      # proxy on 20128 rather than this port.
-      #
-      # Publishing on 0.0.0.0 also satisfied those two, and put the dashboard on the
-      # LAN — where the only gate is its own password login, because Authentik and the
-      # `cerulean-platform` group check live in the proxy that fronts this, not here.
-      # A client on another machine uses that door instead: `192.168.1.71:20128/v1`.
-      - "127.0.0.1:20128:20128"
-      - "172.17.0.1:20128:20128"
-      #
-      # THERE IS NO LAN BINDING, and that is now load-bearing rather than tidy.
-      # There used to be a third one (`OMNIROUTE_LAN_BIND`) for stacks that moved to
-      # another host, kept safe by the dashboard's own password. That safety is gone
-      # by design: `make gateway-auth-mode` sets `requireLogin=false`, so the gateway
-      # has no gate of its own and this port's reachability IS the control — see
-      # scripts/gateway-auth-mode.py, which refuses to make that change while the
-      # port answers anywhere but this host. So the LAN door is the proxy that
-      # fronts this service (`oauth2-proxy`, `192.168.1.71:20128`), which exempts
-      # `/v1` for inference clients and requires an Authentik session in
-      # `cerulean-platform` for the dashboard. Same host as this container, so it
-      # reaches the two bindings above and nothing else needs the LAN.
-      # See 5-dev/olympus/docs/gateway-sso.md.
-    volumes:
-      # MOUNT IT WHERE THE IMAGE READS IT — `/app/data`, not `/data`.
-      # The image sets `DATA_DIR=/app/data` and keeps every provider connection,
-      # its `server.env` and the SQLite store there. Mounting the volume at `/data`
-      # (as this file did) leaves the gateway reading its own container layer: it
-      # works, so nothing looks broken, but each recreate silently discards the
-      # credentials and auto/coding answers `503 No credentials for opencode` — the
-      # failure that made multi-turn app builds impossible. The volume beside it
-      # then holds a stale copy, and a backup pointed at that path would preserve
-      # the wrong thing and report success.
-      # `scripts/omniroute-vault-backup.py` asks the running container for this
-      # destination rather than assuming it, so the two cannot drift again without
-      # a nightly failure that names it.
-      - omniroute_data:/app/data
-    networks: [interview-net]
+  GATEWAY_DO_NOT_START_ME_HERE:   # from capstone (profiles: "retired")
+    # Keep this here, and keep it out of the way: `docker compose --profile
+    # retired up` no longer starts a gateway, because the image, the container
+    # name and the ports are all gone. Anything that tries fails at once and says
+    # why. Delete the stanza only when something else carries the pointer above.
+    profiles: ["retired"]
+    image: python:3.12-alpine
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - |
+        echo "capstone: the OmniRoute gateway is not defined here any more." >&2
+        echo "It is the standalone stack in ips/extensions/llm/ on i1 .71." >&2
+        echo "See the comment in 2-voice/capstone/docker-compose.yml." >&2
+        exit 2
+
 
   # ── Workflow automation: n8n (Community Edition) ──────────────────────────
 
@@ -1038,9 +975,9 @@ services:
       # loopback leg was dropped once dograh — its last client — stopped dialling
       # 127.0.0.1. 8089 keeps a loopback leg because no client has been measured
       # on it yet; check `ss -tnp | grep :8089` before narrowing that one.
-      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.30}:8088:8088" # Asterisk HTTP / ARI (LAN + edge proxy)
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:8088:8088" # Asterisk HTTP / ARI (LAN + edge proxy)
       - "127.0.0.1:8089:8089"                            # PJSIP WebSocket (WSS, host-mode)
-      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.30}:8089:8089" # PJSIP WebSocket (WSS, LAN + edge proxy)
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:8089:8089" # PJSIP WebSocket (WSS, LAN + edge proxy)
       # AMI answers on the host LAN IP and nothing else — not 0.0.0.0, not a
       # docker address (project rule: README → Addressing). Binding it on every
       # interface is what let public scanners reach 5038 and fill the security
@@ -1055,7 +992,7 @@ services:
       # (zeus/docker-compose.full.yml) and needs the same pin —
       # that file currently publishes it on 0.0.0.0. See docs/operations.md →
       # "The PBX".
-      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.30}:5038:5038"  # Asterisk AMI (LAN IP only)
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:5038:5038"  # Asterisk AMI (LAN IP only)
       - "${FREEPBX_WEBMIN_PORT:-10000}:10000" # Webmin admin panel (optional; host port configurable)
       - "${FREEPBX_RTP_PORT_START:-10101}-${FREEPBX_RTP_PORT_END:-10120}:10101-10120/udp" # RTP media (20 ports / 10 active calls)
     environment:
@@ -1069,13 +1006,23 @@ services:
       # so LAN softphones aren't told to send RTP to the public IP. See
       # pbx/entrypoint-dograh.sh inject_pjsip_media_address.
       PJSIP_LOCAL_NET: ${PJSIP_LOCAL_NET:-192.168.1.0/255.255.255.0}
-      PJSIP_MEDIA_ADDRESS: ${PJSIP_MEDIA_ADDRESS:-192.168.1.30}
+      PJSIP_MEDIA_ADDRESS: ${PJSIP_MEDIA_ADDRESS:-192.168.1.46}
       PJSIP_LAN_ENDPOINTS: ${PJSIP_LAN_ENDPOINTS:-101}
       # STUN/TURN relay wiring: the entrypoint pushes these into FreePBX's
       # SIP Settings so Asterisk's RTP engine + WebRTC endpoints use coturn.
       # PJSIP_STUN_TURN_ADDR overrides the address (default: the `coturn`
       # compose service on the same network).
       PJSIP_STUN_TURN_ADDR: ${PJSIP_STUN_TURN_ADDR:-}
+      # STUN discovery server for the RTP engine — deliberately NOT the TURN
+      # address: coturn runs --no-stun here, and it is RFC 5389 while Asterisk's
+      # client is RFC 3489, so it could never answer it. The default answers
+      # both generations and returns MAPPED-ADDRESS, the attribute the legacy
+      # client parses. Empty disables discovery; see pbx/rtp_settings_guard.py.
+      PJSIP_STUN_ADDR: ${PJSIP_STUN_ADDR:-}
+      # STUN server handed to the *browsers* (the webrtcstunaddr row). Tracks
+      # PJSIP_STUN_ADDR by default; only the STUN row moves — webrtcturnaddr
+      # stays on coturn, which is what actually relays the media.
+      PJSIP_WEBRTC_STUN_ADDR: ${PJSIP_WEBRTC_STUN_ADDR:-}
       TURN_USERNAME: ${TURN_USERNAME:-}
       TURN_PASSWORD: ${TURN_PASSWORD:-}
       TURN_LISTENING_PORT: ${TURN_LISTENING_PORT:-3478}
@@ -1118,6 +1065,9 @@ services:
       - ../../2-voice/capstone/pbx/entrypoint-dograh.sh:/usr/local/bin/entrypoint-dograh.sh:ro
       # shared-voice-plane dialplan renderer (per-context merge, markers)
       - ../../2-voice/capstone/pbx/asterisk_converge.py:/opt/asterisk_converge.py:ro
+      # Re-asserts the rtp_additional.conf rows FreePBX rewrites wrong after
+      # every reload (the lower-cased TURN credential and the STUN server).
+      - ../../2-voice/capstone/pbx/rtp_settings_guard.py:/opt/rtp_settings_guard.py:ro
       - asterisk-config:/etc/asterisk
       - asterisk-sounds:/var/lib/asterisk/sounds
       - asterisk-spool:/var/spool/asterisk
@@ -1166,7 +1116,7 @@ services:
       # The host LAN IP, not a compose service name: docker addresses do not
       # resolve correctly for this project, and the [pbxportal] ACL admits the
       # LAN address the host masquerades this connection to.
-      ASTERISK_AMI_HOST: "${PJSIP_MEDIA_ADDRESS:-192.168.1.30}"
+      ASTERISK_AMI_HOST: "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}"
       ASTERISK_AMI_PORT: "5038"
       ASTERISK_AMI_USERNAME: ${FREEPBX_AMI_USER:-pbxportal}
       ASTERISK_AMI_SECRET: ${FREEPBX_AMI_SECRET:-}
@@ -1547,6 +1497,27 @@ services:
       # host.docker.internal, ast_sockaddr_resolve fails on it and silently
       # disables STUN.
       PJSIP_STUN_TURN_ADDR: ${PJSIP_STUN_TURN_ADDR:-}
+      # STUN discovery server for the RTP engine. Deliberately NOT the TURN
+      # address: Asterisk's STUN client is RFC 3489 (no magic cookie) and coturn
+      # is RFC 5389, so coturn silently drops the request and every call logs
+      # three "stun.c: Attempt N ... timed out" retries. The default answers both
+      # generations and returns MAPPED-ADDRESS, the attribute the legacy client
+      # parses. Set empty to disable discovery entirely; see
+      # pbx/rtp_settings_guard.py.
+      PJSIP_STUN_ADDR: ${PJSIP_STUN_ADDR:-}
+      # STUN server handed to the *browsers* (the webrtcstunaddr row). coturn
+      # runs with --no-stun, so this must not be coturn; it defaults to
+      # PJSIP_STUN_ADDR, which answers a modern RFC 5389 binding request. Only
+      # the STUN row moves — webrtcturnaddr stays on coturn, which is what
+      # actually relays the media.
+      PJSIP_WEBRTC_STUN_ADDR: ${PJSIP_WEBRTC_STUN_ADDR:-}
+      # The address Asterisk advertises to a LAN phone for its media (answer
+      # SDP), converged per endpoint by pbx/media_address.py from the entrypoint
+      # on every boot. PROJECT RULE: a real LAN address, never a docker range —
+      # the phone cannot route to the container, and its voice/DTMF are lost.
+      # Defaults to LAN_IP, then (in the entrypoint) to the host of
+      # PJSIP_STUN_TURN_ADDR. The trunks get the WAN address instead, never this.
+      PJSIP_MEDIA_ADDRESS: ${PJSIP_MEDIA_ADDRESS:-${LAN_IP:-}}
       # LAN subnet(s) Asterisk treats as on-net, comma separated. Defaults to
       # the /24 of PJSIP_STUN_TURN_ADDR. Never a docker range: a foreign subnet
       # recorded by another stack leaves Asterisk classifying addresses that do
@@ -1637,7 +1608,7 @@ services:
     # permit and the FreePBX access log both end up keyed on a Docker address —
     # and Docker addresses do not resolve correctly for this project. Joining the
     # host namespace instead lets the portal reach every service on this host's
-    # LAN IP, so Asterisk sees 192.168.1.30 and only the LAN subnet is ever
+    # LAN IP, so Asterisk sees 192.168.1.46 and only the LAN subnet is ever
     # permitted (no `permit = 172.16.0.0/12` anywhere).
     #
     # Consequences: the portal listens on the host port directly (PORT below)
@@ -1697,6 +1668,17 @@ services:
       ASTERISK_AMI_USERNAME: ${FREEPBX_AMI_USER:-pbxportal}
       ASTERISK_AMI_SECRET: ${FREEPBX_AMI_SECRET:-}
 
+      # ── The media address a newly created softphone is handed ──
+      # When the portal creates a softphone it writes the same
+      # `[<ext>](+) media_address=` section the boot owner converges
+      # (src/lib/pjsip-endpoint.ts -> provisionMediaAddress), so a phone added
+      # *between* boots is not deaf until the next restart. It writes nothing
+      # when no reachable address is configured, so the value has to reach the
+      # portal as well as the PBX. PROJECT RULE: the host's LAN address, never
+      # a docker range (a phone cannot route to the container). Defaults to
+      # LAN_IP; /api/health reports `softphone_media` when it is missing.
+      PJSIP_MEDIA_ADDRESS: ${PJSIP_MEDIA_ADDRESS:-${LAN_IP:-}}
+
       # ── Call-context read (GET /api/voice/context/{token}) ──
       # Bearer credential for the machines that read a call's context: Capstone
       # at the hand-off, AVA at the hand-back. Empty refuses every read.
@@ -1704,12 +1686,18 @@ services:
 
       # ── WebRTC / TURN ──
       # WSS URL the browser dials for the softphone. Prefer FREEPBX_WSS_URL
-      # (same override capstone uses) — the :8089 form below reaches Asterisk
-      # directly, whose WSS certificate is self-signed, so a browser refuses it
-      # unless the operator trusts that cert. Point FREEPBX_WSS_URL at the edge
-      # hostname (wss://ws.<domain>/ws) to ride the wildcard certificate NPM
-      # serves, which also satisfies the `sip` subprotocol the softphone needs.
-      NEXT_PUBLIC_FREEPBX_WSS_URL: ${FREEPBX_WSS_URL:-wss://${FREEPBX_WSS_HOST:-ws.zeus.innotel.us}:8089/ws}
+      # (same override capstone uses). The proxied `wss://ws.<domain>/ws` form is
+      # the default, NOT a `:8089` host:port — :8089 reaches Asterisk's own
+      # socket, whose certificate is self-signed, so a browser refuses it unless
+      # the operator trusts that cert, and it is not open from outside the LAN at
+      # all. The edge hostname rides NPM's wildcard certificate and satisfies the
+      # `sip` subprotocol the softphone needs.
+      #
+      # Read at request time by /api/rtc-config as well as here: this variable is
+      # `NEXT_PUBLIC_`, so on a released image the value below is frozen at build
+      # time — see src/lib/softphone-wss.ts for the resolution rule that the
+      # route, the Settings field and the softphone panel all share.
+      NEXT_PUBLIC_FREEPBX_WSS_URL: ${FREEPBX_WSS_URL:-wss://${FREEPBX_WSS_HOST:-ws.zeus.innotel.us}/ws}
       # TURN URL handed to the browser, e.g. turn:coturn.<domain>:3478. Empty
       # leaves the softphone on public STUN alone, which fails behind symmetric
       # NAT — the relay is what makes calls carry audio for most residential
@@ -1827,6 +1815,15 @@ services:
       - turnserver
       - --fingerprint
       - --lt-cred-mech
+      # STUN is OFF on purpose. TURN is authenticated (--lt-cred-mech), but a
+      # bare STUN Binding request is unauthenticated *by design*, so an open
+      # 3478 on the WAN is a public STUN reflector — this box was scanned and
+      # then used as exactly that (67.65.227.32). Nothing here needs coturn's
+      # STUN: Asterisk's client is RFC 3489 and coturn is RFC 5389 (see
+      # pbx/rtp_settings_guard.py), and the browsers get their server-reflexive
+      # candidates from PJSIP_WEBRTC_STUN_ADDR instead. TURN relay is untouched
+      # — `turnserver --help` has no rate limit for the binding case.
+      - --no-stun
       - --user=${TURN_USERNAME:-turnuser}:${TURN_CREDENTIAL:?set TURN_CREDENTIAL in .env}
       - --realm=${TURN_REALM:-zeus.innotel.us}
       - --listening-port=3478
@@ -1919,6 +1916,11 @@ volumes:
   postgres_data:
   redis_data:
   minio-data:
+  # The gateway's own volume lives with the gateway now — `innotel-gateway_omniroute-data`
+  # on i1 `.71`, declared by `ips/extensions/llm/docker-compose.host.yml`. This name
+  # still exists on the host that ran the gateway before 2026-09-28 (`.46` keeps its
+  # copy as the rollback), so it stays declared rather than deleted, and nothing
+  # mounts it.
   omniroute_data:
   speaches_models:
   n8n_data:

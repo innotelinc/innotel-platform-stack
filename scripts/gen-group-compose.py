@@ -18,6 +18,14 @@ WHAT IS GENERATED, AND FROM WHAT
     scripts/gen-group-compose.py            # regenerate every group
     scripts/gen-group-compose.py --check    # fail if the checked-in file is stale
     scripts/gen-group-compose.py --group 3-media
+    scripts/gen-group-compose.py --root /tmp/estate --check   # members from elsewhere
+
+`--root` names the directory holding the group directories (default: this repo's
+parent). CI checks out `ips` alone, so it clones the member repos into a scratch
+root (`scripts/fetch-group-members.py`) and points `--check` at it — otherwise the
+check has no repos to read, reports "this checkout stands alone", and passes: a
+guard that can never fail. The checked-in files are always read from and compared
+against this repo's `groups/`, whatever the root.
 
 Each group's output (`groups/<n>-<group>.yml`) is, in order:
 
@@ -80,6 +88,9 @@ import sys
 from pathlib import Path
 
 STACK_DIR = Path(__file__).resolve().parent.parent
+# Where the group directories sit by default — beside this repo in a full estate.
+# A run can point somewhere else with `--root` (CI clones the members to a
+# scratch tree); the generated files always live in this repo's `groups/`.
 ROOT_DIR = STACK_DIR.parent
 OUT_DIR = STACK_DIR / "groups"
 EXTRAS_DIR = OUT_DIR / "extras"
@@ -420,8 +431,13 @@ def fix_paths(line: str, rel: str, section: str = "") -> str:
 
 # ── generation ────────────────────────────────────────────────────────────────
 
-def generate(group: str) -> tuple[str, list[str], list[str]]:
-    """The group's compose text, plus the warnings to print about it."""
+def generate(group: str, root: Path | None = None) -> tuple[str, list[str], list[str]]:
+    """The group's compose text, plus the warnings to print about it.
+
+    `root` is where the group directories (and so the member repos) are read from;
+    it defaults to the estate beside this repo, and `--root` overrides it.
+    """
+    root = root or ROOT_DIR
     number = number_of(group)
     members = SOURCES.get(group)
     if not members:
@@ -431,7 +447,7 @@ def generate(group: str) -> tuple[str, list[str], list[str]]:
 
     contributions: list[Contribution] = []
     for repo, files in members.items():
-        repo_dir = ROOT_DIR / group / repo
+        repo_dir = root / group / repo
         base: Compose | None = None
         for file in files:
             path = repo_dir / file
@@ -961,7 +977,12 @@ def main() -> int:
     parser.add_argument("--check", action="store_true",
                         help="do not write — fail if a checked-in file is stale")
     parser.add_argument("--quiet", action="store_true", help="only report problems")
+    parser.add_argument("--root", default=None,
+                        help="directory holding the group dirs (default: this "
+                             "repo's parent) — CI points it at a scratch clone "
+                             "of the member repos")
     args = parser.parse_args()
+    root = Path(args.root).resolve() if args.root else ROOT_DIR
 
     # In a lone `ips` checkout there are no group directories beside it, so
     # there is nothing to read and nothing to compare — say so and pass, the way
@@ -969,7 +990,7 @@ def main() -> int:
     # steps in this repo. An explicitly named `--group` that is absent is still an
     # error: that is a typo, not a standalone checkout.
     present = [group for group in (args.group or sorted(SOURCES))
-               if (ROOT_DIR / group).is_dir()]
+               if (root / group).is_dir()]
     if not present and not args.group:
         print("gen-group-compose: this checkout stands alone — no group directories "
               "beside it to read, nothing to generate")
@@ -977,12 +998,12 @@ def main() -> int:
     groups = present
     for group in args.group:
         if group not in present:
-            raise CannotRun(f"no group directory {group} under {ROOT_DIR}")
+            raise CannotRun(f"no group directory {group} under {root}")
 
     stale = 0
     for group in groups:
         try:
-            text, warnings, notes = generate(group)
+            text, warnings, notes = generate(group, root)
         except CannotRun as err:
             print(f"{group}: cannot generate — {err}", file=sys.stderr)
             return 2

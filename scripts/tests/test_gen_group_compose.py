@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -199,6 +200,43 @@ class PortTests(unittest.TestCase):
         self.assertEqual((warnings, notes), ([], []))
 
 
+class RootTests(unittest.TestCase):
+    """`--root` reads the members elsewhere, and the output still lives here.
+
+    CI has no estate beside it: it clones the member repos to a scratch root and
+    points `--check` at it. That only works if `generate` reads from the root it
+    is handed, not from this repo's parent (where the group dirs are absent).
+    """
+
+    def test_members_are_read_from_the_root_it_is_given(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "9-test" / "widget"
+            repo.mkdir(parents=True)
+            (repo / "docker-compose.yml").write_text(
+                "services:\n  widget:\n    image: widget:1\n"
+                "    container_name: widget\n")
+            saved = gen.SOURCES
+            gen.SOURCES = {"9-test": {"widget": ["docker-compose.yml"]}}
+            try:
+                text, warnings, _ = gen.generate("9-test", root)
+            finally:
+                gen.SOURCES = saved
+            self.assertIn("  widget:", text)
+            self.assertIn("image: widget:1", text)
+            self.assertNotIn("does not exist", " ".join(warnings))
+
+    def test_a_missing_member_under_the_root_is_a_warning_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = gen.SOURCES
+            gen.SOURCES = {"9-test": {"absent": ["docker-compose.yml"]}}
+            try:
+                _, warnings, _ = gen.generate("9-test", Path(tmp))
+            finally:
+                gen.SOURCES = saved
+            self.assertTrue(any("does not exist" in w for w in warnings), warnings)
+
+
 class ConfigTests(unittest.TestCase):
     """The tables that say what a group deploys, and the guard on stale ones."""
 
@@ -229,6 +267,30 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(gen.number_of("5-dev"), "5")
         with self.assertRaises(gen.CannotRun):
             gen.number_of("dev")
+
+    def test_a_named_group_is_read_from_the_root(self):
+        """CI points `--check` at a scratch clone via `--root`; the presence of a
+        group is judged under that root, so a group absent there is a typo (exit
+        2), not a lone checkout that quietly passes."""
+        with self.assertRaises(gen.CannotRun):
+            with _captured_argv(["--root", "/nonexistent", "--group", "9-test"]):
+                gen.main()
+
+
+class _captured_argv:
+    """Run a block with `sys.argv` set, then restore it."""
+
+    def __init__(self, argv: list[str]) -> None:
+        self.argv = ["gen-group-compose.py", *argv]
+
+    def __enter__(self):
+        self._saved = sys.argv
+        sys.argv = self.argv
+        return self
+
+    def __exit__(self, *exc):
+        sys.argv = self._saved
+        return False
 
 
 if __name__ == "__main__":

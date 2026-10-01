@@ -115,11 +115,22 @@ jobs:
       # drift check above), or somebody edited a repo file in a way that should
       # change the generated output — a comment, a rewritten path — and did not
       # regenerate. `--check` writes nothing and fails on the second: it
-      # regenerates in memory and diffs. Like the two checks above it, it stands
-      # alone in this checkout and skips cleanly when the group dirs are absent;
-      # run it from a host that has the estate to actually catch staleness.
+      # regenerates in memory and diffs.
+      #
+      # This check needs the member repos, and CI checks out `ips` alone — so it
+      # used to report "this checkout stands alone" and pass, a guard that could
+      # never fail (docs/stack-migration-gaps.md). `fetch-group-members.py`
+      # shallow-clones every repo `SOURCES` names into a scratch root, and
+      # `--root` points the check at it; the checked-in files are still read from
+      # and compared against this repo. A member repo's compose change now fails
+      # this job until the group file is regenerated and committed, which is the
+      # point: the generated file is what a host is rebuilt from.
       - name: Group composes are current with their member repos
-        run: python3 scripts/gen-group-compose.py --check
+        run: |
+          set -euo pipefail
+          root="$(mktemp -d)"
+          python3 scripts/fetch-group-members.py "$root"
+          python3 scripts/gen-group-compose.py --root "$root" --check
 
       # A `vault://` reference is only better than a plaintext secret if it
       # resolves, and an unresolvable one looks configured in every review: the

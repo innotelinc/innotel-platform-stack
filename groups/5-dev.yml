@@ -175,8 +175,8 @@ services:
       # http://host.docker.internal:8080/hook
       - 'host.docker.internal:host-gateway'
     ports:
-      # Browser-facing (the admin console at /admin; Studio and the builder
-      # surface call the same API). Bind LAN via 0.0.0.0, loopback via
+      # Browser-facing (the admin console at /admin; Genie calls the same API
+      # server-to-server). Bind LAN via 0.0.0.0, loopback via
       # CONTROL_BIND_HOST=127.0.0.1. Protect with CONTROL_CORS_ORIGIN.
       - '${CONTROL_BIND_HOST:-0.0.0.0}:20140:20140'
 
@@ -575,7 +575,7 @@ services:
     # shell, which makes the healthcheck below impossible to express (a `wget`
     # healthcheck on it reports the container unhealthy forever — measured). A
     # shell in the image is the price of a liveness signal; the container is the
-    # only thing on 20128 and it never runs the shell itself.
+    # only thing listening on the door and it never runs the shell itself.
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine
     container_name: gateway-sso
     restart: unless-stopped
@@ -614,8 +614,15 @@ services:
       # it says so on every start. A public-Redirect-URI code flow should use it.
       - --code-challenge-method=S256
       - --upstream=${GATEWAY_SSO_UPSTREAM:-http://127.0.0.1:20128}
-      # 0.0.0.0 because the edge is on another host and reaches this over the LAN.
-      - --http-address=0.0.0.0:${GATEWAY_SSO_PORT:-20128}
+      # THE LAN ADDRESS, NOT 0.0.0.0, and since the door moved onto the gateway's
+      # own default port (20128) that is load-bearing rather than tidiness: on
+      # this host `omniroute` already holds 127.0.0.1:20128 (host-mode callers)
+      # and 172.17.0.1:20128 (containers on this host, via `host.docker.internal`).
+      # A wildcard bind overlaps both and fails with EADDRINUSE, so the proxy
+      # would not start at all. Binding this host's LAN address leaves those two
+      # answers untouched and makes the LAN address the door — one listener, two
+      # roles, told apart by address rather than by port number.
+      - --http-address=${GATEWAY_SSO_BIND:-0.0.0.0}:${GATEWAY_SSO_PORT:-20128}
       # THE LAN PATH FOR API CLIENTS, and the reason this listener is on 0.0.0.0
       # rather than loopback. The gateway itself stays on 127.0.0.1, so the only
       # way in from another machine is through here — which means one door, and it
@@ -809,7 +816,10 @@ services:
       # dashboard instead would make this container's health depend on the
       # gateway being up, which is how a healthy proxy gets restarted for
       # somebody else's outage.
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${GATEWAY_SSO_PORT:-20128}/ping"]
+      # Probes the BIND, not loopback: on this host 127.0.0.1:20128 answers
+      # `omniroute`, so a loopback probe would silently test the gateway's
+      # dashboard (and report unhealthy) instead of this proxy's liveness.
+      test: ["CMD", "wget", "-qO-", "http://${GATEWAY_SSO_BIND:-127.0.0.1}:${GATEWAY_SSO_PORT:-20128}/ping"]
       interval: 30s
       timeout: 5s
       retries: 3
