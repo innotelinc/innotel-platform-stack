@@ -287,7 +287,7 @@ LAN/mesh by address, never by a second copy):
 | Host | Group(s) | Also runs |
 |---|---|---|
 | `192.168.1.71` (trust + edge) | 1, 4 | **Cerulean** (Authentik, Cerulean Vault, Technitium DNS — all moved here from `.46`), the **NPM edge** (`:80`/`:443`, admin API `:81`) — and the **one** OmniRoute gateway on `:20128` (loopback + docker0 only) with its Authentik-fronted SSO proxy on `:20128`, which is the door every other box consumes by address |
-| `192.168.1.46` (dev box) | — | The estate's development box. The production stacks have moved off it; only webmin `:10000` and Ollama `:11434` remain |
+| `192.168.1.74` (dev box) | — | The estate's development box. The production stacks have moved off it; only webmin `:10000` and Ollama `:11434` remain |
 | `192.168.1.31` (build) | — | Build server — 24 GB RAM, no long-running services |
 | `192.168.1.21` | — | OnTrak sync |
 | `192.168.1.30` | 2 (voice) | Capstone (26 services) and Zeus (`docker-compose.full.yml`: FreePBX, portal, coturn) |
