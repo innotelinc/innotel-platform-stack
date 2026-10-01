@@ -32,6 +32,19 @@ estate as it is, not as it was.
   container whose address still comes from DHCP: that is the state that produced
   this outage. `--json`, `--hosts`, and `SSHPASS`/keyless ssh are supported; an
   unreachable host exits **2**, never silently a pass.
+- **Every running container is now pinned — the other ten too.** The 2026-10-01
+  survey found ten containers (i2 `capstone`/`terminal`/`vault`/`www`; i3
+  `distro`/`mail`/`onyx`/`pi`/`signara`/`vpn`) still taking their address from DHCP.
+  Each is now static in the manager that actually holds it, because the estate has
+  three: netplan (six of them, a `99-static.yaml` alongside `10-lxc.yaml`), PVE's
+  systemd-networkd (`vault`/`www`/`pi`, their `eth0.network` rewritten), and
+  ifupdown (`vpn`, `/etc/network/interfaces`). The check now reads all three, so a
+  container pinned outside netplan is no longer called DHCP. Backups of every file
+  replaced are kept beside it as `*.bak-<timestamp>`.
+- **`vault` (`.73`) is not HashiCorp Vault.** It runs Vaultwarden (healthy) plus
+  Linkwarden and Meilisearch; the earlier role label was stale. Nothing listens on
+  `:8200`, which is why a LAN health probe returns nothing — not a consequence of
+  pinning.
 - **Memory caps set** on the containers that had none, so a single runaway cannot
   take a host down (values are ceilings, not reservations): i1 `monarch` 6 GiB /
   `cpu=2`, `ontrak` 2 GiB / `cpu=2`, `proxy` 5 GiB / `cpu=4`; i2 `atlas` 1 GiB,
@@ -124,7 +137,7 @@ Memory is the container's live usage and the cap set on it (`limits.memory` / `l
 | i2 | `genesis` | `.66` | BusinessOps — intake + assisted EIN filing | 177 MiB (1024 MiB) | 2 |
 | i2 | `rizzaura` | `.62` | Rizz Aura (5 svc) | 215 MiB (512 MiB) | — |
 | i2 | `terminal` | `.22` | web terminal | 374 MiB (1024 MiB) | — |
-| i2 | `vault` | `.73` | HashiCorp Vault | 943 MiB (2048 MiB) | 4 |
+| i2 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 943 MiB (2048 MiB) | 4 |
 | i2 | `www` | `.80` | public website (+ `tun0`) | 552 MiB (1536 MiB) | 4 |
 | i3 | `acme` | `.49` | ACME / certificate issue — **STOPPED** | — (1 GiB) | — |
 | i3 | `distro` | `.61` | distro control plane | 165 MiB (1 GiB) | — |
@@ -165,11 +178,12 @@ here only so the two surveys can be read against each other.
    means the caps cannot be read as a placement budget: nothing here is protected
    *collectively*, only individually. `proxy` is capped at 4 vCPU on a 4-vCPU host
    and `monarch`+`ontrak` add 4 more, so i1's CPU caps sum to twice the host.
-6. **Only three containers have an address that cannot drift.** `ontrak` `.21`,
-   `monarch` `.56` and `proxy` `.71` are static by netplan; the other **ten
-   running containers still take their address from DHCP**, which is exactly the
-   state that produced the 2026-10-01 outage. `check-container-addresses.py`
-   reports each one as a warning.
+6. **No running container's address can drift.** Every container the check covers
+   is now static in its own manager, so a recreation cannot renumber it — the
+   condition that produced the 2026-10-01 outage is closed. Re-run
+   `scripts/check-container-addresses.py` after any container is recreated: it
+   reports 0 failures and 0 warnings on 2026-10-01, and will name the first
+   container that regresses.
 7. **No host can absorb the two heavies.** `monarch` (4.91 GiB) fits neither i2
    (4.1 GiB free) nor i3 (5.3 GiB total); `capstone` (5.96 GiB) fits nowhere but
    i2. So the heavies stay where they are, and any real rebalance is a *light*
@@ -223,11 +237,11 @@ containers meeting idle CPU, not heavies meeting RAM (finding 7).
 
 ## Open items (as of 2026-10-01)
 
-- **Ten running containers still take their address from DHCP.** This is the one
-  un-fixed half of the 2026-10-01 incident: the check reports them, but they can
-  still renumber the next time they are recreated. Pinning them the way
-  `ontrak`/`monarch`/`proxy` are pinned is the remaining fix, and it needs no
-  workload to move.
+- ~~Ten running containers still take their address from DHCP.~~ **Done
+  2026-10-01:** all ten are pinned in their own network manager, and the check
+  reads netplan, systemd-networkd and ifupdown so a container pinned outside
+  netplan is still counted as pinned. Keep it that way — a new container arrives
+  on DHCP and must be pinned before it is dialled by address.
 - **pm4 (host of i3) has only ~1.4 GiB RAM free**, so i3 cannot be grown in place;
   any move of a heavy onto i3 needs RAM added to pm4, or a fourth host.
 - **i2's root filesystem was 45 % (12 G free)** at this refresh — down from 72 %
