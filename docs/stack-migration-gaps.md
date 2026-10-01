@@ -995,6 +995,24 @@ matters more than the three files:
   the big hunks. The dirty trees on this host still differ from their own commits
   and are left for their owners; the group files now track the commits.
 
+**Genesis is deployed, on its own container** (2026-10-01). It follows the
+`.46`-migration method rather than running on the dev box: a new `genesis`
+container on **i3**, static `192.168.1.65`, Ubuntu 24.04 + `docker.io`, project at
+`/opt/genesis`, `limits.cpu 2` / `limits.memory 2GiB`, `boot.autostart true`. The
+image is built on the development host and carried over (`docker save | … |
+docker load`) because a Next.js production build wants ~3 GB of heap and i3 has
+2 GiB free — the same reason Magnate's image travelled as an artifact. The public
+name is an NPM proxy host (`genesis.innotel.us` → `192.168.1.65:3000`, wildcard
+cert 34) and a Technitium CNAME to the apex; identity is a new Authentik
+application `genesis` (provider 49, `issuer_mode: per_provider`, redirect
+`https://genesis.innotel.us/api/auth/callback`, group `genesis-admins`).
+`https://genesis.innotel.us/api/health` answers 200 with
+`assistedProviders:["irs"]`, and `/api/auth/login` 307s into Authentik with a
+PKCE challenge. Genesis was the one sibling stack with no
+`scripts/npm-proxy-hosts.py`; it now has one, plus `docs/Deployment.md`. Two
+things are left manual and recorded there: the router DHCP reservation for `.65`
+(UI-only) and moving `SESSION_SECRET`/`OIDC_CLIENT_SECRET` into Vault.
+
 Genesis, the repo this pass was mostly about, is now published and conforms:
 `innotelinc/genesis` on `main`, its landing live at
 `https://innotelinc.github.io/genesis/`, its guard and CI green, and the

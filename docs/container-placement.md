@@ -95,6 +95,7 @@ Memory is live usage; disk is the container rootfs.
 | i3 | olympus-gw | `.64` | Olympus factory + Studio (moved from `.46`) | ~290 MiB | — |
 | i3 | docs | `.125` | ONLYOFFICE Docs (moved from i2) | 467 MiB | 2.7 G |
 | i3 | ansible | `.35` | Ansible runner + postfix (moved from i2) | 37 MiB | 464 M |
+| i3 | genesis | `.65` | BusinessOps — intake + assisted EIN filing (new 2026-10-01) | 111 MiB | 862 M |
 
 ## Findings
 
