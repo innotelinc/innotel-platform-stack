@@ -34,7 +34,11 @@ THE RULES
    than by symptom.
 3. **DHCP is drift in waiting.** A container that gets its address from DHCP is
    reported: it is the state that produced this outage, and it will produce it again
-   the next time the container is recreated or the lease expires.
+   the next time the container is recreated or the lease expires. "Pinned" means a
+   static address in whichever manager the container actually uses — netplan
+   (`dhcp4: false`), systemd-networkd (an `Address=` and no `DHCP=ipv4`), or
+   ifupdown (`iface eth0 inet static`). The estate has all three, so a check that
+   only read netplan would call a pinned container DHCP.
 4. **The table must not be stale in the other direction.** A running container the
    table does not know about is reported, because the table is only worth having if it
    is the estate as it is.
@@ -134,7 +138,7 @@ class Instance:
     name: str
     state: str
     address: str | None = None
-    #: False when the address comes from DHCP — see rule 3.
+    #: False when no manager declares the address static — see rule 3.
     pinned: bool = True
 
 
@@ -268,9 +272,10 @@ def _first_lan_address(text: str) -> str | None:
 def gather(hosts: dict[str, str], runner: Callable[[str, str], str] = _ssh) -> dict[str, list[Instance]]:
     """Read each host's containers, their addresses and whether they are pinned.
 
-    `pinned` is answered from the container's own netplan: a static `dhcp4: false` is the
-    thing that survives a recreation, and it is what the fix for the 2026-10-01 outage put
-    in place.
+    `pinned` is answered from the container's own configuration, read from whichever
+    manager holds it: a static declaration in netplan, systemd-networkd or ifupdown is
+    what survives a recreation, and it is what the fix for the 2026-10-01 outage put in
+    place (see rule 3).
     """
     observed: dict[str, list[Instance]] = {}
     for host, target in hosts.items():
@@ -285,9 +290,22 @@ def gather(hosts: dict[str, str], runner: Callable[[str, str], str] = _ssh) -> d
             pinned = True
             if state == "RUNNING":
                 try:
+                    # One shell probe, because it runs inside the container and the
+                    # three managers are told apart only there. `s` starts as dhcp and
+                    # is set to static by the first manager that declares the address.
                     probe = runner(
                         target,
-                        f"incus exec {name} -- bash -c 'grep -l \"dhcp4: false\" /etc/netplan/*.yaml >/dev/null && echo static || echo dhcp' </dev/null",
+                        "incus exec %s -- bash -c '"
+                        "s=dhcp; "
+                        "grep -sq \"dhcp4: false\" /etc/netplan/*.yaml 2>/dev/null && s=static; "
+                        "if [ \"$s\" = dhcp ]; then "
+                        "grep -sqE \"^[[:space:]]*Address[[:space:]]*=\" /etc/systemd/network/*.network 2>/dev/null && "
+                        "! grep -sqE \"^[[:space:]]*DHCP[[:space:]]*=[[:space:]]*(ipv4|yes|true)\" /etc/systemd/network/*.network 2>/dev/null && s=static; "
+                        "fi; "
+                        "if [ \"$s\" = dhcp ]; then "
+                        "grep -sqE \"iface[[:space:]]+eth0[[:space:]]+inet[[:space:]]+static\" /etc/network/interfaces /etc/network/interfaces.d/* 2>/dev/null && s=static; "
+                        "fi; "
+                        "echo $s' </dev/null" % name,
                     )
                     pinned = "static" in probe
                 except Exception:  # a container we cannot exec into is not pinned *silently*
