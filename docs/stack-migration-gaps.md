@@ -997,21 +997,29 @@ matters more than the three files:
 
 **Genesis is deployed, on its own container** (2026-10-01). It follows the
 `.46`-migration method rather than running on the dev box: a new `genesis`
-container on **i3**, static `192.168.1.65`, Ubuntu 24.04 + `docker.io`, project at
-`/opt/genesis`, `limits.cpu 2` / `limits.memory 2GiB`, `boot.autostart true`. The
-image is built on the development host and carried over (`docker save | … |
-docker load`) because a Next.js production build wants ~3 GB of heap and i3 has
-2 GiB free — the same reason Magnate's image travelled as an artifact. The public
-name is an NPM proxy host (`genesis.innotel.us` → `192.168.1.65:3000`, wildcard
-cert 34) and a Technitium CNAME to the apex; identity is a new Authentik
-application `genesis` (provider 49, `issuer_mode: per_provider`, redirect
+container on **i2**, static `192.168.1.66`, Ubuntu 24.04 + `docker.io`, project at
+`/opt/genesis`, `limits.cpu 2` / `limits.memory 2GiB`, `boot.autostart true`. It
+first came up on i3 the same day and was moved to i2 hours later, so the image is
+no longer built on the development host and carried over: CI publishes
+`ghcr.io/innotelinc/genesis` (`latest` + `:<short-sha>`) and the host pins
+`GENESIS_IMAGE_TAG`, which is also the rollback. The public name is an NPM proxy
+host (`genesis.innotel.us` → `192.168.1.66:3000`, wildcard cert 34) and a
+Technitium CNAME to the apex; identity is a new Authentik application `genesis`
+(provider 49, `issuer_mode: per_provider`, redirect
 `https://genesis.innotel.us/api/auth/callback`, group `genesis-admins`).
 `https://genesis.innotel.us/api/health` answers 200 with
 `assistedProviders:["irs"]`, and `/api/auth/login` 307s into Authentik with a
 PKCE challenge. Genesis was the one sibling stack with no
-`scripts/npm-proxy-hosts.py`; it now has one, plus `docs/Deployment.md`. Two
-things are left manual and recorded there: the router DHCP reservation for `.65`
-(UI-only) and moving `SESSION_SECRET`/`OIDC_CLIENT_SECRET` into Vault.
+`scripts/npm-proxy-hosts.py`; it now has one, plus `docs/Deployment.md`.
+
+**Genesis's own secrets are in Cerulean Vault** (2026-10-01). The two it held at
+rest — `SESSION_SECRET` and `OIDC_CLIENT_SECRET` — now live at `cerulean/genesis`
+and the container's `.env` carries `vault://` references. `genesis` was added to
+Cerulean's `VAULT_PRODUCT_TOKENS`, so Vault mints a path-scoped `genesis` policy
+and token (the mount-wide token is not used), and `docker-entrypoint.sh` runs
+`scripts/vault-env.mjs` before the server and **refuses to boot** on a reference
+it cannot resolve. Only the router DHCP reservation for `.66` is left manual
+(UI-only).
 
 Genesis, the repo this pass was mostly about, is now published and conforms:
 `innotelinc/genesis` on `main`, its landing live at

@@ -81,6 +81,7 @@ Memory is live usage; disk is the container rootfs.
 | i2 | capstone | `.30` | Zeus / capstone telephony | **4.41 GiB** | 23.7 G |
 | i2 | atlas | `.90` | Gitea + convex (moved from `.46`) | ~0.4 GiB | — |
 | i2 | rizzaura | `.62` | Rizz Aura (5 svc, moved from `.46`) | ~50 MiB | — |
+| i2 | genesis | `.66` | BusinessOps — intake + assisted EIN filing (moved off i3 2026-10-01) | ~120 MiB | 862 M |
 | i2 | cloud | `.146` | cloud storage | 299 MiB | 9.2 G |
 | i2 | development | `.46` | **the `dev` container** — every project's docker stack | 2.32 GiB | **156 G** |
 | i2 | voice | `.9` | voice | 777 MiB | 11.6 G |
@@ -95,7 +96,6 @@ Memory is live usage; disk is the container rootfs.
 | i3 | olympus-gw | `.64` | Olympus factory + Studio (moved from `.46`) | ~290 MiB | — |
 | i3 | docs | `.125` | ONLYOFFICE Docs (moved from i2) | 467 MiB | 2.7 G |
 | i3 | ansible | `.35` | Ansible runner + postfix (moved from i2) | 37 MiB | 464 M |
-| i3 | genesis | `.65` | BusinessOps — intake + assisted EIN filing (new 2026-10-01) | 111 MiB | 862 M |
 
 ## Findings
 
@@ -123,7 +123,7 @@ limits and a small relocation — no host has enough slack for a wholesale shuff
 | Host | Belongs there | Reasoning |
 |---|---|---|
 | **i1** (edge, 4 vCPU) | `proxy` `.71`, `vault` `.73`, `acme` `.49`, `mail` `.15`, `vpn` `.43`, `terminal` `.22` | Network ingress and identity; `proxy` already owns `:80/:443/:53` and every service dials these by LAN address. Topology-bound — do not move. |
-| **i2** (apps, 8 vCPU / 16 GiB) | `capstone`, `atheniq`, `development`, `voice`, `www`, `cloud` | The heavy, RAM-hungry, CPU-workload set. `development` (`.46`) is where the projects run and is the target of the standalone-project migration. |
+| **i2** (apps, 8 vCPU / 16 GiB) | `capstone`, `atheniq`, `development`, `voice`, `www`, `cloud`, `genesis` | The heavy, RAM-hungry, CPU-workload set. `development` (`.46`) is where the projects run and is the target of the standalone-project migration. `genesis` is small and could sit on i3 by this table's logic; it is on i2 by operator choice (2026-10-01). |
 | **i3** (light, 8 vCPU / 6 GiB) | `olympus`, `onyx`, `signara`, `distro`, `slack`, `patchmon`, `pi` **+ `docs`, `ansible`** | Small, self-contained services. Has CPU to spare; only RAM limits it. |
 
 ### Actions (applied 2026-09-27)
@@ -146,6 +146,19 @@ limits and a small relocation — no host has enough slack for a wholesale shuff
 4. **`atheniq` stays on i2.** It caused i3's CPU wedges and needs the RAM; i3's
    5.4 GiB cannot hold it. Moving it to i2 (done 2026-09-27) was correct. Cap it
    (action 1) so its growth cannot fill i2.
+
+### Actions (applied 2026-10-01)
+
+1. **`genesis` moved i3 `.65` → i2 `.66`.** Genesis was created on i3 the same
+   day and moved to i2 at the operator's request, to sit with the app host. i2's
+   `limits` are caps, not reservations, so the 2 GiB it is allowed adds nothing
+   to i2's *floor* — but it does add a consumer to a host that already runs the
+   three heaviest containers, so treat i2's ~3 GiB free as the ceiling for the
+   next arrival. The i3 container was deleted; i3's data volume was empty, so
+   nothing was carried. `genesis` now resolves its two secrets from Cerulean
+   Vault (`cerulean/genesis`) with a path-scoped token.
+2. **Router reservation follows the address.** The manual router reservation is
+   now for `.66`, not `.65` (see `1-primary/genesis/docs/Deployment.md`).
 
 ## Open items
 
