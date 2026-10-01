@@ -110,6 +110,13 @@ Conventions encoded in the library (enforced portfolio-wide):
   (172.x) and loopback addresses are never used because a remote NPM edge
   cannot resolve them. `host.docker.internal` is a last-resort fallback for
   single-box installs.
+- **The same address for a builder's app and sandbox** — `stack_lib_agent_net_env`
+  derives the builder deployment's network (`AGENT_LAN_IP`, the preview bind and
+  publish, and `AGENT_SANDBOX_NETWORK=host`) from that one LAN address, and
+  `./stack.sh lan` writes it into `.env`. A live preview and the sandbox an
+  agent's commands run in both need the *host's* address: inside a container
+  every address a process can see is a `172.x` bridge one, which is exactly what
+  a gateway calling back into the app cannot dial.
 - **One wildcard cert per platform zone** — `*.<platform>.innotel.us` via
   DNS-01 against the shared BIND, attached to every proxy host in the zone.
 - **Idempotent provisioning** — every script GETs before it writes and only
@@ -790,6 +797,7 @@ dirs cannot orphan a volume.
 | `./stack.sh discover <service>` | Find a service by name across all groups |
 | `./stack.sh register <svc> <addr> <port> [tags]` | Register a service manually |
 | `./stack.sh mesh` | Start only the WireGuard mesh |
+| `./stack.sh lan` | Detect this host's LAN address and write it (plus the `AGENT_*` builder network) into `.env`; `up` runs this before starting a group |
 | `./stack.sh logs <group>` | Tail logs for a group |
 
 ---
