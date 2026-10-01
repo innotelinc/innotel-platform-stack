@@ -33,6 +33,12 @@ set -euo pipefail
 STACK_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="${STACK_DIR}/.env"
 
+# The shared library holds the LAN-IP / forward-host rule and the .env editing
+# helpers, so the orchestrator never re-implements them. Sourced, not re-declared:
+# the same copy every member repo mirrors is the one that runs here.
+# shellcheck source=scripts/stack-lib.sh
+. "${STACK_DIR}/scripts/stack-lib.sh"
+
 # ── Mesh layout ───────────────────────────────────────────────────────────────
 # The group dirs live BESIDE this repo, not inside it:
 #
@@ -201,6 +207,29 @@ export_group_env() {
     export REGISTRY_ADDR="${REGISTRY_ADDR:-mesh-consul:8500}"
   fi
   export CONSUL="${CONSUL:-$REGISTRY_ADDR}"
+
+  # The host's LAN address, exported for every group before compose runs.
+  #
+  # `2-voice.yml` already interpolates `${LAN_IP}` (Asterisk's ARI/AMI, the SDP
+  # media address), and until now nothing ever set it: unset it collapsed to the
+  # `${LAN_IP:-127.0.0.1}` fallback, so those ports answered nowhere but the host
+  # and the softphone had no advert the LAN could reach. An operator's own
+  # `LAN_IP` wins; otherwise it is detected by the platform's own rule.
+  export LAN_IP="${LAN_IP:-$(stack_lib_lan_ip)}"
+
+  # The builder network, derived from that address. The app an agent runs and the
+  # sandbox its commands run in both need the host's LAN address rather than a
+  # docker bridge one, because a `172.x` address is the one a remote gateway
+  # cannot dial. Exported only when there is a real address to name; with none,
+  # the deployment stays loopback-private rather than pointed at nothing.
+  if [ -n "$LAN_IP" ]; then
+    local kv key value
+    while IFS= read -r kv; do
+      key="${kv%%=*}"
+      value="${kv#*=}"
+      [ -n "$value" ] && export "${key}=${value}"
+    done < <(stack_lib_agent_net_env)
+  fi
 }
 
 ensure_env() {
@@ -323,6 +352,9 @@ cmd_up() {
 
   # Export this group's mesh config (IP, subnet, Consul role)
   export_group_env "$target"
+  # Write the same values into the deployment env, so a service that reads its
+  # env from a file (not from this shell) sees them too — see cmd_lan.
+  cmd_lan
 
   # Bring up the mesh if not running
   if ! docker network ls 2>/dev/null | grep -q innotel-mesh-net; then
@@ -1069,6 +1101,39 @@ cmd_download() {
   fi
 }
 
+# Inject the host's LAN address into the deployment's `.env`.
+#
+# `up` exports these for the compose it starts, which is enough for a container
+# that reads its own environment. A deployment whose env comes from a *file* —
+# Genie's, and every group service with an `env_file:` — needs the value written,
+# and that is what this does. Idempotent, and it never overwrites a value an
+# operator set deliberately, so running it on every `up` is safe.
+cmd_lan() {
+  ensure_env
+  local lan
+  lan="$(stack_lib_lan_ip)"
+  if [ -z "$lan" ]; then
+    warn "no LAN address detected (only loopback and docker bridges) — leaving the env alone"
+    return 0
+  fi
+  # Export what is written, as well as writing it. `ensure_env` above read the
+  # *old* file into this shell, so without this the compose started moments later
+  # would interpolate the value from before the write — empty, on a first run,
+  # which is the one case where `${LAN_IP:-127.0.0.1}` would quietly win.
+  stack_lib_env_set "$ENV_FILE" LAN_IP "$lan"
+  export LAN_IP="$lan"
+  local kv key value
+  while IFS= read -r kv; do
+    key="${kv%%=*}"
+    value="${kv#*=}"
+    [ -n "$value" ] || continue
+    stack_lib_env_set "$ENV_FILE" "$key" "$value"
+    export "${key}=${value}"
+  done < <(stack_lib_agent_net_env)
+  ok "LAN address provisioned into ${ENV_FILE} (LAN_IP=${lan})"
+  info "the builder deployment names http://${lan}:<port> for its app and its sandbox"
+}
+
 cmd_migrate() {
   local sub="${1:?Usage: stack.sh migrate pack <group> --stop --out DIR | stack.sh migrate restore --in BUNDLE [--force]}"
   shift
@@ -1095,6 +1160,7 @@ case "$cmd" in
   discover) cmd_discover "$@" ;;
   register) cmd_register "$@" ;;
   migrate)  cmd_migrate "$@" ;;
+  lan)      cmd_lan ;;
   help|--help|-h)
     echo -e "${BOLD}Innotel Platform Stack — Unified Orchestrator${NC}\n"
     echo -e "Usage: ./stack.sh <command> [args]\n"
@@ -1122,6 +1188,8 @@ case "$cmd" in
     echo "  mesh                  Start mesh network only"
     echo "  discover <service>    Find a service across all groups"
     echo "  register <svc> <addr> <port> [tags]  Register a service"
+    echo "  lan                   Detect this host's LAN address and write it into .env"
+    echo "                        (LAN_IP + the AGENT_* builder vars; never clobbers yours)"
     echo "  migrate pack <group> --stop --out DIR   Bundle a stack: volumes, envs, vault secrets, images"
     echo "  migrate restore --in BUNDLE [--force]   Rebuild that stack here from the bundle"
     ;;
