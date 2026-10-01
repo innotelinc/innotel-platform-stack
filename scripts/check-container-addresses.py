@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+"""Fail when a container is not at the LAN address the estate expects it at.
+
+WHY THIS EXISTS
+---------------
+Every service here is reached **by address**, not by name: the A records point at
+`192.168.1.x`, each compose file publishes `192.168.1.x:port`, and every consumer dials
+that address. So a container's address is not an implementation detail — it is the
+interface, and the estate has no way to route around it.
+
+That is exactly what went wrong on 2026-10-01. The `ontrak` container was recreated with
+a new MAC, the router's DHCP reservation no longer matched it, and it came up on `.20`
+instead of `.21`. Everything that binds a specific LAN address died at once:
+
+  * `ontrak-sync-api` and `ontrak-sync-web` were `Exited (255)` — `docker compose` had
+    been told `ONTRAK_API_BIND=192.168.1.21` and the box did not have that address, so
+    the containers could never start;
+  * the family stack (Genie, Sentinel, Tix, Training) kept *running* only because it
+    binds `0.0.0.0` — they were up on an address nothing dials, which is down with
+    extra steps;
+  * `sync.ontrak.innotel.us` and `genie.ontrak.innotel.us` returned nothing.
+
+Nothing reported any of that. `docker compose` failure looked like an application
+problem, the DNS name resolved to the *right* answer for the wrong host, and the only
+signal was a person noticing a dashboard was blank. This check is that signal.
+
+THE RULES
+---------
+1. **The expectation table is the contract.** A running container whose IPv4 is not
+   the address the table names is a failure, whatever its state looks like.
+2. **A declared bind is a promise about the container's own address.** Where the table
+   records the env vars a stack publishes on (`binds`), the value must be an address
+   the container actually has. This is the `Exited (255)` case, caught by name rather
+   than by symptom.
+3. **DHCP is drift in waiting.** A container that gets its address from DHCP is
+   reported: it is the state that produced this outage, and it will produce it again
+   the next time the container is recreated or the lease expires.
+4. **The table must not be stale in the other direction.** A running container the
+   table does not know about is reported, because the table is only worth having if it
+   is the estate as it is.
+5. **A stopped container is not a finding.** It has no address to be wrong. It is
+   reported so an operator knows what the table is covering.
+
+The address table lives here rather than in a doc because a doc cannot fail a build.
+`docs/container-placement.md` keeps the reasoning; this keeps the invariant.
+
+    ./scripts/check-container-addresses.py                 # live, over ssh to each host
+    ./scripts/check-container-addresses.py --hosts i1=root@192.168.1.51,...
+    ./scripts/check-container-addresses.py --json
+
+Reaching the hosts: with key-based `ssh` the check just runs. This estate reaches its
+hosts with a password, so where `sshpass` is installed, set `SSHPASS` and it is handed
+through (`SSHPASS='…' ./scripts/check-container-addresses.py`). Without either, the
+check exits 2 rather than reporting a pass it cannot stand behind.
+
+Exit codes: 0 = every address holds, 1 = at least one does not, 2 = the check could not
+run (a host it needs was unreachable — never silently a pass).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from typing import Callable, Iterable
+
+# --------------------------------------------------------------------------------------
+# The estate as it should be
+# --------------------------------------------------------------------------------------
+
+#: host → {container: IPv4}. The addresses every A record and every published port names.
+EXPECTED: dict[str, dict[str, str]] = {
+    "i1": {"ontrak": "192.168.1.21", "monarch": "192.168.1.56", "proxy": "192.168.1.71"},
+    "i2": {
+        "atlas": "192.168.1.90",
+        "capstone": "192.168.1.30",
+        "dev": "192.168.1.74",
+        "genesis": "192.168.1.66",
+        "rizzaura": "192.168.1.62",
+        "terminal": "192.168.1.22",
+        "vault": "192.168.1.73",
+        "www": "192.168.1.80",
+    },
+    "i3": {
+        "acme": "192.168.1.49",
+        "distro": "192.168.1.61",
+        "magnate": "192.168.1.57",
+        "mail": "192.168.1.15",
+        "onyx": "192.168.1.60",
+        "pi": "192.168.1.70",
+        "signara": "192.168.1.44",
+        "subscribe": "192.168.1.58",
+        "vpn": "192.168.1.43",
+    },
+}
+
+#: Where each host is reachable. Overridable with `--hosts`.
+HOSTS: dict[str, str] = {"i1": "root@192.168.1.51", "i2": "root@192.168.1.52", "i3": "root@192.168.1.53"}
+
+#: host → container → {env var: address it must have}. Rule 2, for the stacks whose whole
+#: failure mode is "the address in `.env` is not the one the box has".
+BINDS: dict[str, dict[str, dict[str, str]]] = {
+    "i1": {
+        "ontrak": {
+            "ONTRAK_API_BIND": "192.168.1.21",
+            "ONTRAK_WEB_BIND": "192.168.1.21",
+        }
+    }
+}
+
+#: What each address is for. Reported, so a failure names the thing that broke.
+ROLES: dict[str, str] = {
+    "192.168.1.21": "ontrak family + Ontrak Sync",
+    "192.168.1.56": "monarch — media",
+    "192.168.1.71": "the Cerulean edge (NPM, Authentik, Vault, DNS)",
+    "192.168.1.30": "capstone / Zeus telephony",
+    "192.168.1.74": "the dev container",
+}
+
+
+# --------------------------------------------------------------------------------------
+# The decision — pure, so it is the thing under test
+# --------------------------------------------------------------------------------------
+
+
+@dataclass
+class Instance:
+    """One container as it actually is."""
+
+    name: str
+    state: str
+    address: str | None = None
+    #: False when the address comes from DHCP — see rule 3.
+    pinned: bool = True
+
+
+@dataclass
+class Finding:
+    code: str
+    level: str  # "fail" | "warn" | "note"
+    message: str
+
+
+@dataclass
+class Audit:
+    findings: list[Finding] = field(default_factory=list)
+
+    @property
+    def failures(self) -> list[Finding]:
+        return [f for f in self.findings if f.level == "fail"]
+
+    @property
+    def ok(self) -> bool:
+        return not self.failures
+
+
+def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
+    """Compare what the hosts report against `EXPECTED` / `BINDS`."""
+    out = Audit()
+
+    for host, wanted in EXPECTED.items():
+        seen = {inst.name: inst for inst in observed.get(host, [])}
+
+        for name, address in sorted(wanted.items()):
+            inst = seen.pop(name, None)
+            if inst is None:
+                out.findings.append(
+                    Finding("missing", "fail", f"{host} {name}: not present (the table expects {address})")
+                )
+                continue
+            if inst.state != "RUNNING":
+                out.findings.append(
+                    Finding("stopped", "note", f"{host} {name}: {inst.state} — no address to be wrong")
+                )
+                continue
+            if inst.address is None:
+                out.findings.append(
+                    Finding("no_address", "fail", f"{host} {name}: running with no IPv4 (the table expects {address})")
+                )
+                continue
+            if inst.address != address:
+                role = ROLES.get(address, "a published service")
+                out.findings.append(
+                    Finding(
+                        "address_moved",
+                        "fail",
+                        f"{host} {name}: at {inst.address}, expected {address} — "
+                        f"{role} is dialled at {address}; anything binding it cannot start",
+                    )
+                )
+            if not inst.pinned:
+                out.findings.append(
+                    Finding(
+                        "not_pinned",
+                        "warn",
+                        f"{host} {name}: address comes from DHCP — a renumber is how this outage happens",
+                    )
+                )
+            # Rule 2: what the stack publishes on must be an address the stack has.
+            for var, bound in sorted(BINDS.get(host, {}).get(name, {}).items()):
+                if bound != (inst.address or ""):
+                    out.findings.append(
+                        Finding(
+                            "bind_mismatch",
+                            "fail",
+                            f"{host} {name}: {var}={bound} but the container is at "
+                            f"{inst.address or '(none)'} — the service cannot bind and will not start",
+                        )
+                    )
+
+        for name, inst in sorted(seen.items()):
+            if inst.state == "RUNNING":
+                out.findings.append(
+                    Finding("unexpected", "warn", f"{host} {name}: running and not in the table — update the table")
+                )
+
+    return out
+
+
+# --------------------------------------------------------------------------------------
+# The estate, as it is
+# --------------------------------------------------------------------------------------
+
+
+def _ssh_prefix() -> list[str]:
+    """How to reach a host here.
+
+    Key-based SSH is the clean case and the default (`BatchMode=yes`, so an unreachable
+    host fails instead of hanging on a prompt). This estate, though, reaches its hosts
+    with a password, so where `sshpass` is installed and `SSHPASS` is set in the
+    environment the password is handed to `ssh` through it — the same way every other
+    script here talks to a host. `BatchMode=yes` is dropped in that case because it
+    disables password auth outright, which would make the check exit 2 forever.
+    """
+    if os.environ.get("SSHPASS") and shutil.which("sshpass"):
+        return ["sshpass", "-e", "ssh", "-o", "StrictHostKeyChecking=no"]
+    return ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"]
+
+
+def _ssh(host: str, command: str, timeout: int = 25) -> str:
+    return subprocess.run(
+        [*_ssh_prefix(), "-o", f"ConnectTimeout={timeout}", host, command],
+        capture_output=True,
+        text=True,
+        timeout=timeout + 15,
+        check=True,
+    ).stdout
+
+
+def _first_lan_address(text: str) -> str | None:
+    """The first LAN address in an `incus list -c ns4` address field.
+
+    The field is a CSV-quoted, newline-separated list like
+    `"192.168.1.56 (eth0)\n172.20.0.1 (br-…)"`, so it is split on comma, quote,
+    whitespace and `/` (a CIDR suffix is cut) before the prefix test. A container whose
+    only addresses are bridges (docker0, br-…) has no LAN address and returns None.
+    """
+    for token in re.split(r"[\s,\"/]+", text):
+        if token.startswith("192.168.1."):
+            return token
+    return None
+
+
+def gather(hosts: dict[str, str], runner: Callable[[str, str], str] = _ssh) -> dict[str, list[Instance]]:
+    """Read each host's containers, their addresses and whether they are pinned.
+
+    `pinned` is answered from the container's own netplan: a static `dhcp4: false` is the
+    thing that survives a recreation, and it is what the fix for the 2026-10-01 outage put
+    in place.
+    """
+    observed: dict[str, list[Instance]] = {}
+    for host, target in hosts.items():
+        listing = runner(target, "incus list --format csv -c ns4")
+        instances: list[Instance] = []
+        for line in listing.splitlines():
+            if not line.strip():
+                continue
+            name, _, rest = line.partition(",")
+            state, _, addresses = rest.partition(",")
+            address = _first_lan_address(addresses)
+            pinned = True
+            if state == "RUNNING":
+                try:
+                    probe = runner(
+                        target,
+                        f"incus exec {name} -- bash -c 'grep -l \"dhcp4: false\" /etc/netplan/*.yaml >/dev/null && echo static || echo dhcp' </dev/null",
+                    )
+                    pinned = "static" in probe
+                except Exception:  # a container we cannot exec into is not pinned *silently*
+                    pinned = False
+            instances.append(Instance(name=name.strip(), state=state.strip(), address=address, pinned=pinned))
+        observed[host] = instances
+    return observed
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--hosts", help="name=target pairs, comma separated (default: the table's)")
+    parser.add_argument("--json", action="store_true", help="machine-readable findings")
+    args = parser.parse_args(argv)
+
+    hosts = dict(HOSTS)
+    if args.hosts:
+        hosts = {}
+        for pair in args.hosts.split(","):
+            name, _, target = pair.partition("=")
+            hosts[name.strip()] = target.strip()
+
+    missing = [t for t in (shutil.which("ssh"),) if t is None]
+    if missing:
+        print("check-container-addresses: no ssh on PATH", file=sys.stderr)
+        return 2
+    if not (os.environ.get("SSHPASS") and shutil.which("sshpass")):
+        print(
+            "check-container-addresses: no keyless ssh path assumed — reads hosts with "
+            "key-based `ssh`; set SSHPASS (and install sshpass) where the estate uses "
+            "passwords",
+            file=sys.stderr,
+        )
+
+    try:
+        observed = gather(hosts)
+    except Exception as error:  # unreachable host is not a pass — see the module docstring
+        print(f"check-container-addresses: could not read a host: {error}", file=sys.stderr)
+        return 2
+
+    result = audit(observed)
+    if args.json:
+        print(json.dumps([f.__dict__ for f in result.findings], indent=2))
+    else:
+        for level in ("fail", "warn", "note"):
+            for finding in [f for f in result.findings if f.level == level]:
+                print(f"{level.upper():4} {finding.message}")
+        print(
+            f"\ncheck-container-addresses: {len(result.failures)} failure(s), "
+            f"{len([f for f in result.findings if f.level == 'warn'])} warning(s)"
+        )
+    return 0 if result.ok else 1
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
