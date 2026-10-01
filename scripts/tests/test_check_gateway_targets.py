@@ -72,7 +72,7 @@ class RuleTests(ScanCase):
         # `.46` was the door until 2026-09-28. The whole point of moving the gateway
         # to `.71` is that this address stops working, so it has to be a failure and
         # not merely a stale-looking line.
-        found = self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.46:20128/v1\n"})
+        found = self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.74:20128/v1\n"})
         self.assertEqual(len(found), 1)
         self.assertIn("dial 192.168.1.71:20128", found[0].reason)
 
@@ -84,7 +84,7 @@ class RuleTests(ScanCase):
         self.assertIn("dial 192.168.1.71:20128", found[0].reason)
 
     def test_the_retired_proxy_port_is_a_violation_whatever_the_host(self):
-        found = self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.46:20129/v1\n"})
+        found = self.violations({"app/.env": "OMNIROUTE_BASE_URL=http://192.168.1.74:20129/v1\n"})
         self.assertEqual(len(found), 1)
         self.assertIn("20129", found[0].text)
         self.assertIn("moved to 192.168.1.71:20128", found[0].reason)
@@ -192,7 +192,7 @@ class ConditionalTests(ScanCase):
             self.assertEqual(chk.main(["--root", str(root)]), 0)
 
     def test_a_sanctioned_target_is_not_even_conditional(self):
-        self.assertEqual(self.conditional({"app/.env": "X=http://192.168.1.46:20128/v1\n"}), [])
+        self.assertEqual(self.conditional({"app/.env": "X=http://192.168.1.74:20128/v1\n"}), [])
 
     def test_a_service_name_the_file_declares_is_not_conditional_either(self):
         # Same project, same network: unambiguous, so nothing to report.
@@ -220,7 +220,7 @@ class DeclaredNamesTests(ScanCase):
         self.assertEqual(self.declared(compose), {"n8n"})
 
     def test_nothing_is_declared_in_a_non_compose_file(self):
-        self.assertEqual(self.declared("OMNIROUTE_URL=http://192.168.1.46:20128\n"), set())
+        self.assertEqual(self.declared("OMNIROUTE_URL=http://192.168.1.74:20128\n"), set())
 
 
 class ExclusionTests(ScanCase):
@@ -231,7 +231,7 @@ class ExclusionTests(ScanCase):
             "    ports:\n      - \"127.0.0.1:20128:20128\"\n",
             "    ports:\n      - \"172.17.0.1:20128:20128\"\n",
             "    ports:\n      - \"${OMNIROUTE_PORT:-20128}:20128\"\n",
-            "    ports:\n      - \"192.168.1.46:20128:20128\"      # a binding, however wide\n",
+            "    ports:\n      - \"192.168.1.74:20128:20128\"      # a binding, however wide\n",
         ]
         for line in lines:
             with self.subTest(line=line):
@@ -245,17 +245,17 @@ class ExclusionTests(ScanCase):
         self.assertEqual(self.violations({"ontrak-genie/package.json": line}), [])
 
     def test_comments_are_not_configuration(self):
-        self.assertEqual(self.violations({"app/.env": "# was http://192.168.1.46:20128/v1 before the split\n"}), [])
+        self.assertEqual(self.violations({"app/.env": "# was http://192.168.1.74:20128/v1 before the split\n"}), [])
 
     def test_the_gateway_s_port_used_as_a_value_is_not_a_target(self):
         # `OMNIROUTE_PORT=20128` (ips's own extension) has no host, so nothing is dialled.
         self.assertEqual(self.violations({"ips/.env.example": "OMNIROUTE_PORT=20128\n"}), [])
 
     def test_other_ports_are_not_this_check_s_business(self):
-        self.assertEqual(self.violations({"app/.env": "REDIS_URL=redis://192.168.1.46:16380/0\n"},), [])
+        self.assertEqual(self.violations({"app/.env": "REDIS_URL=redis://192.168.1.74:16380/0\n"},), [])
 
     def test_only_config_shaped_files_are_scanned(self):
-        _, scanned = self.scan({"app/notes.md": "http://192.168.1.46:20128/v1\n",
+        _, scanned = self.scan({"app/notes.md": "http://192.168.1.74:20128/v1\n",
                                 "app/.env": "X=1\n",
                                 "app/docker-compose.yml": "services: {}\n"})
         names = sorted(p.name for p in scanned)
@@ -313,10 +313,10 @@ class LiveCheckTests(unittest.TestCase):
         self.assertIn("this host only", note)
 
     def test_a_lan_binding_fails_because_the_premise_is_now_false(self):
-        ok, note = self.live({"20128/tcp": [{"HostIp": "127.0.0.1"}, {"HostIp": "192.168.1.46"}]})
+        ok, note = self.live({"20128/tcp": [{"HostIp": "127.0.0.1"}, {"HostIp": "192.168.1.74"}]})
         self.assertFalse(ok)
         self.assertIn("on the LAN again", note)
-        self.assertIn("192.168.1.46", note)
+        self.assertIn("192.168.1.74", note)
 
     def test_every_interface_is_caught(self):
         ok, note = self.live({"20128/tcp": [{"HostIp": ""}]})
@@ -343,7 +343,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.run_cli({"app/.env": "X=http://192.168.1.71:20128/v1\n"}), 0)
 
     def test_a_violation_exits_one(self):
-        self.assertEqual(self.run_cli({"app/.env": "X=http://192.168.1.46:20129/v1\n"}), 1)
+        self.assertEqual(self.run_cli({"app/.env": "X=http://192.168.1.74:20129/v1\n"}), 1)
 
     def test_json_output_names_all_three_lists(self):
         import io
@@ -351,7 +351,7 @@ class CliTests(unittest.TestCase):
 
         buffer = io.StringIO()
         with redirect_stdout(buffer):
-            code = self.run_cli({"app/.env": "X=http://192.168.1.46:20128\n",
+            code = self.run_cli({"app/.env": "X=http://192.168.1.74:20128\n",
                                  "other/.env": "X=http://10.10.2.1:20128\n",
                                  "gateway/.env": "UPSTREAM=http://127.0.0.1:20128\n"}, "--json")
         report = json.loads(buffer.getvalue())
@@ -393,12 +393,12 @@ class BindingAndTargetTests(unittest.TestCase):
                 self.assertNotIn("20128:20128", chk.PUBLISH.sub(" ", line))
 
     def test_targets_are_not_mistaken_for_bindings(self):
-        for line in ("OMNIROUTE_URL=http://192.168.1.46:20128", "host: 192.168.1.46", "url: http://omniroute:20128/v1"):
+        for line in ("OMNIROUTE_URL=http://192.168.1.74:20128", "host: 192.168.1.74", "url: http://omniroute:20128/v1"):
             with self.subTest(line=line):
                 self.assertIsNone(chk.BINDING.match(line))
 
     def test_a_host_is_read_out_of_a_url_or_a_bare_pair(self):
-        for line, host in (("X=http://192.168.1.46:20128/v1", "192.168.1.46"),
+        for line, host in (("X=http://192.168.1.74:20128/v1", "192.168.1.74"),
                            ("GATEWAY_API_URL=http://host.docker.internal:20128", "host.docker.internal"),
                            ("AI_BASE_URL: http://omniroute:20128/v1", "omniroute")):
             with self.subTest(line=line):
