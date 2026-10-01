@@ -962,6 +962,25 @@ What the pass left alone, and why:
   rewrite the message, then force-push with a lease — so it is recorded and not
   done.
 
+**And the group composes for `2-voice` and `5-dev` are stale, with the check that
+should say so unable to.** Regenerating them from the working trees rewrites
+about 150 lines — capstone's `ZEUS_RETURN_ENABLED`, coturn's `--no-stun` — because
+capstone, zeus, olympus and atlas all carry uncommitted work right now. Two
+things follow, and the second is the one worth keeping:
+
+- **Regenerating would publish unreviewed work.** The generated file is what a
+group host is rebuilt from, so folding another stack's in-flight changes into it
+is a decision with an owner, not a chore to sweep up in passing. It was reverted
+and left for whoever owns those changes.
+- **The check cannot catch it where the check runs.** `gen-group-compose.py
+--check` is a CI step (`ci.yml`), and CI checks out `ips` alone — the group
+directories are not beside it, so the script correctly reports "this checkout
+stands alone … nothing to generate" and passes. The guard runs, and can never
+fail. That is the same shape as the two defects above: a check that looks like
+coverage and is not. Making it real means either generating the groups in a CI
+checkout that has the repos, or checking in just the member repos' headers — a
+change to the pipeline, recorded here rather than made silently.
+
 Genesis, the repo this pass was mostly about, is now published and conforms:
 `innotelinc/genesis` on `main`, its landing live at
 `https://innotelinc.github.io/genesis/`, its guard and CI green, and the
