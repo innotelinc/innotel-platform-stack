@@ -54,9 +54,12 @@ class DashboardCase(unittest.TestCase):
         self.assertIn("innotel_estate_check", self.raw)
 
     def test_it_charts_the_address_latency_the_check_publishes(self):
-        # The one panel that makes the power-save regression visible; if the metric is
-        # renamed the dashboard must be renamed with it.
+        # The panel that makes the power-save regression visible; if the metric is renamed
+        # the dashboard must be renamed with it.
         self.assertIn("innotel_estate_check_address_latency_ms", self.raw)
+
+    def test_it_charts_the_disk_headroom_the_check_publishes(self):
+        self.assertIn("innotel_estate_check_host_disk_percent", self.raw)
 
     def test_the_rationale_is_written_where_the_next_reader_looks(self):
         # Grafana ignores unknown top-level keys, which is what lets `__comment` carry the

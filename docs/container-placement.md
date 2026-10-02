@@ -86,7 +86,7 @@ estate as it is, not as it was.
   (The 2026-09-27 note below that `limits.cpu` waits for a restart is wrong, and is
   corrected here.)
 - **The estate's host invariants are scheduled and alerting.**
-  `systemd/estate-checks.{service,timer}` runs four checks every 30 minutes *on the
+  `systemd/estate-checks.{service,timer}` runs five checks every 30 minutes *on the
   Cerulean edge* and writes each one's textfile into node-exporter's directory:
   `check-container-addresses.py` (every address an A record names),
   `check-container-limits.py` (a declared `limits.cpu` is the cpuset actually pinned),
@@ -94,9 +94,10 @@ estate as it is, not as it was.
   `check-address-latency.py` (every address the estate dials — each host **and** every
   container in the address table — answers at all, and answers in milliseconds rather
   than hundreds; the reachability half closes the outage one layer below a renumber, and
-  the latency half is the `i4` WiFi power-save regression, measured rather than felt).
+  the latency half is the `i4` WiFi power-save regression, measured rather than felt), and
+  `check-host-disk.py` (each host's root filesystem has room — 80 % warns, 90 % fails).
   They share one metric family — `innotel_estate_check`, one series per check via a
-  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all four
+  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all five
   (`EstateCheckFailing`, `...CouldNotRun`, `...Stale`, `...NotPinned`), and the
   provisioned `grafana/dashboards/estate-checks.json` shows them (a green stat, a
   per-check table, and the per-address latency chart). The edge reaches
@@ -170,11 +171,21 @@ estate as it is, not as it was.
   block in the edge's `/root/.ssh/config` naming every host by address; `--check` reports
   drift without a password. The edge's config was reduced to that one block on 2026-10-02
   (the hand-fix it replaced left a second, identical `Host` entry), and `--check` reads 0.
-- **The edge is watched from off the edge.** `scripts/check-edge-liveness.py` runs on `i1`
-  under `systemd/edge-liveness.{service,timer}` every five minutes and TCP-connects to the
-  edge's doors; two attempts per endpoint, so one dropped packet on the WiFi link does not
-  page. It exits non-zero when the edge is dark and can `--notify`; this is the only
-  checker that can still report the edge being gone, because it does not run there.
+- **Root-filesystem headroom is watched now, not noted.** The page has said "i2 is the
+  one to watch" since the `.46` migration, and nothing looked between surveys.
+  `check-host-disk.py` reads `df -P /` on every host each run: 80 % is a warning, 90 % a
+  failure, and it publishes the percentage and free bytes per host. Its first run
+  corrected this page's own assumption: the host to watch is **i3 at 68 %**, not i2 —
+  i1 13 %, i2 47 %, i3 68 %, i4 39 %. All are under the 80 % line, so all are green; i3
+  is the one with the least room, and it is now a number rather than a memory.
+- **The edge is watched from off the edge, and the report goes out by mail.**
+  `scripts/check-edge-liveness.py` runs on `i1` under `systemd/edge-liveness.{service,timer}`
+  every five minutes and TCP-connects to the edge's doors; two attempts per endpoint, so
+  one dropped packet on the WiFi link does not page. On failure it exits non-zero (the unit
+  shows failed) and mails `EDGE_LIVENESS_MAIL_TO` through the estate's own mail server —
+  not through the estate's Alertmanager, which is on the edge's side and silent (see Open
+  items). It is the only checker that can still report the edge being gone, because it does
+  not run there.
 - **The scheduled checks now cover `i4`.** `check-estate-inventory.py` no longer lists
   it as an optional bench (every named host must answer), `check-container-addresses.py`
   carries its four addresses, and `check-container-limits.py` reads its caps.
@@ -481,13 +492,24 @@ The deployed estate and this map agree again; what remains is sizing, not placem
   `/etc/systemd/system/estate-checks.*` there, and the watcher at
   `/opt/innotel/edge-liveness/` with `/etc/systemd/system/edge-liveness.*` on `i1`; the
   platform-stack copies are the source.
-- **The liveness watcher's outward channel is not wired yet.** `check-edge-liveness.py`
-  reports an unreachable edge by exiting non-zero (so the unit shows as failed on `i1`)
-  and by `--notify`, which is **unset** — so today the signal is `systemctl --failed` on
-  `i1` plus the journal, and nothing reaches a person. Point `EDGE_LIVENESS_NOTIFY` at a
-  real receiver (a webhook, or Alertmanager's `/api/v2/alerts`). Its textfile is written
-  to `/var/lib/node_exporter/textfile/edge-liveness.prom` on `i1`, which no collector
-  reads today; a node-exporter pointed at that directory would make it scrapable.
+- ~~The liveness watcher's outward channel is not wired.~~ **Done 2026-10-02:**
+  `check-edge-liveness.py` now mails the failure through the estate's own mail server
+  (`--mail-to`, sent via `192.168.1.15:25`) as well as exiting non-zero; `i1` sets
+  `EDGE_LIVENESS_MAIL_TO=admin@innotel.us` in `/etc/innotel/edge-liveness.env`, and a
+  simulated dark edge delivered. `--notify` is still there for another channel. Its
+  textfile is written to `/var/lib/node_exporter/textfile/edge-liveness.prom` on `i1`,
+  which no collector reads today; a node-exporter pointed at that directory would make it
+  scrapable.
+- **The estate's one Alertmanager delivers nowhere.** `signara` (i3) runs
+  `signara-alertmanager-1`, but its container environment has **empty** `SMTP_HOST`,
+  `SMTP_USER`, `SMTP_PASS` and `ALERT_EMAIL_TO` — the exact state its own config comment
+  warns about ("a receiver that looks configured, validates, and delivers nowhere",
+  `amtool check-config` says SUCCESS on it). Its port is also loopback-only
+  (`127.0.0.1:9093` on the `i3` host), so nothing off that host can POST to it either.
+  That is why the edge-dark watcher mails through the estate's mail server instead of
+  routing through Alertmanager: for the watcher's one job, Alertmanager is both
+  unreachable and silent. Filling those four values is what turns the estate's alerting
+  from "visible in the Prometheus UI" into "reaches a person".
 - **The move shifted disk the other way: i1 is back to 13 % and `i4` took the
   images.** The four rootfs copies added tens of GB to `i4`'s `dir` pool (stored
   uncompressed, so larger than the ZFS `USED` figures they came from); `i4`'s root

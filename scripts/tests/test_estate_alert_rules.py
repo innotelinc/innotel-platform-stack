@@ -33,6 +33,7 @@ CHECK_SCRIPTS = [
     "check-container-limits",
     "check-estate-inventory",
     "check-address-latency",
+    "check-host-disk",
 ]
 
 

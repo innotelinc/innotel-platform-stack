@@ -140,6 +140,61 @@ class TextfileCase(unittest.TestCase):
             self.assertEqual(Path(path).read_text(encoding="utf-8"), "x\n")
 
 
+class MailCase(unittest.TestCase):
+    def test_the_message_carries_from_to_subject_and_body(self):
+        sent = {}
+
+        class FakeSMTP:
+            def __init__(self, host, port, timeout=None):
+                sent["addr"] = (host, port)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def send_message(self, message):
+                sent["to"] = message["To"]
+                sent["from"] = message["From"]
+                sent["subject"] = message["Subject"]
+                sent["body"] = message.get_content()
+
+        watch.send_mail(
+            "192.168.1.15", 25, "edge-watch@innotel.us", "admin@innotel.us",
+            "[critical] the edge did not answer", "the edge is dark\n", smtp=FakeSMTP,
+        )
+        self.assertEqual(sent["addr"], ("192.168.1.15", 25))
+        self.assertEqual(sent["to"], "admin@innotel.us")
+        self.assertEqual(sent["from"], "edge-watch@innotel.us")
+        self.assertIn("[critical]", sent["subject"])
+        self.assertIn("the edge is dark", sent["body"])
+
+    def test_a_dark_edge_is_mailed_and_a_healthy_one_is_not(self):
+        from unittest import mock
+
+        dark = [watch.Result(endpoint=watch.Endpoint("192.168.1.71", 443), ms=None)]
+        healthy = [watch.Result(endpoint=watch.Endpoint("192.168.1.71", 443), ms=4.0)]
+        argv = ["--endpoints", "192.168.1.71:443", "--mail-to", "admin@innotel.us", "--smtp-host", "192.168.1.15"]
+
+        with mock.patch.object(watch, "probe", return_value=dark), mock.patch.object(watch, "send_mail") as mailer:
+            self.assertEqual(watch.main(argv), 1)
+            mailer.assert_called_once()
+            self.assertEqual(mailer.call_args.args[3], "admin@innotel.us")
+
+        with mock.patch.object(watch, "probe", return_value=healthy), mock.patch.object(watch, "send_mail") as mailer:
+            self.assertEqual(watch.main(argv), 0)
+            mailer.assert_not_called()
+
+    def test_an_empty_recipient_sends_nothing(self):
+        from unittest import mock
+
+        dark = [watch.Result(endpoint=watch.Endpoint("192.168.1.71", 443), ms=None)]
+        with mock.patch.object(watch, "probe", return_value=dark), mock.patch.object(watch, "send_mail") as mailer:
+            self.assertEqual(watch.main(["--endpoints", "192.168.1.71:443"]), 1)
+            mailer.assert_not_called()
+
+
 class NotifyCase(unittest.TestCase):
     def test_the_message_reaches_the_notify_command(self):
         seen = {}
