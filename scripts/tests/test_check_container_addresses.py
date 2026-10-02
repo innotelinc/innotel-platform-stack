@@ -91,8 +91,8 @@ class AddressCase(unittest.TestCase):
         self.assertEqual([f.code for f in result.failures], ["missing"])
 
     def test_a_stopped_container_is_reported_and_not_failed(self):
-        # `acme` and `patchmon` sit stopped on i3; that is not an address that is wrong.
-        result = chk.audit(estate({("i3", "acme"): dict(state="STOPPED", address=None)}))
+        # `acme` sits stopped on i1; that is not an address that is wrong.
+        result = chk.audit(estate({("i1", "acme"): dict(state="STOPPED", address=None)}))
         self.assertTrue(result.ok, [f.message for f in result.failures])
         self.assertEqual([f.code for f in result.findings if f.level == "note"], ["stopped"])
 
@@ -138,6 +138,50 @@ class ParseCase(unittest.TestCase):
                         chk.EXPECTED[host][name],
                         f"{host} {name}: {var} is a promise about the address the table names",
                     )
+
+
+class PromCase(unittest.TestCase):
+    """The scheduled signal: a renumber must reach an alert, not sit in a log."""
+
+    def test_a_clean_run_publishes_status_one_and_advances_success(self):
+        text = chk.prometheus_text(chk.audit(estate()), ran_ok=True, now=1000.0)
+        self.assertIn("innotel_container_address_last_status 1", text)
+        self.assertIn("innotel_container_address_failures 0", text)
+        self.assertIn("innotel_container_address_last_success_timestamp 1000", text)
+
+    def test_a_moved_address_publishes_status_zero_and_names_the_count(self):
+        result = chk.audit(estate({("i1", "ontrak"): dict(state="RUNNING", address="192.168.1.20")}))
+        text = chk.prometheus_text(result, ran_ok=True, now=2000.0, prior_success=900.0)
+        self.assertIn("innotel_container_address_last_status 0", text)
+        self.assertIn(f"innotel_container_address_failures {len(result.failures)}", text)
+        self.assertGreater(len(result.failures), 0)
+        # A bad run must not look like a fresh success — the stale-rule depends on it.
+        self.assertIn("innotel_container_address_last_success_timestamp 900", text)
+
+    def test_a_run_that_could_not_happen_is_a_failure_not_silence(self):
+        # Exit 2 (a host unreachable) must read as status 0, because "no data" is how
+        # the 2026-10-01 outage stayed invisible.
+        text = chk.prometheus_text(None, ran_ok=False, now=3000.0, prior_success=900.0)
+        self.assertIn("innotel_container_address_last_status 0", text)
+        self.assertIn("innotel_container_address_last_run_timestamp 3000", text)
+        self.assertNotIn("innotel_container_address_failures", text)
+        self.assertIn("innotel_container_address_last_success_timestamp 900", text)
+
+    def test_the_written_file_carries_a_good_run_forward_over_a_bad_one(self):
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/container-address.prom"
+            chk.write_prom(path, chk.audit(estate()), ran_ok=True, now=1000.0)
+            chk.write_prom(path, None, ran_ok=False, now=2000.0)
+            with open(path, encoding="utf-8") as handle:
+                body = handle.read()
+            # The textfile collector reads as an unprivileged user; a 0600 file reads
+            # as "no metrics" and took this alert path dark once already.
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o644)
+        self.assertIn("innotel_container_address_last_status 0", body)
+        self.assertIn("innotel_container_address_last_success_timestamp 1000", body)
 
 
 if __name__ == "__main__":  # pragma: no cover

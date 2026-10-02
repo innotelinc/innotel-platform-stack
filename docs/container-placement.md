@@ -1,13 +1,15 @@
 # Incus container placement — i1 / i2 / i3
 
-Surveyed 2026-09-27; refreshed 2026-10-01. Three Incus hosts run every estate
-container. This page records what each host is, what currently sits on it, and
-where it should sit.
+Surveyed 2026-09-27; refreshed 2026-10-01 (a morning survey and an evening
+rebalance). Three Incus hosts run every estate container. This page records what
+each host is, what currently sits on it, and where it should sit.
 
 The 2026-10-01 refresh matters because the estate's *shape* changed, not just its
 numbers: the pre-migration containers on `.46` (`atheniq`, `cloud`, `voice`,
-`docs`, `ansible`, `slack`, `olympus`/`olympus-gw`) are gone, and the edge
-services that used to live on i1 now live on i2 and i3. The tables below are the
+`docs`, `ansible`, `slack`, `olympus`/`olympus-gw`) are gone, the `ontrak` address
+incident was fixed by pinning addresses instead of trusting the router, and the
+evening pass moved the edge services back onto i1, right-sized i1's CPU caps, and
+put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
 
 ## Changes applied 2026-10-01
@@ -57,6 +59,38 @@ estate as it is, not as it was.
   static by netplan the address stops being a lease; the remaining DHCP containers
   are listed as findings so the same drift is visible rather than latent.
 
+### Changes applied 2026-10-01 (evening rebalance)
+
+- **The edge services moved back onto i1.** `terminal` `.22` and `vault` `.73`
+  came off i2, and `acme` `.49`, `mail` `.15` and `vpn` `.43` came off i3, so the
+  documented topology — i1 owns the edge — is deployed again. Each move was an
+  `incus copy <remote>:<name> <name> --storage incus` from i1, over the existing
+  `i2move`/`i3move` TLS remotes, followed by deleting the source. **Every container
+  kept its address**, because the address is pinned *inside* the container and
+  travels with its rootfs: a cross-host copy is exactly the recreation that used to
+  renumber, and pinning is what makes the move address-preserving. i1's root pool
+  is `incus`, not `tank`, so the copy remaps the root disk (that is what `--storage
+  incus` is doing).
+- **i1's CPU caps were right-sized.** They summed to **24 vCPU on a 4-vCPU host**
+  (`proxy` 4, `vault` 4, `vpn` 4, `mail` 4 inherited from its `medium` profile, and
+  2 each on the rest) — a cap at or above the host total protects nobody. `proxy`
+  is now 2 and every other i1 container is 1, except `monarch` which keeps 2
+  because media transcoding is the one real CPU consumer. **No container can now
+  claim the whole host, and a runaway anywhere leaves at least two vCPU for the
+  rest.** `limits.cpu` takes effect on the container's next restart; these
+  containers had just been restarted by the move.
+- **The address invariant is now scheduled and alerting.**
+  `systemd/container-address-check.{service,timer}` runs
+  `scripts/check-container-addresses.py` every 30 minutes *on the Cerulean edge*
+  and writes `container-address.prom` into node-exporter's textfile directory;
+  `extensions/monitoring/prometheus/rules/container-address.yml` alerts on it
+  (`ContainerAddressMoved`, `ContainerAddressCheckCouldNotRun`,
+  `ContainerAddressCheckStale`, `ContainerAddressNotPinned`). The edge reaches the
+  three hosts with a dedicated ssh key, `/root/.ssh/container-address`, authorized
+  `from="192.168.1.71"` only, so the scheduled run needs no password on disk. A
+  check that cannot reach a host publishes status 0 rather than nothing, because
+  "no data" is how the outage stayed invisible. Verified running 2026-10-01.
+
 ## Changes applied 2026-09-27
 
 - **Limits set** on the unbounded heavies: i2 `atheniq`/`capstone` = 6 GiB,
@@ -101,18 +135,24 @@ estate as it is, not as it was.
 
 ## The three hosts
 
-Values are the 2026-10-01 (18:51 EDT) survey.
+Values are the 2026-10-01 evening (21:00 EDT) survey, after the move.
 
 | Host | Address | vCPU | RAM | Load at survey | RAM available | Root disk | Pool |
 |---|---|---|---|---|---|---|---|
-| **i1** | `.51` | 4 | 14.9 GiB | 1.67 / 2.51 / 3.96 | **5.3 GiB** | 98 G (13 %) | `incus` (zfs) |
-| **i2** | `.52` | 8 | 13.1 GiB | 0.93 / 1.14 / 2.19 | 4.1 GiB | 23 G (45 %) | `tank` (zfs) |
-| **i3** | `.53` | 8 | 5.3 GiB | **0.33** / 0.34 / 0.27 | 2.6 GiB | 23 G (66 %) | `tank` (zfs) |
+| **i1** | `.51` | 4 | 14.9 GiB | 2.73 / 12.27 / 14.55 † | 3.9 GiB | 98 G (14 %) | `incus` (zfs) |
+| **i2** | `.52` | 8 | 13.1 GiB | 0.54 / 0.68 / 0.89 | 4.5 GiB | 23 G (45 %) | `tank` (zfs) |
+| **i3** | `.53` | 8 | 5.3 GiB | **0.18** / 0.30 / 0.23 | 3.0 GiB | 23 G (67 %) | `tank` (zfs) |
+
+† i1's load is the five container copies described above — it climbed while the
+3.35 GB `vpn` image and the rest transferred, and was still falling when this was
+written. The pre-move reading was 0.33 / 1.39 / 2.59.
 
 `i2` and `i3` are the same `tank` profile set (`default`, `docker`, `large`,
 `medium`, `small`), so export/import between them works unchanged. Both are
 `incus` containers' hosts, reached over SSH as `root` with the estate's incus
-root password; `i2` runs on pm3 (VM200), `i3` on pm4 (VM200).
+root password; `i2` runs on pm3 (VM200), `i3` on pm4 (VM200), and i1 is another guest on the
+same Proxmox host as i2 — which is why "more vCPUs on pm3" is the way i1's CPU
+would be grown, a decision the evening pass made and declined (finding 2).
 
 That password is **not written down here** — golden rule 4 (no credential in any
 repo file) applies to documentation as much as to code, and a literal in a doc
@@ -128,28 +168,28 @@ Memory is the container's live usage and the cap set on it (`limits.memory` / `l
 
 | Host | Container | IP | Role | Mem (cap) | CPU cap |
 |---|---|---|---|---|---|
-| i1 | `monarch` | `.56` | media (Jellyfin etc.) | **4.91 GiB** (6 GiB) | 2 |
-| i1 | `ontrak` | `.21` | Ontrak family stack + Ontrak Sync | 815 MiB (2 GiB) | 2 |
-| i1 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | **3.35 GiB** (5 GiB) | 4 |
-| i2 | `atlas` | `.90` | Gitea + convex + postgres + dashboard | 450 MiB (1 GiB) | — |
-| i2 | `capstone` | `.30` | Zeus / capstone telephony | **5.96 GiB** (6 GiB) | — |
-| i2 | `dev` | `.74` | **the `dev` container** — every project's docker stack | 1.05 GiB (4 GiB) | 4 |
-| i2 | `genesis` | `.66` | BusinessOps — intake + assisted EIN filing | 177 MiB (1024 MiB) | 2 |
-| i2 | `rizzaura` | `.62` | Rizz Aura (5 svc) | 215 MiB (512 MiB) | — |
-| i2 | `terminal` | `.22` | web terminal | 374 MiB (1024 MiB) | — |
-| i2 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 943 MiB (2048 MiB) | 4 |
-| i2 | `www` | `.80` | public website (+ `tun0`) | 552 MiB (1536 MiB) | 4 |
-| i3 | `acme` | `.49` | ACME / certificate issue — **STOPPED** | — (1 GiB) | — |
-| i3 | `distro` | `.61` | distro control plane | 165 MiB (1 GiB) | — |
-| i3 | `magnate` | `.57` | Magnate | 225 MiB (1 GiB) | — |
-| i3 | `mail` | `.15` | mail (SMTP/IMAP) | 197 MiB (1 GiB) | — |
+| i1 | `acme` | `.49` | ACME / certificate issue — **STOPPED** | — (1 GiB) | 1 |
+| i1 | `mail` | `.15` | mail (SMTP/IMAP) | 316 MiB (1 GiB) | 1 |
+| i1 | `monarch` | `.56` | media (Jellyfin etc.) | 3.76 GiB (6 GiB) | 2 |
+| i1 | `ontrak` | `.21` | Ontrak family stack + Ontrak Sync | 671 MiB (2 GiB) | 1 |
+| i1 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 3.04 GiB (5 GiB) | 2 |
+| i1 | `terminal` | `.22` | web terminal (termix, guacd, zapit) | 445 MiB (1024 MiB) | 1 |
+| i1 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 916 MiB (2048 MiB) | 1 |
+| i1 | `vpn` | `.43` | WireGuard (`10.7.0.2` wg0) | 319 MiB (1024 MiB) | 1 |
+| i2 | `atlas` | `.90` | Gitea + convex + postgres + dashboard | 415 MiB (1 GiB) | — |
+| i2 | `capstone` | `.30` | Zeus / capstone telephony | **5.84 GiB** (6 GiB) | — |
+| i2 | `dev` | `.74` | **the `dev` container** — every project's docker stack | 1.85 GiB (4 GiB) | 4 |
+| i2 | `genesis` | `.66` | BusinessOps — intake + assisted EIN filing | 183 MiB (1024 MiB) | 2 |
+| i2 | `rizzaura` | `.62` | Rizz Aura (5 svc) | 207 MiB (512 MiB) | — |
+| i2 | `www` | `.80` | public website (+ `tun0`) | 655 MiB (1536 MiB) | 4 |
+| i3 | `distro` | `.61` | distro control plane | 191 MiB (1 GiB) | — |
+| i3 | `magnate` | `.57` | Magnate | 194 MiB (1 GiB) | — |
 | i3 | `olympus-archived-20260930` | — | archived Olympus — **STOPPED** | — (1 GiB) | — |
-| i3 | `onyx` | `.60` | Onyx (RAG) | 260 MiB (1 GiB) | — |
+| i3 | `onyx` | `.60` | Onyx (RAG) | 274 MiB (1 GiB) | — |
 | i3 | `patchmon` | `.108` | patchmon — **STOPPED** | — (2 GiB) | 2 |
-| i3 | `pi` | `.70` | pi | 174 MiB (1536 MiB) | 4 |
-| i3 | `signara` | `.44` | Signara | 563 MiB (1 GiB) | — |
-| i3 | `subscribe` | `.58` | Subscribe | 90 MiB (1 GiB) | — |
-| i3 | `vpn` | `.43` | WireGuard (`10.7.0.2` wg0) | 229 MiB (1024 MiB) | 4 |
+| i3 | `pi` | `.70` | pi | 176 MiB (1536 MiB) | 4 |
+| i3 | `signara` | `.44` | Signara | 562 MiB (1 GiB) | — |
+| i3 | `subscribe` | `.58` | Subscribe | 88 MiB (1 GiB) | — |
 
 `atheniq`, `cloud`, `voice`, `docs`, `ansible`, `slack` and `olympus`/`olympus-gw`,
 which the 2026-09-27 survey listed, are **no longer present on any host** — those
@@ -158,48 +198,57 @@ here only so the two surveys can be read against each other.
 
 ## Findings
 
-1. **No host is under memory pressure any more — the 2026-09-27 findings are
-   spent.** i2, the survey-day bottleneck at 0.4 GiB free, has **4.1 GiB
-   available**; i1 has 5.3 GiB and i3 has 2.6 GiB. The `.46` migration (which
+1. **Memory pressure is spent, and i1 is now the fuller host.** i1 has gone from
+   three containers and 5.3 GiB available to eight and **3.9 GiB** after taking the
+   edge back; i2 has **4.5 GiB** and i3 **3.0 GiB**. The `.46` migration (which
    retired `atheniq`, `cloud`, `voice`, `docs`, `ansible`, `slack`) is what freed
-   i2, and it is the reason this refresh exists.
-2. **i1 carries the least.** Three containers, 5.3 GiB available — more headroom
-   than either app host. But only 4 vCPU, and `monarch` (media transcoding) is its
-   CPU hog: CPU, not memory, is i1's constraint.
-3. **i2 is now the app host and the busiest by count.** Eight containers and
-   9.2 GiB used, but 4.1 GiB free and load 0.93 on 8 vCPU. `capstone` alone is
-   5.96 GiB of the 9.2 — 65 % of the host's usage in one container.
-4. **i3 is CPU-idle but is the smallest host.** Load 0.33 on 8 vCPU, and it now
-   carries 8 running containers on only 5.3 GiB (2.6 GiB available). It has the
-   CPU the others lack and the RAM the others have to spare.
-5. **The caps oversubscribe every host** — i1 13 GiB of caps on 14.9 GiB, i2
-   17 GiB on 13.1 GiB, i3 **13.5 GiB on 5.3 GiB**. That is deliberate (a cap is a
-   per-container runaway guard, not a reservation) and safe for memory, but it
-   means the caps cannot be read as a placement budget: nothing here is protected
-   *collectively*, only individually. `proxy` is capped at 4 vCPU on a 4-vCPU host
-   and `monarch`+`ontrak` add 4 more, so i1's CPU caps sum to twice the host.
-6. **No running container's address can drift.** Every container the check covers
-   is now static in its own manager, so a recreation cannot renumber it — the
-   condition that produced the 2026-10-01 outage is closed. Re-run
-   `scripts/check-container-addresses.py` after any container is recreated: it
-   reports 0 failures and 0 warnings on 2026-10-01, and will name the first
-   container that regresses.
-7. **No host can absorb the two heavies.** `monarch` (4.91 GiB) fits neither i2
-   (4.1 GiB free) nor i3 (5.3 GiB total); `capstone` (5.96 GiB) fits nowhere but
-   i2. So the heavies stay where they are, and any real rebalance is a *light*
-   container moving to meet idle CPU, or more RAM on pm4.
+   i2, and the 2026-10-01 rebalance is what redrew i1. No host is tight, but i1 is
+   no longer the emptiest.
+2. **i1 carries the edge again, and it was never CPU-bound.** Eight containers,
+   but seven of them are the edge and `monarch`; the survey-day 1.67 load on 4 vCPU
+   was not saturation, and the high evening readings are the container copies this
+   page describes rather than steady-state work (the pre-move reading was
+   0.33 / 1.39 / 2.59). **pm3 therefore does not need more vCPUs:** its guest i1
+   has never come near its 4, and i2's load is 0.89 across 8. The cap fix below is
+   what was actually wrong.
+3. **i2 is the app host and the busiest by container size.** Six containers and
+   8.9 GiB used, but 4.5 GiB free and load 0.89 on 8 vCPU. `capstone` alone is
+   5.84 GiB of the 8.9 — 66 % of the host's usage in one container.
+4. **i3 is CPU-idle and the smallest.** Load 0.18 on 8 vCPU, and after giving the
+   edge back it carries four running containers on 5.3 GiB (3.0 GiB available). It
+   has the CPU the others lack and the RAM the others have to spare.
+5. **i1's CPU caps were the real defect, and they are fixed; the memory caps still
+   oversubscribe on purpose.** i1's CPU caps summed to **24 vCPU on a 4-vCPU host**
+   (`proxy` alone was capped at the whole host), so a runaway there could starve
+   everything else. They are now `proxy` 2, `monarch` 2 and 1 on each of the other
+   six: the largest cap is **2**, so a runaway always leaves at least two vCPU for
+   the rest. Memory caps still oversubscribe every host — i1 19 GiB of caps on
+   14.9 GiB, i2 14 GiB on 13.1 GiB, i3 6.5 GiB of running caps on 5.3 GiB — which
+   is deliberate: a memory cap is a per-container runaway guard, not a reservation.
+6. **No running container's address can drift — and the check now watches.** Every
+   container is static in its own manager, so a recreation cannot renumber it, and
+   the scheduled check on the Cerulean edge re-runs every 30 minutes and alerts on
+   drift, on a run that could not reach a host, and on a run that has stopped
+   succeeding. It reports 0 failures and 0 warnings on 2026-10-01 and will name the
+   first container that regresses.
+7. **No host can absorb the two heavies.** `monarch` (3.76 GiB) fits neither i2
+   (4.5 GiB free, but it is the app host) nor i3 (5.3 GiB total); `capstone`
+   (5.84 GiB) fits nowhere but i2. So the heavies stay where they are, and any real
+   rebalance is a *light* container moving to meet idle CPU, or more RAM on pm4.
 
 ## Recommended target map
 
-Keep each container where its *dependencies* are. After the `.46` migration the
-target map is close to what is deployed — the remaining moves are *light*
-containers meeting idle CPU, not heavies meeting RAM (finding 7).
+Keep each container where its *dependencies* are. The 2026-10-01 evening pass
+applied the one move this map called for — the edge back onto i1 — so the target
+map and the deployed estate now agree. What remains is sizing, not placement: the
+only moves left are *light* containers meeting idle CPU, not heavies meeting RAM
+(finding 7).
 
 | Host | Belongs there | Reasoning |
 |---|---|---|
-| **i1** (edge, 4 vCPU / 14.9 GiB) | `proxy` `.71`, `monarch` `.56`, `ontrak` `.21` | `proxy` is network ingress and identity — it owns `:80/:443/:53` and every service dials it by LAN address, so it is topology-bound. `ontrak` is here because the family stack and Ontrak Sync share the box. `monarch` is here for its disk (161 G) and is pinned on purpose; it is the reason i1 is CPU-bound. |
-| **i2** (apps, 8 vCPU / 13.1 GiB) | `capstone`, `dev`, `www`, `vault`, `terminal`, `atlas`, `genesis`, `rizzaura` | The heavy, RAM-hungry set. `dev` (`.74`) is where the projects run — every project's docker stack — and is the target of the standalone-project migration. `genesis` is small and could sit on i3 by this table's logic; it is on i2 by operator choice (2026-10-01). |
-| **i3** (light, 8 vCPU / 5.3 GiB) | `distro`, `magnate`, `mail`, `onyx`, `subscribe`, `signara`, `pi`, `vpn`, stopped `acme`/`patchmon`/`olympus-archive` | Small, self-contained services and the identity-adjacent bits (`mail`, `vpn`). Has CPU to spare; only RAM limits it. |
+| **i1** (edge, 4 vCPU / 14.9 GiB) | `proxy` `.71`, `monarch` `.56`, `ontrak` `.21`, `mail` `.15`, `vpn` `.43`, `terminal` `.22`, `vault` `.73`, stopped `acme` `.49` | `proxy` is network ingress and identity — it owns `:80/:443/:53` and every service dials it by LAN address, so it is topology-bound. `mail`, `vpn`, `terminal`, `vault` and `acme` are the edge services, moved back here on 2026-10-01 to match the documented topology. `ontrak` is here because the family stack and Ontrak Sync share the box. `monarch` is here for its disk (161 G) and is pinned on purpose. |
+| **i2** (apps, 8 vCPU / 13.1 GiB) | `capstone`, `dev`, `www`, `atlas`, `genesis`, `rizzaura` | The heavy, RAM-hungry set. `dev` (`.74`) is where the projects run — every project's docker stack — and is the target of the standalone-project migration. `genesis` is small and could sit on i3 by this table's logic; it is on i2 by operator choice (2026-10-01). |
+| **i3** (light, 8 vCPU / 5.3 GiB) | `distro`, `magnate`, `onyx`, `subscribe`, `signara`, `pi`, stopped `patchmon`/`olympus-archive` | Small, self-contained services. Has CPU to spare; only RAM limits it. |
 
 ### Actions (applied 2026-09-27)
 
@@ -247,12 +296,21 @@ containers meeting idle CPU, not heavies meeting RAM (finding 7).
 - **i2's root filesystem was 45 % (12 G free)** at this refresh — down from 72 %
   before the `.46` migration, so the earlier concern is resolved; watch it as the
   standalone-project migration fills `dev` (`.74`).
-- **The edge services are spread across hosts.** The 2026-09-27 target map kept
-  `vault`/`terminal`/`acme`/`mail`/`vpn` on i1 (they dial the edge by LAN address);
-  they now sit on i2 (`vault`, `terminal`) and i3 (`acme`, `mail`, `vpn`). i1 has
-  the headroom to take them back (5.3 GiB free) and doing so restores the documented
-  topology — but each move changes a container's host, so it is a decision rather
-  than a cleanup.
-- **i1's CPU caps sum to twice the host** (`proxy` 4 + `monarch` 2 + `ontrak` 2 on
-  4 vCPU). Not wrong — a cap is a ceiling — but it means i1's real constraint is
-  vCPU, and the durable fix is more vCPUs on pm3, not another cap.
+- ~~The edge services are spread across hosts.~~ **Done 2026-10-01 (evening):**
+  `vault`, `terminal`, `acme`, `mail` and `vpn` are back on i1, each keeping its
+  address because the address is pinned inside the container. The target map and the
+  estate now agree.
+- ~~i1's CPU caps sum to twice the host.~~ **Done 2026-10-01 (evening):** the caps
+  were 24 vCPU on a 4-vCPU host and are now `proxy` 2, `monarch` 2 and 1 on the
+  rest, so no container can claim the whole host. **pm3 does not need more vCPUs**
+  — i1 was never saturated (finding 2); revisit only if a real CPU constraint
+  appears.
+- **The scheduled check has a single runner.** It runs on the Cerulean edge
+  (`proxy`), which is itself an i1 container: if the edge is down, the check cannot
+  report, and the `ContainerAddressCheckStale` rule is what catches that. The ssh
+  key it uses (`/root/.ssh/container-address`) is authorized `from="192.168.1.71"`
+  only and lives on the edge; rotate it with the host inventory if the edge moves.
+- **i1's root disk grew to 14 %** after the edge moved back — the moved rootfs
+  images added several GB (the `vpn` image alone is 3.35 GB). Comfortable on a 98 G
+  disk, but it is the number that moved, and `dev` (`.74`) growth on i2 remains the
+  one to watch.
