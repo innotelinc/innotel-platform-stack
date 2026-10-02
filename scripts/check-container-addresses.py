@@ -69,6 +69,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
@@ -77,28 +79,35 @@ from typing import Callable, Iterable
 # --------------------------------------------------------------------------------------
 
 #: host → {container: IPv4}. The addresses every A record and every published port names.
+#: The edge services (`acme`, `mail`, `terminal`, `vault`, `vpn`) were moved back onto i1
+#: on 2026-10-01, restoring the documented topology; each kept its address because it is
+#: pinned in its own manager inside the container, which is what `incus copy` carries.
 EXPECTED: dict[str, dict[str, str]] = {
-    "i1": {"ontrak": "192.168.1.21", "monarch": "192.168.1.56", "proxy": "192.168.1.71"},
+    "i1": {
+        "acme": "192.168.1.49",
+        "mail": "192.168.1.15",
+        "monarch": "192.168.1.56",
+        "ontrak": "192.168.1.21",
+        "proxy": "192.168.1.71",
+        "terminal": "192.168.1.22",
+        "vault": "192.168.1.73",
+        "vpn": "192.168.1.43",
+    },
     "i2": {
         "atlas": "192.168.1.90",
         "capstone": "192.168.1.30",
         "dev": "192.168.1.74",
         "genesis": "192.168.1.66",
         "rizzaura": "192.168.1.62",
-        "terminal": "192.168.1.22",
-        "vault": "192.168.1.73",
         "www": "192.168.1.80",
     },
     "i3": {
-        "acme": "192.168.1.49",
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
-        "mail": "192.168.1.15",
         "onyx": "192.168.1.60",
         "pi": "192.168.1.70",
         "signara": "192.168.1.44",
         "subscribe": "192.168.1.58",
-        "vpn": "192.168.1.43",
     },
 }
 
@@ -121,6 +130,11 @@ ROLES: dict[str, str] = {
     "192.168.1.21": "ontrak family + Ontrak Sync",
     "192.168.1.56": "monarch — media",
     "192.168.1.71": "the Cerulean edge (NPM, Authentik, Vault, DNS)",
+    "192.168.1.15": "mail (SMTP/IMAP)",
+    "192.168.1.22": "the web terminal",
+    "192.168.1.43": "WireGuard VPN",
+    "192.168.1.49": "ACME / certificate issue",
+    "192.168.1.73": "Vaultwarden + Linkwarden + Meilisearch",
     "192.168.1.30": "capstone / Zeus telephony",
     "192.168.1.74": "the dev container",
 }
@@ -226,6 +240,90 @@ def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
 
 
 # --------------------------------------------------------------------------------------
+# The signal, so a renumber reaches someone
+# --------------------------------------------------------------------------------------
+#
+# The check existing is not the same as the check running, and the 2026-10-01 outage was
+# found by a person noticing a blank dashboard rather than by anything that reported. So a
+# scheduled run publishes what it saw as a Prometheus textfile (`--prom <path>`), which is
+# the estate's existing path from a scheduled job to an alert: node-exporter's textfile
+# collector picks the file up and `prometheus/rules/container-address.yml` turns it into an
+# alert. The same shape as Cerulean's Authentik dump status (`status.prom`).
+#
+# `last_status` is 1 only when the check ran AND every address held, so a check that could
+# not reach a host (exit 2) reads as a failure rather than as silence. `last_success`
+# carries the previous value forward on a bad run, which is what lets a rule alert on a
+# check that stopped succeeding rather than one that is merely unhappy today.
+
+PROM_PREFIX = "innotel_container_address"
+
+
+def _prior_metric(path: str, name: str) -> float | None:
+    """The value of `name` in an existing textfile, so a bad run does not erase a good run."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                key, _, value = line.partition(" ")
+                if key == name:
+                    return float(value)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def prometheus_text(result: Audit | None, ran_ok: bool, now: float, prior_success: float | None = None) -> str:
+    """The textfile body for a run. Pure, so the contract is the thing under test."""
+    ok = bool(ran_ok and result is not None and result.ok)
+    failures = len(result.failures) if result is not None else None
+    warnings = len([f for f in result.findings if f.level == "warn"]) if result is not None else None
+    success = now if ok else prior_success
+
+    lines = [
+        f"# HELP {PROM_PREFIX}_last_status 1 when the check ran and every address held",
+        f"# TYPE {PROM_PREFIX}_last_status gauge",
+        f"{PROM_PREFIX}_last_status {1 if ok else 0}",
+        f"# HELP {PROM_PREFIX}_last_run_timestamp When the check last ran, whatever it found",
+        f"# TYPE {PROM_PREFIX}_last_run_timestamp gauge",
+        f"{PROM_PREFIX}_last_run_timestamp {now:.0f}",
+    ]
+    if failures is not None:
+        lines += [
+            f"# HELP {PROM_PREFIX}_failures Addresses that do not hold",
+            f"# TYPE {PROM_PREFIX}_failures gauge",
+            f"{PROM_PREFIX}_failures {failures}",
+            f"# HELP {PROM_PREFIX}_warnings Containers whose address can still drift from DHCP",
+            f"# TYPE {PROM_PREFIX}_warnings gauge",
+            f"{PROM_PREFIX}_warnings {warnings}",
+        ]
+    if success is not None:
+        lines += [
+            f"# HELP {PROM_PREFIX}_last_success_timestamp When the check last ran and found every address holding",
+            f"# TYPE {PROM_PREFIX}_last_success_timestamp gauge",
+            f"{PROM_PREFIX}_last_success_timestamp {success:.0f}",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def write_prom(path: str, result: Audit | None, ran_ok: bool, now: float | None = None) -> None:
+    """Write the textfile atomically, so a scrape never reads a half-written file."""
+    now = time.time() if now is None else now
+    body = prometheus_text(result, ran_ok, now, _prior_metric(path, f"{PROM_PREFIX}_last_success_timestamp"))
+    directory = os.path.dirname(path) or "."
+    handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False, prefix=".container-address-")
+    try:
+        handle.write(body)
+        handle.close()
+        # World-readable: the textfile collector (node-exporter) reads this as an
+        # unprivileged user, and `NamedTemporaryFile` creates it 0600 — which reads
+        # as "no metrics" rather than as a permission problem. Measured, 2026-10-01.
+        os.chmod(handle.name, 0o644)
+        os.replace(handle.name, path)
+    except BaseException:
+        os.unlink(handle.name)
+        raise
+
+
+# --------------------------------------------------------------------------------------
 # The estate, as it is
 # --------------------------------------------------------------------------------------
 
@@ -319,6 +417,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--hosts", help="name=target pairs, comma separated (default: the table's)")
     parser.add_argument("--json", action="store_true", help="machine-readable findings")
+    parser.add_argument(
+        "--prom",
+        metavar="PATH",
+        help="also write a Prometheus textfile here, for node-exporter's textfile collector",
+    )
     args = parser.parse_args(argv)
 
     hosts = dict(HOSTS)
@@ -328,25 +431,34 @@ def main(argv: list[str] | None = None) -> int:
             name, _, target = pair.partition("=")
             hosts[name.strip()] = target.strip()
 
+    def emit(result: Audit | None, ran: bool) -> None:
+        if args.prom:
+            try:
+                write_prom(args.prom, result, ran)
+            except OSError as error:
+                print(f"check-container-addresses: could not write {args.prom}: {error}", file=sys.stderr)
+
     missing = [t for t in (shutil.which("ssh"),) if t is None]
     if missing:
         print("check-container-addresses: no ssh on PATH", file=sys.stderr)
+        emit(None, ran=False)
         return 2
-    if not (os.environ.get("SSHPASS") and shutil.which("sshpass")):
-        print(
-            "check-container-addresses: no keyless ssh path assumed — reads hosts with "
-            "key-based `ssh`; set SSHPASS (and install sshpass) where the estate uses "
-            "passwords",
-            file=sys.stderr,
-        )
 
     try:
         observed = gather(hosts)
     except Exception as error:  # unreachable host is not a pass — see the module docstring
         print(f"check-container-addresses: could not read a host: {error}", file=sys.stderr)
+        if not (os.environ.get("SSHPASS") and shutil.which("sshpass")):
+            print(
+                "check-container-addresses: reads hosts with key-based `ssh`; where the "
+                "estate uses passwords instead, set SSHPASS and install sshpass",
+                file=sys.stderr,
+            )
+        emit(None, ran=False)
         return 2
 
     result = audit(observed)
+    emit(result, ran=True)
     if args.json:
         print(json.dumps([f.__dict__ for f in result.findings], indent=2))
     else:

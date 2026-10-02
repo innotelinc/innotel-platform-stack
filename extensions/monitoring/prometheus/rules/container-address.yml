@@ -1,0 +1,83 @@
+# ==========================================================================
+# Container address alerts
+# ==========================================================================
+# These read the metrics `scripts/check-container-addresses.py --prom` publishes
+# as a Prometheus textfile, surfaced by node-exporter's textfile collector — the
+# same path Cerulean's Authentik dump takes (`rules/backup.yml`).
+#
+# Why an address is worth paging on: every service here is reached by address, not
+# by name. Each A record points at `192.168.1.x` and each compose publishes
+# `192.168.1.x:port`, so a container that renumbers is down with extra steps — the
+# 2026-10-01 `ontrak` `.21` → `.20` incident took out Ontrak Sync's `Exited (255)`
+# containers and stayed invisible until a person noticed a blank dashboard. See
+# docs/container-placement.md.
+#
+# The metric contract (written by the scheduled check):
+#   innotel_container_address_last_status              1 ran and every address held, 0 otherwise
+#   innotel_container_address_last_run_timestamp       unix seconds, every run
+#   innotel_container_address_last_success_timestamp   unix seconds, advanced only on a clean run
+#   innotel_container_address_failures                  addresses that did not hold (absent if the check could not run)
+#   innotel_container_address_warnings                  containers still taking their address from DHCP
+# ==========================================================================
+groups:
+  - name: innotel-container-address
+    rules:
+      - alert: ContainerAddressMoved
+        expr: innotel_container_address_failures > 0
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'A container is not at the address the estate dials it at'
+          description: >-
+            {{ $value }} address(es) failed the container-address check. A container that
+            renumbered takes down everything that binds the old address — the dialled A
+            records and the `Exited (255)` stacks alike. Run
+            `scripts/check-container-addresses.py` for the container and the role that
+            broke, then re-pin the address in the manager that container uses
+            (netplan, systemd-networkd or ifupdown).
+
+      # The failure the check cannot report about itself: it exits 2 when a host is
+      # unreachable, which is not a pass. `unless` keeps this quiet when the run
+      # happened and merely found a moved address (that is ContainerAddressMoved).
+      - alert: ContainerAddressCheckCouldNotRun
+        expr: innotel_container_address_last_status == 0 unless innotel_container_address_failures > 0
+        for: 30m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'The container-address check cannot reach a host'
+          description: >-
+            The scheduled check exited 2 — a host it needs was unreachable — so nothing
+            is watching the invariant right now. An unread host is exactly how a
+            renumber stays invisible. Check the timer and the ssh path from the host
+            that runs it.
+
+      - alert: ContainerAddressCheckStale
+        expr: (time() - innotel_container_address_last_success_timestamp) > 26 * 60 * 60
+        for: 30m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'No successful container-address check in 26 hours'
+          description: >-
+            The last run that found every address holding was
+            {{ $value | humanizeDuration }} ago. Either the timer is gone or every run
+            since has failed; both mean the invariant is unwatched.
+
+      - alert: ContainerAddressNotPinned
+        expr: innotel_container_address_warnings > 0
+        for: 1h
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'A container still takes its address from DHCP'
+          description: >-
+            {{ $value }} container(s) get their address from DHCP, which is the state
+            that produced the 2026-10-01 outage. A renumber will happen again on the next
+            recreation or lease expiry. Pin the address in whichever manager the
+            container uses. See docs/container-placement.md.

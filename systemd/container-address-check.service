@@ -1,0 +1,28 @@
+[Unit]
+Description=Container address invariant check — fail when a container is not where the estate dials it
+Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/container-placement.md
+
+# The check reads the three incus hosts over ssh, so it needs the LAN up before it
+# runs. It asserts nothing about a local service; it is the estate's own invariant.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/innotel/container-address
+
+# TEXTFILE_DIR is the directory node-exporter's textfile collector mounts (see
+# extensions/monitoring/docker-compose.host.yml). The check writes
+# `container-address.prom` there; the collector turns it into the metrics that
+# `prometheus/rules/container-address.yml` alerts on. The default is the Cerulean
+# edge, which is the host that already runs the per-host metrics stack.
+EnvironmentFile=-/etc/innotel/container-address.env
+Environment=TEXTFILE_DIR=/root/cerulean-backup/authentik
+
+# The check exits 0 (every address holds), 1 (one does not) or 2 (a host was
+# unreachable — never a pass). A non-zero exit marks the unit failed so
+# `systemctl status` shows it; the textfile is written either way and is what the
+# alert reads. Reaching the hosts with a key is the clean case; where the estate
+# uses a password instead, put SSHPASS in the environment file above (and install
+# sshpass on this host).
+ExecStart=/usr/bin/python3 /opt/innotel/container-address/check-container-addresses.py --prom ${TEXTFILE_DIR}/container-address.prom
