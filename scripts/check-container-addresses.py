@@ -83,19 +83,15 @@ CHECK = "container_address"
 # --------------------------------------------------------------------------------------
 
 #: host → {container: IPv4}. The addresses every A record and every published port names.
-#: The edge services (`acme`, `mail`, `terminal`, `vault`, `vpn`) were moved back onto i1
-#: on 2026-10-01, restoring the documented topology; each kept its address because it is
-#: pinned in its own manager inside the container, which is what `incus copy` carries.
+#: The edge services (`proxy`, `terminal`, `vault`, `vpn`) moved i1 → i4 on 2026-10-02,
+#: each keeping its address because it is pinned in its own manager inside the container,
+#: which is what `incus copy` carries — the same reason the 2026-10-01 moves kept theirs.
 EXPECTED: dict[str, dict[str, str]] = {
     "i1": {
         "acme": "192.168.1.49",
         "mail": "192.168.1.15",
         "monarch": "192.168.1.56",
         "ontrak": "192.168.1.21",
-        "proxy": "192.168.1.71",
-        "terminal": "192.168.1.22",
-        "vault": "192.168.1.73",
-        "vpn": "192.168.1.43",
     },
     "i2": {
         "atlas": "192.168.1.90",
@@ -113,13 +109,25 @@ EXPECTED: dict[str, dict[str, str]] = {
         "signara": "192.168.1.44",
         "subscribe": "192.168.1.58",
     },
+    "i4": {
+        "proxy": "192.168.1.71",
+        "terminal": "192.168.1.22",
+        "vault": "192.168.1.73",
+        "vpn": "192.168.1.43",
+    },
 }
 
 #: Where each host is reachable. Overridable with `--hosts`.
-#: `i4` (`root@192.168.1.54`) is deliberately not here: it is a test bench whose
-#: only container is recreated at will, so it holds no address the estate dials.
-#: See docs/container-placement.md §The i4 bench.
-HOSTS: dict[str, str] = {"i1": "root@192.168.1.51", "i2": "root@192.168.1.52", "i3": "root@192.168.1.53"}
+#: `i4` (`root@192.168.1.54`) joined this table on 2026-10-02: it took the edge and three
+#: other containers off i1, so the addresses the estate dials now live there too, and a
+#: table that skipped it would leave those four addresses unwatched.
+#: See docs/container-placement.md §The i4 host.
+HOSTS: dict[str, str] = {
+    "i1": "root@192.168.1.51",
+    "i2": "root@192.168.1.52",
+    "i3": "root@192.168.1.53",
+    "i4": "root@192.168.1.54",
+}
 
 #: host → container → {env var: address it must have}. Rule 2, for the stacks whose whole
 #: failure mode is "the address in `.env` is not the one the box has".

@@ -50,9 +50,16 @@ from estate_check import Audit, Finding, count_cpus, ssh, write_prom  # noqa: E4
 
 CHECK = "container_limits"
 
-#: Where each estate host is reachable. `i4` is a test bench with no estate container
-#: and no declared caps, so it is out of this check's scope on purpose.
-HOSTS: dict[str, str] = {"i1": "root@192.168.1.51", "i2": "root@192.168.1.52", "i3": "root@192.168.1.53"}
+#: Where each estate host is reachable. `i4` is in scope from 2026-10-02: it took the
+#: edge and three other containers off i1, each of which declares a `limits.cpu`, so a
+#: cap there is a fence to check like any other. i4 is a 2-vCPU host and the moved
+#: containers declare 1-2, so a cap above the host would be a real finding here.
+HOSTS: dict[str, str] = {
+    "i1": "root@192.168.1.51",
+    "i2": "root@192.168.1.52",
+    "i3": "root@192.168.1.53",
+    "i4": "root@192.168.1.54",
+}
 
 
 @dataclass

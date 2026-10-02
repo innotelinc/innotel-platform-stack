@@ -91,14 +91,17 @@ groups:
             so nothing is watching that invariant right now. Check the timer and the ssh
             path from the edge.
 
+      # "A whole day": the checks run every 30 minutes, so a success more than 24h old
+      # means every run since has either failed or never happened. 24h is the shortest
+      # window that cannot be tripped by a normal quiet night.
       - alert: EstateCheckStale
-        expr: (time() - innotel_estate_check_last_success_timestamp) > 26 * 60 * 60
+        expr: (time() - innotel_estate_check_last_success_timestamp) > 24 * 60 * 60
         for: 30m
         labels:
           severity: warning
           team: platform
         annotations:
-          summary: 'No clean {{ $labels.check }} run in 26 hours'
+          summary: 'No clean {{ $labels.check }} run in 24 hours'
           description: >-
             The last `{{ $labels.check }}` run that found nothing wrong was
             {{ $value | humanizeDuration }} ago. Either the timer is gone or every run
