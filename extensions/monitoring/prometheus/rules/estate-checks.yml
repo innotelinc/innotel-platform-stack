@@ -6,7 +6,8 @@
 # which one fired. The contract lives in `scripts/estate_check.py`; the checks are
 # `scripts/check-container-addresses.py` (`container_address`),
 # `check-container-limits.py` (`container_limits`), `check-estate-inventory.py`
-# (`estate_inventory`) and `check-address-latency.py` (`address_latency`), run by
+# (`estate_inventory`), `check-address-latency.py` (`address_latency`) and
+# `check-host-disk.py` (`host_disk`), run by
 # `systemd/estate-checks.{service,timer}` on the Cerulean edge, which writes each into
 # node-exporter's textfile directory.
 #
@@ -16,7 +17,9 @@
 # inventory is what stops a fourth host or a stray pool arriving unrecorded, and
 # `address_latency` is both the proof that a dialled address is *lit* (not only correctly
 # numbered) and the number that says the `i4` WiFi uplink's power save has come back
-# rather than leaving the estate merely feeling slow. The 2026-10-01 outage — `ontrak` renumbered
+# rather than leaving the estate merely feeling slow. `host_disk` is the root filesystem
+# headroom, watched because "i2 is the one to watch" was a note read by hand and a disk
+# fills by arithmetic. The 2026-10-01 outage — `ontrak` renumbered
 # `.21` → `.20` — stayed invisible until a person noticed a blank dashboard, which is the
 # case all of this exists to close.
 #
@@ -53,6 +56,7 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="container_limits"}), "check", "container_limits", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="estate_inventory"}), "check", "estate_inventory", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="address_latency"}), "check", "address_latency", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="host_disk"}), "check", "host_disk", "check", ".*")
         for: 30m
         labels:
           severity: critical
@@ -123,6 +127,7 @@ groups:
           description: >-
             {{ $value }} warning(s) in the `{{ $labels.check }}` check — drift that is not
             yet a failure (a container still on DHCP, a cap above the host, a pool that
-            has gone, an address answering in hundreds of milliseconds). Worth a look
-            before it becomes one. For `address_latency`, see
-            systemd/wifi-powersave-off.service.
+            has gone, an address answering in hundreds of milliseconds, a root filesystem
+            past 80 %). Worth a look before it becomes one. For `address_latency`, see
+            systemd/wifi-powersave-off.service; for `host_disk`, reclaim before a write
+            fails.

@@ -282,6 +282,53 @@ class InventoryLiveCase(LiveCase):
 
 
 ####################################################################################
+# check-host-disk: a root filesystem past the line must fail/warn the run
+####################################################################################
+
+DISK_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
+
+
+def _disk_rules(percents: dict | None = None) -> dict:
+    percents = percents or {}
+    rules = {}
+    for name, target in DISK_HOSTS.items():
+        percent = percents.get(name, 42)
+        line = f"/dev/sda2 102400000 51200000 51200000 {percent}% /\n"
+        rules[target.split("@")[-1]] = {"answers": [["df -P", line]]}
+    return rules
+
+
+class HostDiskLiveCase(LiveCase):
+    def test_a_clean_estate_exits_zero_and_publishes_the_reading(self):
+        chk = _load("check-host-disk")
+        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules())
+        self.assertEqual(code, 0)
+        body = self.text(prom)
+        self.assertIn('innotel_estate_check_last_status{check="host_disk"} 1', body)
+        self.assertIn('innotel_estate_check_host_disk_percent{check="host_disk",host="i2",mount="/"} 42', body)
+
+    def test_a_full_root_filesystem_fails_the_run(self):
+        chk = _load("check-host-disk")
+        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules({"i2": 93}))
+        self.assertEqual(code, 1)
+        self.assertIn('innotel_estate_check_failures{check="host_disk"} 1', self.text(prom))
+
+    def test_a_tight_root_filesystem_warns(self):
+        chk = _load("check-host-disk")
+        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules({"i2": 85}))
+        self.assertEqual(code, 0, "85 % is a warning, not a failure")
+        self.assertIn('innotel_estate_check_warnings{check="host_disk"} 1', self.text(prom))
+
+    def test_an_unreachable_host_is_exit_two_not_a_pass(self):
+        chk = _load("check-host-disk")
+        rules = _disk_rules()
+        rules[I1] = {"fail": True}
+        code, prom = self.run_check(chk, chk.HOSTS, rules)
+        self.assertEqual(code, 2)
+        self.assertIn('innotel_estate_check_last_status{check="host_disk"} 0', self.text(prom))
+
+
+####################################################################################
 # check-address-latency: a dialled address that goes dark or slow must warn/fail
 ####################################################################################
 

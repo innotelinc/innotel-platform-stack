@@ -33,14 +33,18 @@ Three ways, because this must work with no external account and no credential:
   * the exit code (0 = every endpoint answered, 1 = one did not) — what systemd records;
   * `--prom DIR/file.prom`, a textfile a node-exporter on **this** host can collect, so a
     Prometheus that does not live on the edge can still alert;
-  * `--notify COMMAND`, run with the failure text on stdin when an endpoint does not
-    answer. Empty (the default) means it only logs. Any channel works — a `sendmail`
-    line, a `curl` to a webhook or to an Alertmanager's `/api/v2/alerts` — because the
-    command is configuration, not code.
+  * `--mail-to ADDRESS`, which emails the failure through `--smtp-host` (the estate's own
+    mail server by default). This is why it does not lean on the estate's Alertmanager:
+    that one lives on the edge's side of the estate and its delivery config is empty
+    (see §Open items), and a watcher exists precisely for when that side is gone;
+  * `--notify COMMAND`, run with the failure text on stdin. Empty (the default) means it
+    only logs. Any other channel works — a webhook, an Alertmanager's `/api/v2/alerts` —
+    because the command is configuration, not code.
 
 Install (on a non-edge host):
     install -D -m 0755 scripts/check-edge-liveness.py /opt/innotel/edge-liveness/check-edge-liveness.py
     install -m 0644 systemd/edge-liveness.service systemd/edge-liveness.timer /etc/systemd/system/
+    printf 'EDGE_LIVENESS_MAIL_TO=%s\n' admin@innotel.us > /etc/innotel/edge-liveness.env
     systemctl daemon-reload && systemctl enable --now edge-liveness.timer
 
 Exit codes: 0 = the edge answered on every endpoint, 1 = it did not, 2 = nothing to probe.
@@ -48,20 +52,22 @@ Exit codes: 0 = the edge answered on every endpoint, 1 = it did not, 2 = nothing
 Usage:
     ./scripts/check-edge-liveness.py
     ./scripts/check-edge-liveness.py --prom /var/lib/node_exporter/textfile/edge-liveness.prom
+    ./scripts/check-edge-liveness.py --mail-to admin@innotel.us
     ./scripts/check-edge-liveness.py --endpoints 192.168.1.71:443,192.168.1.73:443
-    ./scripts/check-edge-liveness.py --notify 'sendmail -t'
+    ./scripts/check-edge-liveness.py --notify 'curl -s -XPOST http://host:9093/api/v2/alerts -d @-'
 """
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import os
+import smtplib
 import socket
 import subprocess
 import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from email.message import EmailMessage
 from typing import Callable
 
 #: The metric family this watcher publishes. Deliberately its own, not
@@ -72,6 +78,16 @@ METRIC = "innotel_edge_liveness"
 #: The edge's own doors, by the addresses every A record names. A connect here succeeding is
 #: what "the estate is reachable" means.
 DEFAULT_ENDPOINTS = ["192.168.1.71:80", "192.168.1.71:443"]
+
+#: Where mail goes when `--mail-to` is set: the estate's own mail server (`mail` on `i1`,
+#: Stalwart). Deliberately the estate's, not an external relay: this must work when the
+#: edge is gone, so it cannot depend on anything hosted on the edge or on a credential
+#: nobody has checked. The recipient has no default — an alert sent to an address nobody
+#: chose is the failure mode that left the edge's own Alertmanager delivering nowhere
+#: (see docs/container-placement.md §Open items).
+SMTP_HOST = "192.168.1.15"
+SMTP_PORT = 25
+MAIL_FROM = "edge-watch@innotel.us"
 
 
 @dataclass(frozen=True)
@@ -195,6 +211,26 @@ def write_textfile(path: str, body: str) -> None:
         raise
 
 
+def send_mail(
+    host: str,
+    port: int,
+    sender: str,
+    recipient: str,
+    subject: str,
+    body: str,
+    timeout: float = 20.0,
+    smtp: Callable[..., smtplib.SMTP] = smtplib.SMTP,
+) -> None:
+    """Send one plain-text message. `smtp` is injectable so the tests never open a socket."""
+    message = EmailMessage()
+    message["From"] = sender
+    message["To"] = recipient
+    message["Subject"] = subject
+    message.set_content(body)
+    with smtp(host, port, timeout=timeout) as client:
+        client.send_message(message)
+
+
 def notify(command: str, message: str, runner: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> None:
     """Run `command` with `message` on stdin. Errors here are reported, never fatal.
 
@@ -214,6 +250,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=5.0, help="seconds per connect (default 5)")
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here for a Prometheus off the edge")
     parser.add_argument("--notify", default="", metavar="COMMAND", help="shell command to run with the failure text on stdin")
+    parser.add_argument("--mail-to", default="", metavar="ADDRESS", help="email the failure here (via --smtp-host)")
+    parser.add_argument("--smtp-host", default=SMTP_HOST, help=f"the mail server to send through (default {SMTP_HOST}, the estate's)")
+    parser.add_argument("--smtp-port", type=int, default=SMTP_PORT, help=f"the mail server's SMTP port (default {SMTP_PORT})")
+    parser.add_argument("--mail-from", default=MAIL_FROM, help=f"the alert's From address (default {MAIL_FROM})")
     parser.add_argument("--edge", default="the edge", help="what to call the thing being watched, in prose")
     args = parser.parse_args(argv)
 
@@ -237,6 +277,14 @@ def main(argv: list[str] | None = None) -> int:
             write_textfile(args.prom, textfile(results, now, edge=args.edge))
         except OSError as error:
             print(f"check-edge-liveness: could not write {args.prom}: {error}", file=sys.stderr)
+
+    if not ok and args.mail_to.strip():
+        subject = f"[critical] {args.edge} did not answer"
+        try:
+            send_mail(args.smtp_host, args.smtp_port, args.mail_from, args.mail_to, subject, text + "\n")
+            print(f"check-edge-liveness: mailed {args.mail_to} via {args.smtp_host}:{args.smtp_port}")
+        except Exception as error:  # noqa: BLE001 — the finding matters more than the channel
+            print(f"check-edge-liveness: could not send mail to {args.mail_to}: {error}", file=sys.stderr)
 
     if not ok and args.notify.strip():
         notify(args.notify, text + "\n")

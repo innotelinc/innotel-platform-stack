@@ -50,6 +50,7 @@ inv = _load("check-estate-inventory")
 addr = _load("check-container-addresses")
 lim = _load("check-container-limits")
 lat = _load("check-address-latency")
+disk = _load("check-host-disk")
 trust = _load("trust-estate-hosts")
 
 
@@ -61,6 +62,7 @@ class CoverageCase(unittest.TestCase):
         self.assertEqual(set(addr.HOSTS), set(inv.HOSTS))
         self.assertEqual(set(lim.HOSTS), set(inv.HOSTS))
         self.assertEqual(set(lat.HOSTS), set(inv.HOSTS))
+        self.assertEqual(set(disk.HOSTS), set(inv.HOSTS))
         self.assertEqual(set(trust.HOSTS), set(inv.HOSTS))
 
     def test_every_check_reads_each_host_at_the_same_address(self):
@@ -69,6 +71,7 @@ class CoverageCase(unittest.TestCase):
         self.assertEqual(addr.HOSTS, inv.HOSTS)
         self.assertEqual(lim.HOSTS, inv.HOSTS)
         self.assertEqual(lat.HOSTS, inv.HOSTS)
+        self.assertEqual(disk.HOSTS, inv.HOSTS)
         self.assertEqual(trust.HOSTS, inv.HOSTS)
 
     def test_the_inventory_names_a_pool_for_every_host(self):

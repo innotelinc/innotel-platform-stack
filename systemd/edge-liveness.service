@@ -12,17 +12,28 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/opt/innotel/edge-liveness
 
-# EDGE_LIVENESS_NOTIFY is the outward channel: any command run with the failure text on
-# stdin (a `sendmail` line, a `curl` to a webhook or to Alertmanager's /api/v2/alerts).
-# It is empty here, so the signal is the failed unit and the journal — please point it at
-# a real receiver. LIVENESS_TEXTFILE_DIR is where this host's node-exporter (if one is
-# pointed at that directory) can collect the result for a Prometheus off the edge; on `i1`
-# today no collector reads it, so it is written for whoever wires one up first.
-# Put either in /etc/innotel/edge-liveness.env.
+# EDGE_LIVENESS_MAIL_TO is the outward channel: an address gets the failure by mail
+# through EDGE_LIVENESS_SMTP_HOST, the estate's own mail server. It is deliberately not
+# the estate's Alertmanager — that one runs on the edge's side and its delivery config is
+# empty (docs/container-placement.md §Open items) — and it does not depend on a credential
+# nobody has verified. Set it in /etc/innotel/edge-liveness.env; empty means no mail.
+#
+# EDGE_LIVENESS_NOTIFY is any other command run with the failure text on stdin (a webhook,
+# an Alertmanager's /api/v2/alerts), also empty by default.
+#
+# LIVENESS_TEXTFILE_DIR is where this host's node-exporter (if one is pointed at that
+# directory) can collect the result for a Prometheus off the edge; on `i1` today no
+# collector reads it, so it is written for whoever wires one up first.
 EnvironmentFile=-/etc/innotel/edge-liveness.env
 Environment=LIVENESS_TEXTFILE_DIR=/var/lib/node_exporter/textfile
+Environment=EDGE_LIVENESS_MAIL_TO=
+Environment=EDGE_LIVENESS_SMTP_HOST=192.168.1.15
 Environment=EDGE_LIVENESS_NOTIFY=
 
 # The exit status is left to fail on purpose: an unreachable edge makes this unit failed, so
 # `systemctl --failed` on this host is a second, dependency-free place the problem shows up.
-ExecStart=/usr/bin/python3 /opt/innotel/edge-liveness/check-edge-liveness.py --prom ${LIVENESS_TEXTFILE_DIR}/edge-liveness.prom --notify ${EDGE_LIVENESS_NOTIFY}
+ExecStart=/usr/bin/python3 /opt/innotel/edge-liveness/check-edge-liveness.py \
+  --prom ${LIVENESS_TEXTFILE_DIR}/edge-liveness.prom \
+  --mail-to ${EDGE_LIVENESS_MAIL_TO} \
+  --smtp-host ${EDGE_LIVENESS_SMTP_HOST} \
+  --notify ${EDGE_LIVENESS_NOTIFY}
