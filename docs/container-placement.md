@@ -77,8 +77,10 @@ estate as it is, not as it was.
   is now 2 and every other i1 container is 1, except `monarch` which keeps 2
   because media transcoding is the one real CPU consumer. **No container can now
   claim the whole host, and a runaway anywhere leaves at least two vCPU for the
-  rest.** `limits.cpu` takes effect on the container's next restart; these
-  containers had just been restarted by the move.
+  rest.** `limits.cpu` takes effect at a container's next restart, and none has
+  restarted since these were set — `cpu.max` still reads `max` for the running
+  containers — so each cap takes hold on that container's next restart. Until then
+  i1 runs unthrottled, which is what the evening load shows.
 - **The address invariant is now scheduled and alerting.**
   `systemd/container-address-check.{service,timer}` runs
   `scripts/check-container-addresses.py` every 30 minutes *on the Cerulean edge*
@@ -143,9 +145,11 @@ Values are the 2026-10-01 evening (21:00 EDT) survey, after the move.
 | **i2** | `.52` | 8 | 13.1 GiB | 0.54 / 0.68 / 0.89 | 4.5 GiB | 23 G (45 %) | `tank` (zfs) |
 | **i3** | `.53` | 8 | 5.3 GiB | **0.18** / 0.30 / 0.23 | 3.0 GiB | 23 G (67 %) | `tank` (zfs) |
 
-† i1's load is the five container copies described above — it climbed while the
-3.35 GB `vpn` image and the rest transferred, and was still falling when this was
-written. The pre-move reading was 0.33 / 1.39 / 2.59.
+† i1's load is `monarch`'s media stack, not the move: qbittorrent and the *arr
+apps are the top CPU consumers, and the load stayed up after the copies finished.
+It is also the clearest evidence that `limits.cpu` is not yet in force — a CPU cap
+applies at a container's next restart, and none has restarted since the caps were
+set (see the evening notes). The pre-move reading was 0.33 / 1.39 / 2.59.
 
 `i2` and `i3` are the same `tank` profile set (`default`, `docker`, `large`,
 `medium`, `small`), so export/import between them works unchanged. Both are
@@ -205,12 +209,13 @@ here only so the two surveys can be read against each other.
    i2, and the 2026-10-01 rebalance is what redrew i1. No host is tight, but i1 is
    no longer the emptiest.
 2. **i1 carries the edge again, and it was never CPU-bound.** Eight containers,
-   but seven of them are the edge and `monarch`; the survey-day 1.67 load on 4 vCPU
-   was not saturation, and the high evening readings are the container copies this
-   page describes rather than steady-state work (the pre-move reading was
-   0.33 / 1.39 / 2.59). **pm3 therefore does not need more vCPUs:** its guest i1
-   has never come near its 4, and i2's load is 0.89 across 8. The cap fix below is
-   what was actually wrong.
+   but seven of them are the edge and `monarch`. The survey-day 1.67 load on 4 vCPU
+   was not saturation, and the evening spike is `monarch`'s media stack
+   (qbittorrent and the *arr apps) — exactly the container `limits.cpu=2` exists to
+   fence, except that cap is not yet in force (see the evening notes). Unthrottled,
+   i1 absorbed it and the edge stayed up. **pm3 therefore does not need more
+   vCPUs:** its guest i1 has never been provisioned to its 4, and i2's load is 0.89
+   across 8. The cap fix below is what was actually wrong.
 3. **i2 is the app host and the busiest by container size.** Six containers and
    8.9 GiB used, but 4.5 GiB free and load 0.89 on 8 vCPU. `capstone` alone is
    5.84 GiB of the 8.9 — 66 % of the host's usage in one container.
@@ -305,6 +310,12 @@ only moves left are *light* containers meeting idle CPU, not heavies meeting RAM
   rest, so no container can claim the whole host. **pm3 does not need more vCPUs**
   — i1 was never saturated (finding 2); revisit only if a real CPU constraint
   appears.
+- **i1's new CPU caps are pending a restart.** They are set in config but not in
+  force: `limits.cpu` applies at a container's next restart, and the containers were
+  restarted by the move *before* the caps were set. Verify with
+  `incus config get <c> limits.cpu` against `cpu.max` inside the container's cgroup
+  (`/sys/fs/cgroup/lxc.payload.<c>/cpu.max`) after any future restart of i1's
+  containers.
 - **The scheduled check has a single runner.** It runs on the Cerulean edge
   (`proxy`), which is itself an i1 container: if the edge is down, the check cannot
   report, and the `ContainerAddressCheckStale` rule is what catches that. The ssh
