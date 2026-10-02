@@ -1,0 +1,14 @@
+[Unit]
+Description=Watch the Cerulean edge every five minutes
+
+[Timer]
+# Five minutes: fast enough that a dead edge is known before anyone wonders why the estate
+# is slow, cheap enough that two TCP connects cost nothing. A little jitter so it does not
+# always land on the same second as the edge's own half-hourly checks.
+OnBootSec=3m
+OnCalendar=*:0/5
+Persistent=true
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target

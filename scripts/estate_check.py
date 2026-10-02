@@ -162,7 +162,7 @@ def prometheus_text(
 ) -> str:
     """The textfile body for one check's run. Pure, so the contract is the thing under test.
 
-    `extra` carries a check's own series on top of the shared contract — `check-host-latency`
+    `extra` carries a check's own series on top of the shared contract — `check-address-latency`
     publishes the round-trip it measured, so the number is diagnosable and not only the
     verdict. It is appended verbatim, so a check that publishes one must still write its
     `last_status`/`failures`/`warnings` here for every rule in `estate-checks.yml` to key on.

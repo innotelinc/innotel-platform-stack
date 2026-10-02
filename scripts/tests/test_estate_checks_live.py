@@ -282,12 +282,14 @@ class InventoryLiveCase(LiveCase):
 
 
 ####################################################################################
-# check-host-latency: a host that stops answering promptly must warn, not be felt
+# check-address-latency: a dialled address that goes dark or slow must warn/fail
 ####################################################################################
 
 #: A stand-in for `ping`: argv[-1] is the address, and ESTATE_PING_STUB is a
-#: `{address: rtt_ms}` map. An unmapped address exits non-zero with no output, which is
-#: exactly how a timeout reads to `parse_rtts` — no sample at all.
+#: `{address: rtt_ms}` map. An address not named in the map answers a healthy ~7 ms; an
+#: address mapped to `null` exits non-zero with no output, which is exactly how a timeout
+#: reads to `parse_rtts` — no sample at all. The default keeps a clean case a one-liner
+#: while still covering every address the check dials, hosts and services alike.
 PING_STUB = '''#!/usr/bin/env python3
 import json, os, sys
 
@@ -297,7 +299,7 @@ try:
         rules = json.load(handle)
 except OSError:
     sys.exit(1)
-rtt = rules.get(address)
+rtt = rules.get(address, 7.0)
 if rtt is None:
     sys.exit(1)
 sys.stdout.write(f"64 bytes from {address}: icmp_seq=1 ttl=64 time={rtt} ms\\n")
@@ -315,31 +317,35 @@ class LatencyLiveCase(LiveCase):
         self.addCleanup(os.environ.pop, "ESTATE_PING_STUB", None)
 
     def run_latency(self, rules: dict):
-        chk = _load("check-host-latency")
+        chk = _load("check-address-latency")
         self._ping_rules.write_text(json.dumps(rules), encoding="utf-8")
-        prom = self.tmp / "host_latency.prom"
+        prom = self.tmp / "address_latency.prom"
         host_arg = ",".join(f"{name}={target}" for name, target in chk.HOSTS.items())
         code = chk.main(["--hosts", host_arg, "--samples", "1", "--idle", "0", "--prom", str(prom)])
         return code, prom
 
-    def test_a_prompt_estate_exits_zero_and_publishes_the_reading(self):
-        code, prom = self.run_latency({I1: 7.2, I2: 7.5, I3: 8.0, I4: 0.1})
+    def test_a_prompt_estate_exits_zero_and_publishes_the_readings(self):
+        code, prom = self.run_latency({I1: 7.2, I4: 0.1})  # everything else defaults to 7 ms
         self.assertEqual(code, 0)
         body = self.text(prom)
-        self.assertIn('innotel_estate_check_last_status{check="host_latency"} 1', body)
-        self.assertIn('innotel_estate_check_host_latency_ms{check="host_latency",host="i1"} 7.200', body)
+        self.assertIn('innotel_estate_check_last_status{check="address_latency"} 1', body)
+        self.assertIn('kind="host",name="i1",address="192.168.1.51"} 7.200', body)
+        # A table address is probed too — that is the reachability half of this check.
+        self.assertIn('kind="service",name="atlas",address="192.168.1.90"', body)
 
-    def test_a_host_held_back_by_the_radio_warns(self):
-        code, prom = self.run_latency({I1: 400.0, I2: 7.5, I3: 8.0, I4: 0.1})
-        self.assertEqual(code, 0, "a slow host is a warning, not a failure")
+    def test_an_address_held_back_by_the_radio_warns(self):
+        code, prom = self.run_latency({I1: 400.0})
+        self.assertEqual(code, 0, "a slow address is a warning, not a failure")
         body = self.text(prom)
-        self.assertIn('innotel_estate_check_warnings{check="host_latency"} 1', body)
-        self.assertIn('innotel_estate_check_failures{check="host_latency"} 0', body)
+        self.assertIn('innotel_estate_check_warnings{check="address_latency"} 1', body)
+        self.assertIn('innotel_estate_check_failures{check="address_latency"} 0', body)
 
-    def test_a_silent_host_fails_the_run(self):
-        code, prom = self.run_latency({I1: 7.2, I2: 7.5, I3: 8.0})  # i4 missing → timeout
+    def test_a_dark_service_address_fails_the_run(self):
+        # capstone's address is dialled; nothing answers it. That is the outage one layer
+        # below a renumber, and it must fail rather than be invisible.
+        code, prom = self.run_latency({"192.168.1.30": None})
         self.assertEqual(code, 1)
-        self.assertIn('innotel_estate_check_failures{check="host_latency"} 1', self.text(prom))
+        self.assertIn('innotel_estate_check_failures{check="address_latency"} 1', self.text(prom))
 
 
 class StubSanityCase(LiveCase):
