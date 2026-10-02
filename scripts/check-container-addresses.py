@@ -112,6 +112,9 @@ EXPECTED: dict[str, dict[str, str]] = {
 }
 
 #: Where each host is reachable. Overridable with `--hosts`.
+#: `i4` (`root@192.168.1.54`) is deliberately not here: it is a test bench whose
+#: only container is recreated at will, so it holds no address the estate dials.
+#: See docs/container-placement.md §The i4 bench.
 HOSTS: dict[str, str] = {"i1": "root@192.168.1.51", "i2": "root@192.168.1.52", "i3": "root@192.168.1.53"}
 
 #: host → container → {env var: address it must have}. Rule 2, for the stacks whose whole

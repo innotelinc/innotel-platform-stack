@@ -1,8 +1,9 @@
-# Incus container placement — i1 / i2 / i3
+# Incus container placement — i1 / i2 / i3 (with the i4 bench)
 
 Surveyed 2026-09-27; refreshed 2026-10-01 (a morning survey and an evening
-rebalance). Three Incus hosts run every estate container. This page records what
-each host is, what currently sits on it, and where it should sit.
+rebalance). Three Incus hosts run every estate container; a fourth, `i4`, is a
+test bench that runs none (see §*The i4 bench*). This page records what each host
+is, what currently sits on it, and where it should sit.
 
 The 2026-10-01 refresh matters because the estate's *shape* changed, not just its
 numbers: the pre-migration containers on `.46` (`atheniq`, `cloud`, `voice`,
@@ -149,14 +150,30 @@ Values are the 2026-10-01 evening (21:00 EDT) survey, after the move.
 apps are the top CPU consumers, and the load stayed up after the copies finished.
 It is also the clearest evidence that `limits.cpu` is not yet in force — a CPU cap
 applies at a container's next restart, and none has restarted since the caps were
-set (see the evening notes). The pre-move reading was 0.33 / 1.39 / 2.59.
+set (see the evening notes). The pre-move reading was 0.33 / 1.39 / 2.59.`i2` and `i3` used to carry the same `tank` profile set, which is what let the
+`genesis` move work unchanged — but they have diverged. On **i2** the `default` and
+`docker` profiles now point at a new **`main-pool`**: a 465 GiB btrfs pool on
+`/dev/sdc`, added 2026-10-01 beside the older zfs `tank` on `/dev/sdb`, with
+`capstone` and `www` moved onto it. A new i2 container therefore lands on
+`main-pool`, not `tank`; `atlas`, `dev`, `genesis` and `rizzaura` are still on
+`tank`. All three are `incus` container hosts, reached over SSH as `root` with the
+estate's incus root password; `i2` runs on pm3 (VM200), `i3` on pm4 (VM200), and i1
+is another guest on the same Proxmox host as i2 — which is why "more vCPUs on pm3"
+is the way i1's CPU would be grown, a decision the evening pass made and declined
+(finding 2).
 
-`i2` and `i3` are the same `tank` profile set (`default`, `docker`, `large`,
-`medium`, `small`), so export/import between them works unchanged. Both are
-`incus` containers' hosts, reached over SSH as `root` with the estate's incus
-root password; `i2` runs on pm3 (VM200), `i3` on pm4 (VM200), and i1 is another guest on the
-same Proxmox host as i2 — which is why "more vCPUs on pm3" is the way i1's CPU
-would be grown, a decision the evening pass made and declined (finding 2).
+### The i4 bench (not an estate host)
+
+`i4` (`.54`) is reachable, and the other three hosts have an `incus` remote
+configured for it, so it appears in `incus remote list` — but it runs **no estate
+container** and nothing in this page's tables or the address table covers it. It is
+a bench: 2 vCPU, 7 GiB, `dir`-backed storage (`default`, `tank`), a 153 G root
+disk, and one container, `lantest`, whose nic is `nictype: routed` over the WiFi
+interface `wlp1s0` with `ipv4.address: 192.168.1.214` (profile `lanrouted`). It is
+where routed networking is tried out, which is why it is on WiFi and why nothing on
+it is dialled by a name. **Deliberately absent from `EXPECTED` in
+`scripts/check-container-addresses.py`** — the check covers the estate, and a bench
+container is expected to be recreated at will.
 
 That password is **not written down here** — golden rule 4 (no credential in any
 repo file) applies to documentation as much as to code, and a literal in a doc
