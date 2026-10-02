@@ -29,4 +29,4 @@ Environment=TEXTFILE_DIR=/root/cerulean-backup/authentik
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-addresses.py --prom ${TEXTFILE_DIR}/estate-check-container-address.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-limits.py --prom ${TEXTFILE_DIR}/estate-check-container-limits.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-inventory.py --prom ${TEXTFILE_DIR}/estate-check-estate-inventory.prom
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-host-latency.py --prom ${TEXTFILE_DIR}/estate-check-host-latency.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-address-latency.py --prom ${TEXTFILE_DIR}/estate-check-address-latency.prom

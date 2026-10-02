@@ -91,8 +91,10 @@ estate as it is, not as it was.
   `check-container-addresses.py` (every address an A record names),
   `check-container-limits.py` (a declared `limits.cpu` is the cpuset actually pinned),
   `check-estate-inventory.py` (no host or storage pool this page does not know), and
-  `check-host-latency.py` (every host answers in milliseconds, not in hundreds — the
-  `i4` WiFi power-save regression, measured rather than felt).
+  `check-address-latency.py` (every address the estate dials — each host **and** every
+  container in the address table — answers at all, and answers in milliseconds rather
+  than hundreds; the reachability half closes the outage one layer below a renumber, and
+  the latency half is the `i4` WiFi power-save regression, measured rather than felt).
   They share one metric family — `innotel_estate_check`, one series per check via a
   `check` label — so `prometheus/rules/estate-checks.yml` alerts on all four
   (`EstateCheckFailing`, `...CouldNotRun`, `...Stale`, `...NotPinned`). The edge reaches
@@ -154,6 +156,23 @@ estate as it is, not as it was.
   more and taking `i4`'s root to **39 %**. Nothing rolls back through an image here: the
   one parked rollback is a stopped *container* (`gateway-sso-pre-version-20261001`),
   which still references — and therefore kept — its `oauth2-proxy:7.7.1-alpine`.
+- **Every dialled address is now probed for reachability, and the power-save number is
+  scheduled.** `check-address-latency.py` pings each estate host **and** every container in
+  the address table (read from `check-container-addresses.py`, so the two cannot drift),
+  one ping per sample after an idle gap. No reply is a failure — that is the outage one
+  layer below a renumber: a container with the *right* address the host no longer routes.
+  A 200 ms median is a warning: ~25× the healthy ~7 ms, and the shape the WiFi power save
+  left behind. It joins `innotel_estate_check` and the alert rules as `address_latency`.
+- **The checks' trust is a script, not a memory.** `scripts/trust-estate-hosts.py`
+  installs the check key into every estate host's `authorized_keys` and owns a marked
+  block in the edge's `/root/.ssh/config` naming every host by address; `--check` reports
+  drift without a password. The edge's config was reduced to that one block on 2026-10-02
+  (the hand-fix it replaced left a second, identical `Host` entry), and `--check` reads 0.
+- **The edge is watched from off the edge.** `scripts/check-edge-liveness.py` runs on `i1`
+  under `systemd/edge-liveness.{service,timer}` every five minutes and TCP-connects to the
+  edge's doors; two attempts per endpoint, so one dropped packet on the WiFi link does not
+  page. It exits non-zero when the edge is dark and can `--notify`; this is the only
+  checker that can still report the edge being gone, because it does not run there.
 - **The scheduled checks now cover `i4`.** `check-estate-inventory.py` no longer lists
   it as an optional bench (every named host must answer), `check-container-addresses.py`
   carries its four addresses, and `check-container-limits.py` reads its caps.
@@ -251,7 +270,7 @@ storage is also why the copied rootfs images are larger here than the ZFS `USED`
 figures they came from — the ZFS number is compressed, the `dir` one is not.
 
 `i4` is in `HOSTS`/`EXPECTED` in `scripts/check-container-addresses.py`, in `HOSTS`
-in `check-container-limits.py` and `check-host-latency.py`, and it is a **required** host
+in `check-container-limits.py` and `check-address-latency.py`, and it is a **required** host
 in `check-estate-inventory.py` (the `OPTIONAL` set is empty now). Its one bench
 container, `lantest`, was retired on 2026-10-02 — the routed pattern is carried by the
 four production containers, and a container the address table does not name would warn
@@ -266,10 +285,11 @@ The trust the checks depend on is now written down rather than done by hand.
 host by address with the check key as its `IdentityFile`; `--check` reports drift without
 changing anything. That is the scripted form of exactly what was missing here — see
 `estate_check.HostUnreadable` for what a missing half looks like from the inside. And the
-latency is a scheduled number now: `check-host-latency.py` pings each host (one ping per
-sample, after an idle gap, so a trained radio cannot hide power save) and warns at a
-200 ms median, which is ~25× the healthy reading and far below the 100–900 ms the power
-save produced.
+reachability and latency are scheduled numbers now: `check-address-latency.py` pings
+every address the estate dials — each host and every container in the address table — one
+ping per sample after an idle gap (so a trained radio cannot hide power save). No reply is
+a failure, and a median at 200 ms is a warning, ~25× the healthy reading and far below the
+100–900 ms the power save produced.
 
 That password is **not written down here** — golden rule 4 (no credential in any
 repo file) applies to documentation as much as to code, and a literal in a doc
@@ -444,16 +464,28 @@ The deployed estate and this map agree again; what remains is sizing, not placem
 - **The scheduled checks have a single runner.** They run on the Cerulean edge
   (`proxy`), which is itself an `i4` container now: if the edge cannot read a host the
   `EstateCheckCouldNotRun` rule fires, and if a check stops running entirely
-  `EstateCheckStale` does. (If the whole edge is down, nothing reports at all — that is
-  a different alert, and it is the honest limit of a check that runs on a host it also
-  monitors.) The ssh key they use (`/root/.ssh/container-address`) is authorized
+  `EstateCheckStale` does. If the whole edge is down, nothing on the edge reports at
+  all — so that one case is watched from **off** the edge: `scripts/check-edge-liveness.py`
+  runs under `systemd/edge-liveness.{service,timer}` on a non-edge host (installed on
+  `i1`, every five minutes) and TCP-connects to the edge's own doors (`:80`/`:443`). It
+  exits non-zero and can `--notify` when they stop answering, which is the one report a
+  host cannot make about itself. The ssh key the checks use (`/root/.ssh/container-address`) is authorized
   `from="192.168.1.71"` only and lives on the edge, and a host is only readable when
   the key is in its `authorized_keys` **and** the host is named in the edge's
   `/root/.ssh/config`. `i4` was missing both, which is why the inventory check reported
   the bench unreachable until 2026-10-02. Those two files are installed (and their drift
   reported) by `scripts/trust-estate-hosts.py`, so restoring them is a command rather
   than a memory. The scripts and units live at `/opt/innotel/estate-checks/` and
-  `/etc/systemd/system/estate-checks.*` there; the platform-stack copies are the source.
+  `/etc/systemd/system/estate-checks.*` there, and the watcher at
+  `/opt/innotel/edge-liveness/` with `/etc/systemd/system/edge-liveness.*` on `i1`; the
+  platform-stack copies are the source.
+- **The liveness watcher's outward channel is not wired yet.** `check-edge-liveness.py`
+  reports an unreachable edge by exiting non-zero (so the unit shows as failed on `i1`)
+  and by `--notify`, which is **unset** — so today the signal is `systemctl --failed` on
+  `i1` plus the journal, and nothing reaches a person. Point `EDGE_LIVENESS_NOTIFY` at a
+  real receiver (a webhook, or Alertmanager's `/api/v2/alerts`). Its textfile is written
+  to `/var/lib/node_exporter/textfile/edge-liveness.prom` on `i1`, which no collector
+  reads today; a node-exporter pointed at that directory would make it scrapable.
 - **The move shifted disk the other way: i1 is back to 13 % and `i4` took the
   images.** The four rootfs copies added tens of GB to `i4`'s `dir` pool (stored
   uncompressed, so larger than the ZFS `USED` figures they came from); `i4`'s root

@@ -19,7 +19,8 @@ A host missing from `EXPECTED` is read but never asserted about — as good as a
 A host in a different check at a different address is two checks reading two estates.
 Both fail here.
 
-It guards the same thing for `check-host-latency.py` (which reads HOSTS directly) and for
+It guards the same thing for `check-address-latency.py` (which reads HOSTS and the
+address table) and for
 `trust-estate-hosts.py` (which decides which addresses the edge's ssh config must carry):
 a host the checks read but the trust script does not name is a host that is read only
 until the key is missing, and the reverse is a config entry for a box nobody watches.
@@ -48,7 +49,7 @@ def _load(name: str):
 inv = _load("check-estate-inventory")
 addr = _load("check-container-addresses")
 lim = _load("check-container-limits")
-lat = _load("check-host-latency")
+lat = _load("check-address-latency")
 trust = _load("trust-estate-hosts")
 
 
