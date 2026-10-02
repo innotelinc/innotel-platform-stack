@@ -144,5 +144,17 @@ jobs:
       - name: Every vault:// reference resolves with its product's token
         run: python3 scripts/check-vault-refs.py
 
+      # The alert rules are code too, and one of them cannot be exercised by the check
+      # it watches: `EstateCheckAbsent` fires when a check's series is *missing*, which
+      # a check that runs never produces. promtool's unit-test mode is the only way to
+      # hold a rule to a series that is deliberately not there, so the rules are tested
+      # in the same Prometheus image the estate runs (docker-compose.host.yml). Without
+      # this, the rule that exists to catch a silent check would itself be untested.
+      - name: Prometheus alert rules (promtool unit tests)
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/work -w /work prom/prometheus:v3.13.3 \
+            promtool test rules extensions/monitoring/prometheus/rules/tests/estate-checks.test.yml
+
       - name: Python syntax
         run: python3 -m py_compile scripts/*.py scripts/tests/*.py
