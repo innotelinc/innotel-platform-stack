@@ -73,7 +73,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from estate_check import Audit, Finding, ssh, write_prom  # noqa: E402
+from estate_check import Audit, Finding, read_host, ssh, write_prom  # noqa: E402
 
 #: The `check` label this check publishes its metrics under (see estate_check).
 CHECK = "container_address"
@@ -86,9 +86,9 @@ CHECK = "container_address"
 #: The edge services (`proxy`, `terminal`, `vault`, `vpn`) moved i1 → i4 on 2026-10-02,
 #: each keeping its address because it is pinned in its own manager inside the container,
 #: which is what `incus copy` carries — the same reason the 2026-10-01 moves kept theirs.
+#: `acme` (`.49`) was retired off i1 on 2026-10-02 and is no longer an address to watch.
 EXPECTED: dict[str, dict[str, str]] = {
     "i1": {
-        "acme": "192.168.1.49",
         "mail": "192.168.1.15",
         "monarch": "192.168.1.56",
         "ontrak": "192.168.1.21",
@@ -148,7 +148,6 @@ ROLES: dict[str, str] = {
     "192.168.1.15": "mail (SMTP/IMAP)",
     "192.168.1.22": "the web terminal",
     "192.168.1.43": "WireGuard VPN",
-    "192.168.1.49": "ACME / certificate issue",
     "192.168.1.73": "Vaultwarden + Linkwarden + Meilisearch",
     "192.168.1.30": "capstone / Zeus telephony",
     "192.168.1.74": "the dev container",
@@ -281,7 +280,7 @@ def gather(hosts: dict[str, str], runner: Callable[[str, str], str] = _ssh) -> d
     """
     observed: dict[str, list[Instance]] = {}
     for host, target in hosts.items():
-        listing = runner(target, "incus list --format csv -c ns4")
+        listing = read_host(host, target, "incus list --format csv -c ns4", runner)
         instances: list[Instance] = []
         for line in listing.splitlines():
             if not line.strip():
