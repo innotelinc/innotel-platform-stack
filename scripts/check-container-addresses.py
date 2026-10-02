@@ -67,12 +67,16 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
-import tempfile
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from estate_check import Audit, Finding, ssh, write_prom  # noqa: E402
+
+#: The `check` label this check publishes its metrics under (see estate_check).
+CHECK = "container_address"
 
 # --------------------------------------------------------------------------------------
 # The estate as it should be
@@ -159,26 +163,6 @@ class Instance:
     pinned: bool = True
 
 
-@dataclass
-class Finding:
-    code: str
-    level: str  # "fail" | "warn" | "note"
-    message: str
-
-
-@dataclass
-class Audit:
-    findings: list[Finding] = field(default_factory=list)
-
-    @property
-    def failures(self) -> list[Finding]:
-        return [f for f in self.findings if f.level == "fail"]
-
-    @property
-    def ok(self) -> bool:
-        return not self.failures
-
-
 def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
     """Compare what the hosts report against `EXPECTED` / `BINDS`."""
     out = Audit()
@@ -246,84 +230,12 @@ def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
 # The signal, so a renumber reaches someone
 # --------------------------------------------------------------------------------------
 #
-# The check existing is not the same as the check running, and the 2026-10-01 outage was
-# found by a person noticing a blank dashboard rather than by anything that reported. So a
-# scheduled run publishes what it saw as a Prometheus textfile (`--prom <path>`), which is
-# the estate's existing path from a scheduled job to an alert: node-exporter's textfile
-# collector picks the file up and `prometheus/rules/container-address.yml` turns it into an
-# alert. The same shape as Cerulean's Authentik dump status (`status.prom`).
-#
-# `last_status` is 1 only when the check ran AND every address held, so a check that could
-# not reach a host (exit 2) reads as a failure rather than as silence. `last_success`
-# carries the previous value forward on a bad run, which is what lets a rule alert on a
-# check that stopped succeeding rather than one that is merely unhappy today.
-
-PROM_PREFIX = "innotel_container_address"
-
-
-def _prior_metric(path: str, name: str) -> float | None:
-    """The value of `name` in an existing textfile, so a bad run does not erase a good run."""
-    try:
-        with open(path, encoding="utf-8") as handle:
-            for line in handle:
-                key, _, value = line.partition(" ")
-                if key == name:
-                    return float(value)
-    except (OSError, ValueError):
-        return None
-    return None
-
-
-def prometheus_text(result: Audit | None, ran_ok: bool, now: float, prior_success: float | None = None) -> str:
-    """The textfile body for a run. Pure, so the contract is the thing under test."""
-    ok = bool(ran_ok and result is not None and result.ok)
-    failures = len(result.failures) if result is not None else None
-    warnings = len([f for f in result.findings if f.level == "warn"]) if result is not None else None
-    success = now if ok else prior_success
-
-    lines = [
-        f"# HELP {PROM_PREFIX}_last_status 1 when the check ran and every address held",
-        f"# TYPE {PROM_PREFIX}_last_status gauge",
-        f"{PROM_PREFIX}_last_status {1 if ok else 0}",
-        f"# HELP {PROM_PREFIX}_last_run_timestamp When the check last ran, whatever it found",
-        f"# TYPE {PROM_PREFIX}_last_run_timestamp gauge",
-        f"{PROM_PREFIX}_last_run_timestamp {now:.0f}",
-    ]
-    if failures is not None:
-        lines += [
-            f"# HELP {PROM_PREFIX}_failures Addresses that do not hold",
-            f"# TYPE {PROM_PREFIX}_failures gauge",
-            f"{PROM_PREFIX}_failures {failures}",
-            f"# HELP {PROM_PREFIX}_warnings Containers whose address can still drift from DHCP",
-            f"# TYPE {PROM_PREFIX}_warnings gauge",
-            f"{PROM_PREFIX}_warnings {warnings}",
-        ]
-    if success is not None:
-        lines += [
-            f"# HELP {PROM_PREFIX}_last_success_timestamp When the check last ran and found every address holding",
-            f"# TYPE {PROM_PREFIX}_last_success_timestamp gauge",
-            f"{PROM_PREFIX}_last_success_timestamp {success:.0f}",
-        ]
-    return "\n".join(lines) + "\n"
-
-
-def write_prom(path: str, result: Audit | None, ran_ok: bool, now: float | None = None) -> None:
-    """Write the textfile atomically, so a scrape never reads a half-written file."""
-    now = time.time() if now is None else now
-    body = prometheus_text(result, ran_ok, now, _prior_metric(path, f"{PROM_PREFIX}_last_success_timestamp"))
-    directory = os.path.dirname(path) or "."
-    handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False, prefix=".container-address-")
-    try:
-        handle.write(body)
-        handle.close()
-        # World-readable: the textfile collector (node-exporter) reads this as an
-        # unprivileged user, and `NamedTemporaryFile` creates it 0600 — which reads
-        # as "no metrics" rather than as a permission problem. Measured, 2026-10-01.
-        os.chmod(handle.name, 0o644)
-        os.replace(handle.name, path)
-    except BaseException:
-        os.unlink(handle.name)
-        raise
+# The textfile this check publishes is written by `estate_check.write_prom`, so every
+# host-level check shares one metric family — `innotel_estate_check`, one series per check
+# via the `check` label — and one set of alert rules
+# (`extensions/monitoring/prometheus/rules/estate-checks.yml`). The contract (the metric
+# names, and why a check that cannot reach a host publishes 0 rather than nothing) is
+# described in `estate_check`. This check contributes only its `CHECK` name.
 
 
 # --------------------------------------------------------------------------------------
@@ -331,29 +243,10 @@ def write_prom(path: str, result: Audit | None, ran_ok: bool, now: float | None 
 # --------------------------------------------------------------------------------------
 
 
-def _ssh_prefix() -> list[str]:
-    """How to reach a host here.
-
-    Key-based SSH is the clean case and the default (`BatchMode=yes`, so an unreachable
-    host fails instead of hanging on a prompt). This estate, though, reaches its hosts
-    with a password, so where `sshpass` is installed and `SSHPASS` is set in the
-    environment the password is handed to `ssh` through it — the same way every other
-    script here talks to a host. `BatchMode=yes` is dropped in that case because it
-    disables password auth outright, which would make the check exit 2 forever.
-    """
-    if os.environ.get("SSHPASS") and shutil.which("sshpass"):
-        return ["sshpass", "-e", "ssh", "-o", "StrictHostKeyChecking=no"]
-    return ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"]
-
-
-def _ssh(host: str, command: str, timeout: int = 25) -> str:
-    return subprocess.run(
-        [*_ssh_prefix(), "-o", f"ConnectTimeout={timeout}", host, command],
-        capture_output=True,
-        text=True,
-        timeout=timeout + 15,
-        check=True,
-    ).stdout
+#: Reaching a host is shared with the other estate checks (`estate_check.ssh`), so the
+#: key/password behaviour — and why `BatchMode=yes` is dropped when SSHPASS is set — is
+#: described in one place.
+_ssh = ssh
 
 
 def _first_lan_address(text: str) -> str | None:
@@ -437,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
     def emit(result: Audit | None, ran: bool) -> None:
         if args.prom:
             try:
-                write_prom(args.prom, result, ran)
+                write_prom(args.prom, CHECK, result, ran)
             except OSError as error:
                 print(f"check-container-addresses: could not write {args.prom}: {error}", file=sys.stderr)
 

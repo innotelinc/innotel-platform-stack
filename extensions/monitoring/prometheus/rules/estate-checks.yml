@@ -1,0 +1,83 @@
+# ==========================================================================
+# Estate-check alerts
+# ==========================================================================
+# Every host-level check publishes one metric family — `innotel_estate_check`, with a
+# `check` label naming the check — so one rule set covers all of them and still says
+# which one fired. The contract lives in `scripts/estate_check.py`; the checks are
+# `scripts/check-container-addresses.py` (`container_address`),
+# `check-container-limits.py` (`container_limits`) and `check-estate-inventory.py`
+# (`estate_inventory`), run by `systemd/estate-checks.{service,timer}` on the
+# Cerulean edge, which writes each into node-exporter's textfile directory.
+#
+# Why these are worth paging on: each check guards something the estate is reached by.
+# An address is an interface (every A record and published port names one), a CPU cap
+# is a fence that a declared-but-unenforced limit only pretends to be, and the host and
+# pool inventory is what stops a fourth host or a stray pool arriving unrecorded. The
+# 2026-10-01 outage — `ontrak` renumbered `.21` → `.20` — stayed invisible until a
+# person noticed a blank dashboard, which is the case all of this exists to close.
+#
+# The metric contract (written by `estate_check.write_prom`), per `check`:
+#   innotel_estate_check_last_status            1 ran and found nothing, 0 otherwise
+#   innotel_estate_check_last_run_timestamp     unix seconds, every run
+#   innotel_estate_check_last_success_timestamp unix seconds, advanced only on a clean run
+#   innotel_estate_check_failures               things that do not hold (absent if the check could not run)
+#   innotel_estate_check_warnings               things worth a look
+# ==========================================================================
+groups:
+  - name: innotel-estate-checks
+    rules:
+      - alert: EstateCheckFailing
+        expr: innotel_estate_check_failures > 0
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'The {{ $labels.check }} check is failing'
+          description: >-
+            {{ $value }} finding(s) in the `{{ $labels.check }}` estate check. Each check
+            names the thing that broke and what is dialled there; run it by hand on the
+            edge for the message, then fix the estate rather than the check. See
+            docs/container-placement.md.
+
+      # A run that could not reach a host (exit 2) is not a pass — it is the state the
+      # 2026-10-01 outage sat in. `unless` keeps this quiet when the run happened and
+      # merely found something (that is EstateCheckFailing).
+      - alert: EstateCheckCouldNotRun
+        expr: innotel_estate_check_last_status == 0 unless innotel_estate_check_failures > 0
+        for: 30m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'The {{ $labels.check }} check cannot reach a host'
+          description: >-
+            The `{{ $labels.check }}` check exited 2 — a host it needs was unreachable —
+            so nothing is watching that invariant right now. Check the timer and the ssh
+            path from the edge.
+
+      - alert: EstateCheckStale
+        expr: (time() - innotel_estate_check_last_success_timestamp) > 26 * 60 * 60
+        for: 30m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'No clean {{ $labels.check }} run in 26 hours'
+          description: >-
+            The last `{{ $labels.check }}` run that found nothing wrong was
+            {{ $value | humanizeDuration }} ago. Either the timer is gone or every run
+            since has failed; both mean that invariant is unwatched.
+
+      - alert: EstateCheckNotPinned
+        expr: innotel_estate_check_warnings > 0
+        for: 1h
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'The {{ $labels.check }} check has warnings'
+          description: >-
+            {{ $value }} warning(s) in the `{{ $labels.check }}` check — drift that is not
+            yet a failure (a container still on DHCP, a cap above the host, a pool that
+            has gone). Worth a look before it becomes one.
