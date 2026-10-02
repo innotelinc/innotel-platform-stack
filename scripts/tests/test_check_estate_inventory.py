@@ -84,18 +84,21 @@ class InventoryCase(unittest.TestCase):
         self.assertEqual([f.code for f in result.warnings], ["missing_pool"])
         self.assertIn("main-pool", result.warnings[0].message)
 
-    def test_an_unreachable_bench_is_a_warning_and_hides_nothing(self):
-        result = inv.audit(
-            views(
-                {
-                    "i4": inv.HostView("i4", reachable=False),
-                    "i3": inv.HostView("i3", remotes=ALL_KNOWN_REMOTES, pools=["tank", "extra"]),
-                }
-            )
-        )
-        self.assertFalse(result.ok, "the bench being down must not excuse an unknown pool")
+    def test_the_bench_is_no_longer_optional(self):
+        # i4 was the test bench whose absence was only a warning. On 2026-10-02 it took
+        # the edge and three other containers off i1, so it is a real host: nothing is
+        # optional, every named host must answer (an unreachable one is exit 2, not a
+        # `bench_unreachable` warning), and its pools and role are part of the inventory.
+        self.assertEqual(inv.OPTIONAL, set())
+        self.assertEqual(set(inv.POOLS), set(inv.HOSTS))
+        self.assertIn("estate", inv.ROLE["i4"])
+
+    def test_an_unknown_pool_anywhere_still_fails(self):
+        # A pool on the promoted host is a failure like any other, not a bench detail.
+        result = inv.audit(views({"i4": inv.HostView("i4", remotes=ALL_KNOWN_REMOTES, pools=["default", "tank", "scratch"])}))
+        self.assertFalse(result.ok)
         self.assertEqual([f.code for f in result.failures], ["unknown_pool"])
-        self.assertEqual([f.code for f in result.warnings], ["bench_unreachable"])
+        self.assertIn("scratch", result.failures[0].message)
 
     def test_the_remote_url_is_read_for_its_address(self):
         self.assertEqual(inv._remote_address("https://192.168.1.52:8443"), "192.168.1.52")

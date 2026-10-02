@@ -126,12 +126,15 @@ class LiveCase(unittest.TestCase):
 
 ADDRESS_ROWS = {
     I1: [("acme", "192.168.1.49"), ("mail", "192.168.1.15"), ("monarch", "192.168.1.56"),
-         ("ontrak", "192.168.1.21"), ("proxy", "192.168.1.71"), ("terminal", "192.168.1.22"),
-         ("vault", "192.168.1.73"), ("vpn", "192.168.1.43")],
+         ("ontrak", "192.168.1.21")],
     I2: [("atlas", "192.168.1.90"), ("capstone", "192.168.1.30"), ("dev", "192.168.1.74"),
          ("genesis", "192.168.1.66"), ("rizzaura", "192.168.1.62"), ("www", "192.168.1.80")],
     I3: [("distro", "192.168.1.61"), ("magnate", "192.168.1.57"), ("onyx", "192.168.1.60"),
          ("pi", "192.168.1.70"), ("signara", "192.168.1.44"), ("subscribe", "192.168.1.58")],
+    # The edge and three other containers moved i1 → i4 on 2026-10-02; the addresses
+    # travel with the pinned rootfs, so only the host key changes here.
+    I4: [("proxy", "192.168.1.71"), ("terminal", "192.168.1.22"),
+         ("vault", "192.168.1.73"), ("vpn", "192.168.1.43")],
 }
 
 

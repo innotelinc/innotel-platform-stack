@@ -85,6 +85,14 @@ class RuleCase(unittest.TestCase):
         for alert in ("EstateCheckFailing", "EstateCheckCouldNotRun", "EstateCheckStale", "EstateCheckNotPinned"):
             self.assertIn("innotel_estate_check", _block(self.text, alert), alert)
 
+    def test_the_stale_window_is_a_whole_day(self):
+        # The checks run every 30 minutes, so 24h is the point at which "not one clean run
+        # for a whole day" is unambiguous. Locked here so a later edit cannot quietly
+        # widen the window back to a day-and-change.
+        block = _block(self.text, "EstateCheckStale")
+        self.assertRegex(block, r">\s*24\s*\*\s*60\s*\*\s*60")
+        self.assertIn("24 hours", block)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

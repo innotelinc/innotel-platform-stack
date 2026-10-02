@@ -26,12 +26,10 @@ THE RULES
 2. **A storage pool is estate structure, not a detail.** Any pool on a known host
    that the inventory does not name is a failure; a pool it names that is gone is a
    warning (a pool can be retired on purpose, and the page then says so).
-3. **The bench is read but not required.** `i4` is a test bench with no estate
-   container; if it is powered off the check reports that as a warning and carries
-   on, because a bench being down is not an estate problem. Its absence does not
-   excuse an unknown host or pool anywhere else.
-4. *(not a rule, a note)* `i4`'s container and pools are still checked when it is up:
-   a bench that grew a new pool is exactly how a stray pool reaches production.
+3. **Every host the inventory names is required.** `i4` was the test bench whose
+   absence was only a warning; on 2026-10-02 it took the edge and three other
+   containers off i1 (see `docs/container-placement.md`), so it is an estate host now
+   and a host that does not answer is exit 2 like any other.
 
 Usage:
     ./scripts/check-estate-inventory.py
@@ -77,15 +75,17 @@ POOLS: dict[str, set[str]] = {
     "i4": {"default", "tank"},
 }
 
-#: Hosts whose absence is a warning rather than an exit 2 — the test bench and nothing else.
-OPTIONAL: set[str] = {"i4"}
+#: Hosts whose absence is a warning rather than an exit 2. Empty: when `i4` was the
+#: bench this held it; it became a real host on 2026-10-02, so every host named above
+#: must answer. The mechanism stays because a bench-style host may return.
+OPTIONAL: set[str] = set()
 
 #: What each host is for. Reported, so a finding says what the host is.
 ROLE: dict[str, str] = {
     "i1": "estate (edge — every address is dialled here)",
     "i2": "estate (apps)",
     "i3": "estate (light)",
-    "i4": "bench (routed-networking tests; no estate container)",
+    "i4": "estate (edge, terminal, vault, vpn — routed over wlp1s0)",
 }
 
 
