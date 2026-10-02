@@ -1,5 +1,5 @@
 [Unit]
-Description=Estate host checks — addresses, CPU caps, and the host and pool inventory
+Description=Estate host checks — addresses, CPU caps, the host and pool inventory, and host latency
 Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/container-placement.md
 
 # Each check reads the estate hosts over ssh, so the LAN has to be up first. None of
@@ -18,12 +18,15 @@ WorkingDirectory=/opt/innotel/estate-checks
 EnvironmentFile=-/etc/innotel/estate-checks.env
 Environment=TEXTFILE_DIR=/root/cerulean-backup/authentik
 
-# `-` on each ExecStart so a failing check does not stop the ones after it: all three
+# `-` on each ExecStart so a failing check does not stop the ones after it: all of them
 # must publish every run, or a check that is merely unhappy today would take the others'
 # metrics stale and page about the wrong thing. The finding is the textfile, not the
 # unit's exit status. Reaching the hosts with a key is the clean case; where the estate
 # uses a password instead, put SSHPASS in the environment file above (and install
-# sshpass on this host).
+# sshpass on this host). The key lives on the edge and a host is readable only when it is
+# in that host's `authorized_keys` and named in the edge's `/root/.ssh/config` — see
+# `scripts/trust-estate-hosts.py`, which installs both and whose `--check` reports drift.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-addresses.py --prom ${TEXTFILE_DIR}/estate-check-container-address.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-limits.py --prom ${TEXTFILE_DIR}/estate-check-container-limits.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-inventory.py --prom ${TEXTFILE_DIR}/estate-check-estate-inventory.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-host-latency.py --prom ${TEXTFILE_DIR}/estate-check-host-latency.prom

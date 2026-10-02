@@ -18,6 +18,11 @@ another, because that is how a host goes unwatched without anyone editing an ale
 A host missing from `EXPECTED` is read but never asserted about — as good as absent.
 A host in a different check at a different address is two checks reading two estates.
 Both fail here.
+
+It guards the same thing for `check-host-latency.py` (which reads HOSTS directly) and for
+`trust-estate-hosts.py` (which decides which addresses the edge's ssh config must carry):
+a host the checks read but the trust script does not name is a host that is read only
+until the key is missing, and the reverse is a config entry for a box nobody watches.
 """
 from __future__ import annotations
 
@@ -43,6 +48,8 @@ def _load(name: str):
 inv = _load("check-estate-inventory")
 addr = _load("check-container-addresses")
 lim = _load("check-container-limits")
+lat = _load("check-host-latency")
+trust = _load("trust-estate-hosts")
 
 
 class CoverageCase(unittest.TestCase):
@@ -52,12 +59,16 @@ class CoverageCase(unittest.TestCase):
     def test_every_check_reads_the_same_hosts(self):
         self.assertEqual(set(addr.HOSTS), set(inv.HOSTS))
         self.assertEqual(set(lim.HOSTS), set(inv.HOSTS))
+        self.assertEqual(set(lat.HOSTS), set(inv.HOSTS))
+        self.assertEqual(set(trust.HOSTS), set(inv.HOSTS))
 
     def test_every_check_reads_each_host_at_the_same_address(self):
         # Same names is not enough: a host named in two checks but pinned to two
         # addresses is two checks reading two different boxes.
         self.assertEqual(addr.HOSTS, inv.HOSTS)
         self.assertEqual(lim.HOSTS, inv.HOSTS)
+        self.assertEqual(lat.HOSTS, inv.HOSTS)
+        self.assertEqual(trust.HOSTS, inv.HOSTS)
 
     def test_the_inventory_names_a_pool_for_every_host(self):
         self.assertEqual(set(inv.POOLS), set(inv.HOSTS))

@@ -86,18 +86,24 @@ estate as it is, not as it was.
   (The 2026-09-27 note below that `limits.cpu` waits for a restart is wrong, and is
   corrected here.)
 - **The estate's host invariants are scheduled and alerting.**
-  `systemd/estate-checks.{service,timer}` runs three checks every 30 minutes *on the
+  `systemd/estate-checks.{service,timer}` runs four checks every 30 minutes *on the
   Cerulean edge* and writes each one's textfile into node-exporter's directory:
   `check-container-addresses.py` (every address an A record names),
   `check-container-limits.py` (a declared `limits.cpu` is the cpuset actually pinned),
-  and `check-estate-inventory.py` (no host or storage pool this page does not know).
+  `check-estate-inventory.py` (no host or storage pool this page does not know), and
+  `check-host-latency.py` (every host answers in milliseconds, not in hundreds — the
+  `i4` WiFi power-save regression, measured rather than felt).
   They share one metric family — `innotel_estate_check`, one series per check via a
-  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all three
+  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all four
   (`EstateCheckFailing`, `...CouldNotRun`, `...Stale`, `...NotPinned`). The edge reaches
   the hosts with a dedicated ssh key, `/root/.ssh/container-address`, authorized
   `from="192.168.1.71"` only, so the scheduled run needs no password on disk. A check
   that cannot reach a host publishes status 0 rather than nothing, because "no data"
   is how the outage stayed invisible. Verified running 2026-10-01.
+  The two host-side files key-only ssh needs — each host's `authorized_keys` and the
+  edge's `/root/.ssh/config` — are installed by `scripts/trust-estate-hosts.py`
+  (idempotent, with a `--check` mode), so the trust is reproducible rather than a hand
+  fix. See §*The i4 host* for why that file exists.
 
 ### Changes applied 2026-10-02
 
@@ -140,8 +146,14 @@ estate as it is, not as it was.
 - **`i4`'s disk was reclaimed.** The four copies are stored uncompressed in a `dir`
   pool, so they took tens of GB and `i4`'s root reached 51 %. A `docker image prune` +
   `docker builder prune` on the edge freed **6.8 GB** of dangling images and build
-  cache, taking it to **45 %**. The images still reclaimable are tagged rollback
-  versions (a previous `npm-edge`, `omniroute`), left in place on purpose.
+  cache, taking it to **45 %**. The remaining tagged-but-unreferenced images (a previous
+  `npm-edge:2.15.1`, the original `diegosouzapw/omniroute:latest`, plus an old
+  `nginx-proxy-manager` and a stray `backup-ui`) were then removed with
+  `docker image prune -af`, the rule `scripts/docker-cleanup.sh` already applies nightly
+  (an image no container references is rebuildable or re-pullable), freeing **5.5 GB**
+  more and taking `i4`'s root to **39 %**. Nothing rolls back through an image here: the
+  one parked rollback is a stopped *container* (`gateway-sso-pre-version-20261001`),
+  which still references — and therefore kept — its `oauth2-proxy:7.7.1-alpine`.
 - **The scheduled checks now cover `i4`.** `check-estate-inventory.py` no longer lists
   it as an optional bench (every named host must answer), `check-container-addresses.py`
   carries its four addresses, and `check-container-limits.py` reads its caps.
@@ -238,15 +250,26 @@ the container's default gateway is the host's link-local `169.254.0.1`. `dir`
 storage is also why the copied rootfs images are larger here than the ZFS `USED`
 figures they came from — the ZFS number is compressed, the `dir` one is not.
 
-`i4` is in `HOSTS`/`EXPECTED` in `scripts/check-container-addresses.py` and in
-`HOSTS` in `check-container-limits.py`, and it is a **required** host in
-`check-estate-inventory.py` (the `OPTIONAL` set is empty now). Its one bench
+`i4` is in `HOSTS`/`EXPECTED` in `scripts/check-container-addresses.py`, in `HOSTS`
+in `check-container-limits.py` and `check-host-latency.py`, and it is a **required** host
+in `check-estate-inventory.py` (the `OPTIONAL` set is empty now). Its one bench
 container, `lantest`, was retired on 2026-10-02 — the routed pattern is carried by the
 four production containers, and a container the address table does not name would warn
 on every scheduled run. The WiFi hop is **not** the latency problem it first looked
-like: with power save off it answers in ~11–14 ms (see the 2026-10-02 change log), so a
+like: with power save off it answers in ~7 ms (see the 2026-10-02 change log), so a
 wired NIC would be for throughput and reliability, not for latency. The move added a
 place to put the edge, not CPU or RAM to run it on.
+
+The trust the checks depend on is now written down rather than done by hand.
+`scripts/trust-estate-hosts.py`, run on the edge, puts the check key into every host's
+`authorized_keys` and owns a marked block in the edge's `/root/.ssh/config` naming every
+host by address with the check key as its `IdentityFile`; `--check` reports drift without
+changing anything. That is the scripted form of exactly what was missing here — see
+`estate_check.HostUnreadable` for what a missing half looks like from the inside. And the
+latency is a scheduled number now: `check-host-latency.py` pings each host (one ping per
+sample, after an idle gap, so a trained radio cannot hide power save) and warns at a
+200 ms median, which is ~25× the healthy reading and far below the 100–900 ms the power
+save produced.
 
 That password is **not written down here** — golden rule 4 (no credential in any
 repo file) applies to documentation as much as to code, and a literal in a doc
@@ -306,7 +329,8 @@ here only so the two surveys can be read against each other.
    therefore does not need more vCPUs:** its guest i1 has never been provisioned to
    its 4, and i2's load is 0.89 across 8. The 2026-10-02 move put the edge on `i4`,
    the estate's weakest box — a deliberate placement, and the thing to watch if the
-   WiFi hop is noisy (§*The i4 host*).
+   WiFi hop costs more in throughput or reliability than it buys in placement
+   (§*The i4 host*) — latency alone is measured and fine.
 3. **i2 is the app host and the busiest by container size.** Six containers and
    8.9 GiB used, but 4.5 GiB free and load 0.89 on 8 vCPU. `capstone` alone is
    5.84 GiB of the 8.9 — 66 % of the host's usage in one container.
@@ -426,12 +450,14 @@ The deployed estate and this map agree again; what remains is sizing, not placem
   `from="192.168.1.71"` only and lives on the edge, and a host is only readable when
   the key is in its `authorized_keys` **and** the host is named in the edge's
   `/root/.ssh/config`. `i4` was missing both, which is why the inventory check reported
-  the bench unreachable until 2026-10-02. The scripts and units live at
-  `/opt/innotel/estate-checks/` and `/etc/systemd/system/estate-checks.*` there; the
-  platform-stack copies are the source.
+  the bench unreachable until 2026-10-02. Those two files are installed (and their drift
+  reported) by `scripts/trust-estate-hosts.py`, so restoring them is a command rather
+  than a memory. The scripts and units live at `/opt/innotel/estate-checks/` and
+  `/etc/systemd/system/estate-checks.*` there; the platform-stack copies are the source.
 - **The move shifted disk the other way: i1 is back to 13 % and `i4` took the
   images.** The four rootfs copies added tens of GB to `i4`'s `dir` pool (stored
   uncompressed, so larger than the ZFS `USED` figures they came from); `i4`'s root
-  peaked at **51 %** and is **45 %** after a `docker` prune freed 6.8 GB. `i1` fell
+  peaked at **51 %** and is **39 %** after pruning the dangling images and build cache
+  (6.8 GB) and then the tagged-but-unreferenced images (5.5 GB more). `i1` fell
   back to 13 % once its four sources were deleted. `dev` (`.74`) growth on i2 remains
   the one to watch.
