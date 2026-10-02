@@ -16,6 +16,13 @@
 # 2026-10-01 outage — `ontrak` renumbered `.21` → `.20` — stayed invisible until a
 # person noticed a blank dashboard, which is the case all of this exists to close.
 #
+# Every rule but one keys on a series, so it can only speak about a check whose
+# textfile reached node-exporter. `EstateCheckAbsent` is the exception: it fires when a
+# selector matches nothing at all, which is how a check that was never deployed or whose
+# textfile was deleted is noticed. It carries one `absent(...)` branch per check, kept in
+# step with the checks by `scripts/tests/test_estate_alert_rules.py` — add a check, add a
+# branch, or that check is silent in exactly the way 2026-10-01 was.
+#
 # The metric contract (written by `estate_check.write_prom`), per `check`:
 #   innotel_estate_check_last_status            1 ran and found nothing, 0 otherwise
 #   innotel_estate_check_last_run_timestamp     unix seconds, every run
@@ -26,6 +33,34 @@
 groups:
   - name: innotel-estate-checks
     rules:
+      # The alert that would have caught 2026-10-01 on its own: not a check that ran
+      # and found nothing, but one that never reported at all. Every rule below keys on
+      # a series, so it can only speak about a check whose textfile reached
+      # node-exporter; a check that was never deployed, whose textfile was deleted, or
+      # whose `TEXTFILE_DIR` is wrong has no series, and the rules below stay silent
+      # forever — the failure is in the shape of a check, which is what the outage looked
+      # like. `absent()` is the one thing that fires on a selector matching *nothing*;
+      # one branch per known check keeps the `check` label so the alert still names which
+      # invariant is unwatched. A check added without a branch here is that same silence,
+      # which `scripts/tests/test_estate_alert_rules.py` is there to catch.
+      - alert: EstateCheckAbsent
+        expr: |
+          label_replace(absent(innotel_estate_check_last_run_timestamp{check="container_address"}), "check", "container_address", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="container_limits"}), "check", "container_limits", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="estate_inventory"}), "check", "estate_inventory", "check", ".*")
+        for: 30m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'The {{ $labels.check }} check has never reported'
+          description: >-
+            No `innotel_estate_check_last_run_timestamp` series exists for the
+            `{{ $labels.check }}` check — it has not run, or its textfile is not in the
+            directory node-exporter reads. Every other rule here keys on a series that
+            exists, so this is the one that catches the check itself being absent. Check
+            the timer and `TEXTFILE_DIR` on the edge.
+
       - alert: EstateCheckFailing
         expr: innotel_estate_check_failures > 0
         for: 5m
