@@ -78,10 +78,12 @@ estate as it is, not as it was.
   is now 2 and every other i1 container is 1, except `monarch` which keeps 2
   because media transcoding is the one real CPU consumer. **No container can now
   claim the whole host, and a runaway anywhere leaves at least two vCPU for the
-  rest.** `limits.cpu` takes effect at a container's next restart, and none has
-  restarted since these were set — `cpu.max` still reads `max` for the running
-  containers — so each cap takes hold on that container's next restart. Until then
-  i1 runs unthrottled, which is what the evening load shows.
+  rest.** Incus applies `limits.cpu` **live**, and it is implemented as a cpuset
+  pin rather than a quota, so the caps are in force with no restart. Verified the
+  same evening: every i1 container's `cpuset.cpus.effective` holds exactly its
+  `limits.cpu` count (`proxy` `0-1`, `monarch` `2-3`, one CPU each on the rest).
+  (The 2026-09-27 note below that `limits.cpu` waits for a restart is wrong, and is
+  corrected here.)
 - **The address invariant is now scheduled and alerting.**
   `systemd/container-address-check.{service,timer}` runs
   `scripts/check-container-addresses.py` every 30 minutes *on the Cerulean edge*
@@ -97,10 +99,9 @@ estate as it is, not as it was.
 ## Changes applied 2026-09-27
 
 - **Limits set** on the unbounded heavies: i2 `atheniq`/`capstone` = 6 GiB,
-  `development` = 4 GiB; i1 `monarch`/`git` = 2 vCPU; i3 `olympus`/`onyx`/
-  `signara` = 1 GiB. The `limits.memory` values apply live; **`limits.cpu`
-  takes effect on the container's next restart** (i1's load is no longer CPU
-  pressure anyway — see below).
+  `development` = 4 GiB; i1 `monarch`/`git` = 2 vCPU; i3 `olympus`/`onyx`/  `signara` = 1 GiB. Both `limits.memory` and `limits.cpu` apply live — `limits.cpu`
+  as a cpuset pin, which the 2026-10-01 pass verified and corrected here (an
+  earlier note claimed it waited for a restart).
 - i1's survey-day `load average` of ~6 was **not** placement pressure: a
   cryptominer was running in the `git` container (`security-incident-2026-09-27-git-miner.md`).
   Once contained, i1 fell from load ~18 to ~4.8 and freed ~2.4 GiB.
@@ -148,9 +149,9 @@ Values are the 2026-10-01 evening (21:00 EDT) survey, after the move.
 
 † i1's load is `monarch`'s media stack, not the move: qbittorrent and the *arr
 apps are the top CPU consumers, and the load stayed up after the copies finished.
-It is also the clearest evidence that `limits.cpu` is not yet in force — a CPU cap
-applies at a container's next restart, and none has restarted since the caps were
-set (see the evening notes). The pre-move reading was 0.33 / 1.39 / 2.59.`i2` and `i3` used to carry the same `tank` profile set, which is what let the
+`monarch` is pinned to CPUs 2-3 (finding 5), so this is real work on cores the edge
+does not need — the load is high, but its blast radius is bounded to a pair of
+cores. The pre-move reading was 0.33 / 1.39 / 2.59.`i2` and `i3` used to carry the same `tank` profile set, which is what let the
 `genesis` move work unchanged — but they have diverged. On **i2** the `default` and
 `docker` profiles now point at a new **`main-pool`**: a 465 GiB btrfs pool on
 `/dev/sdc`, added 2026-10-01 beside the older zfs `tank` on `/dev/sdb`, with
@@ -229,10 +230,10 @@ here only so the two surveys can be read against each other.
    but seven of them are the edge and `monarch`. The survey-day 1.67 load on 4 vCPU
    was not saturation, and the evening spike is `monarch`'s media stack
    (qbittorrent and the *arr apps) — exactly the container `limits.cpu=2` exists to
-   fence, except that cap is not yet in force (see the evening notes). Unthrottled,
-   i1 absorbed it and the edge stayed up. **pm3 therefore does not need more
-   vCPUs:** its guest i1 has never been provisioned to its 4, and i2's load is 0.89
-   across 8. The cap fix below is what was actually wrong.
+   fence, and it **is** fenced: `monarch` is pinned to CPUs 2-3, so the load runs on
+   cores the edge does not need. **pm3 therefore does not need more vCPUs:** its
+   guest i1 has never been provisioned to its 4, and i2's load is 0.89 across 8.
+   The cap fix below is what was actually wrong.
 3. **i2 is the app host and the busiest by container size.** Six containers and
    8.9 GiB used, but 4.5 GiB free and load 0.89 on 8 vCPU. `capstone` alone is
    5.84 GiB of the 8.9 — 66 % of the host's usage in one container.
@@ -244,7 +245,13 @@ here only so the two surveys can be read against each other.
    (`proxy` alone was capped at the whole host), so a runaway there could starve
    everything else. They are now `proxy` 2, `monarch` 2 and 1 on each of the other
    six: the largest cap is **2**, so a runaway always leaves at least two vCPU for
-   the rest. Memory caps still oversubscribe every host — i1 19 GiB of caps on
+   the rest. Incus implements `limits.cpu` as a **cpuset pin**, not a quota, and
+   applies it live: each container gets exactly N host CPUs in
+   `cpuset.cpus.effective`, which a container cannot exceed even when idle cores
+   exist. Verified 2026-10-01: `proxy` 0-1, `monarch` 2-3, one CPU each on the other
+   six. As applied, `proxy` holds cores 0-1 and `monarch` 2-3 — the edge has a pair
+   of cores the media stack cannot touch (that is allocation order, not a promise).
+   Memory caps still oversubscribe every host — i1 19 GiB of caps on
    14.9 GiB, i2 14 GiB on 13.1 GiB, i3 6.5 GiB of running caps on 5.3 GiB — which
    is deliberate: a memory cap is a per-container runaway guard, not a reservation.
 6. **No running container's address can drift — and the check now watches.** Every
@@ -327,12 +334,11 @@ only moves left are *light* containers meeting idle CPU, not heavies meeting RAM
   rest, so no container can claim the whole host. **pm3 does not need more vCPUs**
   — i1 was never saturated (finding 2); revisit only if a real CPU constraint
   appears.
-- **i1's new CPU caps are pending a restart.** They are set in config but not in
-  force: `limits.cpu` applies at a container's next restart, and the containers were
-  restarted by the move *before* the caps were set. Verify with
-  `incus config get <c> limits.cpu` against `cpu.max` inside the container's cgroup
-  (`/sys/fs/cgroup/lxc.payload.<c>/cpu.max`) after any future restart of i1's
-  containers.
+- ~~i1's new CPU caps are pending a restart.~~ **Done 2026-10-01:** Incus applies
+  `limits.cpu` live and implements it as a cpuset, not a quota, so no restart was
+  needed and none is pending. Verify a cap with
+  `cat /sys/fs/cgroup/lxc.payload.<c>/cpuset.cpus.effective` (count the CPUs it
+  names) — **not** `cpu.max`, which stays `max` because there is no quota.
 - **The scheduled check has a single runner.** It runs on the Cerulean edge
   (`proxy`), which is itself an i1 container: if the edge is down, the check cannot
   report, and the `ContainerAddressCheckStale` rule is what catches that. The ssh
