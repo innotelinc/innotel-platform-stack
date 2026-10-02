@@ -183,8 +183,8 @@ estate as it is, not as it was.
   every five minutes and TCP-connects to the edge's doors; two attempts per endpoint, so
   one dropped packet on the WiFi link does not page. On failure it exits non-zero (the unit
   shows failed) and mails `EDGE_LIVENESS_MAIL_TO` through the estate's own mail server —
-  not through the estate's Alertmanager, which is on the edge's side and silent (see Open
-  items). It is the only checker that can still report the edge being gone, because it does
+  not through the estate's Alertmanager, which is loopback-only on `i3` and so not
+  something a watcher on `i1` can POST to. It is the only checker that can still report the edge being gone, because it does
   not run there.
 - **The scheduled checks now cover `i4`.** `check-estate-inventory.py` no longer lists
   it as an optional bench (every named host must answer), `check-container-addresses.py`
@@ -500,16 +500,22 @@ The deployed estate and this map agree again; what remains is sizing, not placem
   textfile is written to `/var/lib/node_exporter/textfile/edge-liveness.prom` on `i1`,
   which no collector reads today; a node-exporter pointed at that directory would make it
   scrapable.
-- **The estate's one Alertmanager delivers nowhere.** `signara` (i3) runs
-  `signara-alertmanager-1`, but its container environment has **empty** `SMTP_HOST`,
-  `SMTP_USER`, `SMTP_PASS` and `ALERT_EMAIL_TO` — the exact state its own config comment
-  warns about ("a receiver that looks configured, validates, and delivers nowhere",
-  `amtool check-config` says SUCCESS on it). Its port is also loopback-only
-  (`127.0.0.1:9093` on the `i3` host), so nothing off that host can POST to it either.
-  That is why the edge-dark watcher mails through the estate's mail server instead of
-  routing through Alertmanager: for the watcher's one job, Alertmanager is both
-  unreachable and silent. Filling those four values is what turns the estate's alerting
-  from "visible in the Prometheus UI" into "reaches a person".
+- **The estate's one Alertmanager delivers — resolved 2026-10-02.** `signara`
+  (i3) runs `signara-alertmanager-1`, which had **empty** `SMTP_HOST`, `SMTP_USER`,
+  `SMTP_PASS` and `ALERT_EMAIL_TO` — the exact state its own config comment warns
+  about ("a receiver that looks configured, validates, and delivers nowhere",
+  `amtool check-config` says SUCCESS on it). It now points at the estate's own
+  Stalwart (`192.168.1.15:25`, unauthenticated LAN sender) and mails
+  `admin@innotel.us`; verified by injecting an alert through the v2 API and
+  reading the 250 delivery in `/var/log/stalwart/stalwart.2026-10-02`.
+  Two failures had to be fixed first, neither visible to `check-config`: the
+  relay refused Alertmanager's default `EHLO localhost` (`550 Invalid EHLO
+  domain`) and then its self-signed certificate that names no address (`x509:
+  cannot validate certificate for 192.168.1.15`). Signara's receiver now takes an
+  `SMTP_HELLO` (a dotted EHLO name) and an `SMTP_TLS_INSECURE` (keep `STARTTLS`,
+  skip verification, off by default) — commit `d6d8ad1`. Its port stays
+  loopback-only (`127.0.0.1:9093` on `i3`), so the edge-dark watcher on `i1`
+  still mails through the mail server directly rather than POSTing to it.
 - **The move shifted disk the other way: i1 is back to 13 % and `i4` took the
   images.** The four rootfs copies added tens of GB to `i4`'s `dir` pool (stored
   uncompressed, so larger than the ZFS `USED` figures they came from); `i4`'s root
