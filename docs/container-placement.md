@@ -146,7 +146,7 @@ Values are the 2026-10-01 evening (21:00 EDT) survey, after the move.
 | Host | Address | vCPU | RAM | Load at survey | RAM available | Root disk | Pool |
 |---|---|---|---|---|---|---|---|
 | **i1** | `.51` | 4 | 14.9 GiB | 2.73 / 12.27 / 14.55 † | 3.9 GiB | 98 G (14 %) | `incus` (zfs) |
-| **i2** | `.52` | 8 | 13.1 GiB | 0.54 / 0.68 / 0.89 | 4.5 GiB | 23 G (45 %) | `tank` (zfs) |
+| **i2** | `.52` | 8 | 13.1 GiB | 0.54 / 0.68 / 0.89 | 4.5 GiB | 23 G (45 %) | `main-pool` (btrfs) |
 | **i3** | `.53` | 8 | 5.3 GiB | **0.18** / 0.30 / 0.23 | 3.0 GiB | 23 G (67 %) | `tank` (zfs) |
 
 † i1's load is `monarch`'s media stack, not the move: qbittorrent and the *arr
@@ -154,11 +154,13 @@ apps are the top CPU consumers, and the load stayed up after the copies finished
 `monarch` is pinned to CPUs 2-3 (finding 5), so this is real work on cores the edge
 does not need — the load is high, but its blast radius is bounded to a pair of
 cores. The pre-move reading was 0.33 / 1.39 / 2.59.`i2` and `i3` used to carry the same `tank` profile set, which is what let the
-`genesis` move work unchanged — but they have diverged. On **i2** the `default` and
-`docker` profiles now point at a new **`main-pool`**: a 465 GiB btrfs pool on
-`/dev/sdc`, added 2026-10-01 beside the older zfs `tank` on `/dev/sdb`, with
-`capstone` and `www` moved onto it. A new i2 container therefore lands on
-`main-pool`, not `tank`; `atlas`, `dev`, `genesis` and `rizzaura` are still on
+`genesis` move work unchanged — but they had diverged, and i2's pool split has since
+been reconciled. On **i2** the `default` and `docker` profiles point at **`main-pool`**:
+a 465 GiB btrfs pool on `/dev/sdc`, added 2026-10-01 beside the older zfs `tank` on
+`/dev/sdb`. `capstone` and `www` moved onto it first; the 2026-10-01 pass found
+`atlas`, `dev`, `genesis` and `rizzaura` still on `tank` — a new container would have
+landed on one pool and four sat on the other — and moved them across, so **i2 is one
+pool again** and `tank` (and its 300 GB `/dev/sdb`) was retired. `i3` is unchanged on
 `tank`. All three are `incus` container hosts, reached over SSH as `root` with the
 estate's incus root password; `i2` runs on pm3 (VM200), `i3` on pm4 (VM200), and i1
 is another guest on the same Proxmox host as i2 — which is why "more vCPUs on pm3"
@@ -270,9 +272,12 @@ here only so the two surveys can be read against each other.
    container's address is static in its own manager, so a recreation cannot renumber
    it; every declared `limits.cpu` is the cpuset actually pinned (finding 5); and the
    host and pool inventory is compared against reality — which is how `i4` and
-   `main-pool` stopped being invisible. Three checks run every 30 minutes on the
-   Cerulean edge and alert on a failure, on a run that could not reach a host, and on
-   a run that has stopped succeeding. All three report nothing wrong on 2026-10-01.
+   `main-pool` stopped being invisible, and how i2's two pools came to be reconciled to
+   one. Three checks run every 30 minutes on the Cerulean edge and alert on a failure,
+   on a run that could not reach a host, on a run that has stopped succeeding, and on a
+   check that has never reported at all (`EstateCheckAbsent` — a check whose textfile
+   never reached node-exporter is otherwise the exact shape of the 2026-10-01 silence).
+   All three report nothing wrong on 2026-10-01.
 7. **No host can absorb the two heavies.** `monarch` (3.76 GiB) fits neither i2
    (4.5 GiB free, but it is the app host) nor i3 (5.3 GiB total); `capstone`
    (5.84 GiB) fits nowhere but i2. So the heavies stay where they are, and any real

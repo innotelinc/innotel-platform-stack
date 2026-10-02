@@ -3,8 +3,8 @@
 
 The cases are the two things the 2026-10-01 pass found by eye and nothing would have
 told it about: a trusted host the inventory did not name (`i4`) and a storage pool that
-appeared on i2 (`main-pool`). Each case builds the hosts as data and asserts what the
-check said.
+appeared on i2 (`main-pool` — since consolidated onto, `tank` retired). Each case builds
+the hosts as data and asserts what the check said.
 
 The module under test has hyphens in its filename, so it is loaded by path.
 """
@@ -71,16 +71,18 @@ class InventoryCase(unittest.TestCase):
         self.assertIn("192.168.1.99", result.failures[0].message)
 
     def test_a_storage_pool_the_inventory_does_not_name_is_a_failure(self):
-        # The main-pool case: it appeared on a host that only declared `tank`.
-        result = inv.audit(views({"i2": inv.HostView("i2", remotes=ALL_KNOWN_REMOTES, pools=["tank", "main-pool", "scratch"])}))
+        # A pool appeared on a host beside the one it is allowed to have.
+        result = inv.audit(views({"i2": inv.HostView("i2", remotes=ALL_KNOWN_REMOTES, pools=["main-pool", "scratch"])}))
         self.assertFalse(result.ok)
         self.assertEqual([f.code for f in result.failures], ["unknown_pool"])
         self.assertIn("scratch", result.failures[0].message)
 
     def test_a_named_pool_that_is_gone_is_a_warning_not_a_failure(self):
-        result = inv.audit(views({"i2": inv.HostView("i2", remotes=ALL_KNOWN_REMOTES, pools=["tank"])}))
+        # i2's one pool is gone but the host is otherwise as the inventory describes.
+        result = inv.audit(views({"i2": inv.HostView("i2", remotes=ALL_KNOWN_REMOTES, pools=[])}))
         self.assertTrue(result.ok, [f.message for f in result.failures])
         self.assertEqual([f.code for f in result.warnings], ["missing_pool"])
+        self.assertIn("main-pool", result.warnings[0].message)
 
     def test_an_unreachable_bench_is_a_warning_and_hides_nothing(self):
         result = inv.audit(
