@@ -50,7 +50,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from estate_check import Audit, Finding, ssh, write_prom  # noqa: E402
+from estate_check import Audit, Finding, HostUnreadable, read_host, ssh, write_prom  # noqa: E402
 
 CHECK = "estate_inventory"
 
@@ -159,9 +159,9 @@ def gather(hosts: dict[str, str], optional: set[str], runner=ssh) -> list[HostVi
     views: list[HostView] = []
     for name, target in hosts.items():
         try:
-            remotes_csv = runner(target, "incus remote list --format csv")
-            pools_csv = runner(target, "incus storage list --format csv -c n")
-        except Exception:
+            remotes_csv = read_host(name, target, "incus remote list --format csv", runner)
+            pools_csv = read_host(name, target, "incus storage list --format csv -c n", runner)
+        except HostUnreadable:
             if name in optional:
                 views.append(HostView(name=name, reachable=False))
                 continue

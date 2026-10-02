@@ -46,7 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from estate_check import Audit, Finding, count_cpus, ssh, write_prom  # noqa: E402
+from estate_check import Audit, Finding, count_cpus, read_host, ssh, write_prom  # noqa: E402
 
 CHECK = "container_limits"
 
@@ -131,13 +131,15 @@ def gather(hosts: dict[str, str], runner=ssh) -> tuple[dict[str, list[Container]
     observed: dict[str, list[Container]] = {}
     host_cpus: dict[str, int] = {}
     for host, target in hosts.items():
-        host_cpus[host] = int(runner(target, "nproc").strip() or 0)
-        listing = json.loads(runner(target, "incus list --format json") or "[]")
-        cpuset = runner(
+        host_cpus[host] = int(read_host(host, target, "nproc", runner).strip() or 0)
+        listing = json.loads(read_host(host, target, "incus list --format json", runner) or "[]")
+        cpuset = read_host(
+            host,
             target,
             "for c in $(incus list --format csv -c n); do "
             'printf "%s %s\\n" "$c" "$(cat /sys/fs/cgroup/lxc.payload.$c/cpuset.cpus.effective 2>/dev/null)"; '
             "done",
+            runner,
         )
         effective: dict[str, str] = {}
         for line in cpuset.splitlines():

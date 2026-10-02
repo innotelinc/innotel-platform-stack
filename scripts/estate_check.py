@@ -88,6 +88,49 @@ def ssh(host: str, command: str, timeout: int = 25) -> str:
     ).stdout
 
 
+class HostUnreadable(RuntimeError):
+    """A host a check reads could not be reached over ssh — and which one, and why.
+
+    The checks run on the Cerulean edge and reach every host with **key-only** ssh. A
+    host is readable only when *both* host-side things are true: the check's public key
+    is in that host's `authorized_keys`, and the host is named in the edge's
+    `/root/.ssh/config`. When `i4` joined the estate on 2026-10-02 it had neither, and
+    the only symptom was a check that could not run — which reads as an estate outage
+    rather than as a missing key, and took a hand-run to tell apart from a powered-off
+    host. Carrying the host name and the two files here is what turns that into a
+    one-line fix: the exit-2 alert (`EstateCheckCouldNotRun`) already fires, and this is
+    what it says when somebody looks.
+
+    Neither file is in this repo, so the docstring is the record of what a host needs —
+    `docs/container-placement.md` §*The i4 host* keeps the same list.
+    """
+
+    def __init__(self, host: str, target: str, detail: str) -> None:
+        super().__init__(detail)
+        self.host = host
+        self.target = target
+        self.detail = detail
+
+    def __str__(self) -> str:
+        return (
+            f"{self.host} ({self.target}) could not be read: {self.detail.strip() or 'ssh failed'}\n"
+            "  key-only ssh needs the check key in that host's authorized_keys AND the host\n"
+            "  named in the edge's /root/.ssh/config (docs/container-placement.md)"
+        )
+
+
+def read_host(host: str, target: str, command: str, runner=ssh) -> str:
+    """Run `command` on `target`, naming the host if ssh fails.
+
+    Every check reads its hosts through here so an unreachable host is reported as
+    *which* host, not as a bare ssh exit code. `runner` is injectable for the tests.
+    """
+    try:
+        return runner(target, command)
+    except Exception as error:  # noqa: BLE001 — any ssh failure is the same finding here
+        raise HostUnreadable(host, target, str(error)) from error
+
+
 # --------------------------------------------------------------------------------------
 # The signal — a textfile the alert rules read
 # --------------------------------------------------------------------------------------

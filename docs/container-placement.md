@@ -116,15 +116,32 @@ estate as it is, not as it was.
   `proxy`/`terminal`, systemd-networkd for `vault`, ifupdown for `vpn`. The address is
   the container's; the next hop is the host's. That is why the address survives the
   move but the route does not.
-- **The cost of that, stated plainly.** `i4` is a 2-vCPU box whose uplink is WiFi, so
-  the edge — every address the estate dials, plus DNS on `:53` — now sits behind a
-  wireless hop. Measured from the LAN, `i4`'s containers answer in hundreds of
-  milliseconds with real jitter. This is the trade the move made; if it proves too
-  noisy, the fix is a wired NIC on `i4` (or moving the edge back), not wider timeouts.
-- **The bench container `lantest` was stopped.** Its purpose — proving `routed`
-  networking works — is now served by four production containers on the same host, and
-  a running container the address table does not carry is exactly the `unexpected`
-  warning that would otherwise fire on every run. It is stopped, not deleted.
+- **The cost of that, stated plainly — and mostly a setting, not the hop.** `i4` is a
+  2-vCPU box whose uplink is WiFi, so the edge — every address the estate dials, plus
+  DNS on `:53` — sits behind a wireless hop. The first measurement looked bad: an
+  *idle* container answered in 100–900 ms while the busy edge was fine. The cause was
+  WiFi **power save**, not the hop — the radio held frames until the next DTIM beacon
+  (~312 ms) whenever its own traffic did not keep it awake. With it off
+  (`systemd/wifi-powersave-off.service`, deployed 2026-10-02) every `i4` container
+  answers in **~11–14 ms** with ~3 ms jitter, and DNS on `:53` in ~30 ms, the same as
+  the router. A wired NIC is therefore not needed for latency; see §The i4 host.
+- **The bench container `lantest` was retired.** Its purpose — proving `routed`
+  networking works — is served by four production containers on the same host, and a
+  container the address table does not carry is exactly the `unexpected` warning that
+  would otherwise fire on every run. It was removed, not merely stopped: a stopped one
+  still has to be reasoned about on every run, and the routed pattern it existed to
+  prove is now carried by the four containers the estate dials.
+- **Two retired, stopped containers were removed: `acme` (i1 `.49`) and `patchmon`
+  (i3 `.108`).** Both were `STOPPED` with `boot.autostart=false`, so nothing dialled
+  them and there was no address to be wrong. With no purpose left they were taken off
+  the record — out of `check-container-addresses.py` and out of this page — rather than
+  left for every run to explain. `olympus-archived-20260930` (i3) stays as the one
+  archived container.
+- **`i4`'s disk was reclaimed.** The four copies are stored uncompressed in a `dir`
+  pool, so they took tens of GB and `i4`'s root reached 51 %. A `docker image prune` +
+  `docker builder prune` on the edge freed **6.8 GB** of dangling images and build
+  cache, taking it to **45 %**. The images still reclaimable are tagged rollback
+  versions (a previous `npm-edge`, `omniroute`), left in place on purpose.
 - **The scheduled checks now cover `i4`.** `check-estate-inventory.py` no longer lists
   it as an optional bench (every named host must answer), `check-container-addresses.py`
   carries its four addresses, and `check-container-limits.py` reads its caps.
@@ -224,11 +241,12 @@ figures they came from — the ZFS number is compressed, the `dir` one is not.
 `i4` is in `HOSTS`/`EXPECTED` in `scripts/check-container-addresses.py` and in
 `HOSTS` in `check-container-limits.py`, and it is a **required** host in
 `check-estate-inventory.py` (the `OPTIONAL` set is empty now). Its one bench
-container, `lantest`, is stopped — the routed pattern is carried by the four
-production containers, and a running container the address table does not name would
-warn on every scheduled run. If the WiFi hop proves too noisy for the edge, the fix
-is a wired NIC on `i4` or moving the edge back to `i1`; the move added a place to put
-the edge, not CPU or RAM to run it on.
+container, `lantest`, was retired on 2026-10-02 — the routed pattern is carried by the
+four production containers, and a container the address table does not name would warn
+on every scheduled run. The WiFi hop is **not** the latency problem it first looked
+like: with power save off it answers in ~11–14 ms (see the 2026-10-02 change log), so a
+wired NIC would be for throughput and reliability, not for latency. The move added a
+place to put the edge, not CPU or RAM to run it on.
 
 That password is **not written down here** — golden rule 4 (no credential in any
 repo file) applies to documentation as much as to code, and a literal in a doc
@@ -244,7 +262,6 @@ Memory is the container's live usage and the cap set on it (`limits.memory` / `l
 
 | Host | Container | IP | Role | Mem (cap) | CPU cap |
 |---|---|---|---|---|---|
-| i1 | `acme` | `.49` | ACME / certificate issue — **STOPPED** | — (1 GiB) | 1 |
 | i1 | `mail` | `.15` | mail (SMTP/IMAP) | 316 MiB (1 GiB) | 1 |
 | i1 | `monarch` | `.56` | media (Jellyfin etc.) | 3.76 GiB (6 GiB) | 2 |
 | i1 | `ontrak` | `.21` | Ontrak family stack + Ontrak Sync | 671 MiB (2 GiB) | 1 |
@@ -258,7 +275,6 @@ Memory is the container's live usage and the cap set on it (`limits.memory` / `l
 | i3 | `magnate` | `.57` | Magnate | 194 MiB (1 GiB) | — |
 | i3 | `olympus-archived-20260930` | — | archived Olympus — **STOPPED** | — (1 GiB) | — |
 | i3 | `onyx` | `.60` | Onyx (RAG) | 274 MiB (1 GiB) | — |
-| i3 | `patchmon` | `.108` | patchmon — **STOPPED** | — (2 GiB) | 2 |
 | i3 | `pi` | `.70` | pi | 176 MiB (1536 MiB) | 4 |
 | i3 | `signara` | `.44` | Signara | 562 MiB (1 GiB) | — |
 | i3 | `subscribe` | `.58` | Subscribe | 88 MiB (1 GiB) | — |
@@ -266,7 +282,6 @@ Memory is the container's live usage and the cap set on it (`limits.memory` / `l
 | i4 | `terminal` | `.22` | web terminal (termix, guacd, zapit) | 445 MiB (1024 MiB) | 1 |
 | i4 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 916 MiB (2048 MiB) | 1 |
 | i4 | `vpn` | `.43` | WireGuard (`10.7.0.2` wg0) | 319 MiB (1024 MiB) | 1 |
-| i4 | `lantest` | `.214` | routed-networking bench — **STOPPED** | — | — |
 
 `atheniq`, `cloud`, `voice`, `docs`, `ansible`, `slack` and `olympus`/`olympus-gw`,
 which the 2026-09-27 survey listed, are **no longer present on any host** — those
@@ -276,16 +291,15 @@ here only so the two surveys can be read against each other.
 ## Findings
 
 1. **Memory pressure is spent, and i1 is roomy again.** i1 has gone from eight
-   containers and **3.9 GiB** available back to four and **8.1 GiB** after the
+   containers and **3.9 GiB** available back to three and **8.1 GiB** after the
    2026-10-02 move sent the edge and its three satellites to `i4`; i2 has **4.5
    GiB**, i3 **3.0 GiB**, and the new host `i4` **3.2 GiB**. The `.46` migration
    (which retired `atheniq`, `cloud`, `voice`, `docs`, `ansible`, `slack`) is what
    freed i2; the 2026-10-01 rebalance redrew i1, and the 2026-10-02 move redrew it
    again. No host is tight; `i4` is the least roomy, which is what a 2-vCPU box
    carrying the edge and its satellites looks like.
-2. **i1 no longer carries the edge, and it was never CPU-bound.** Four containers
-   now (`monarch`, `ontrak`, `mail` and the stopped `acme`), of which the busy one is
-   `monarch`. The survey-day 1.67 load on 4 vCPU was not saturation, and the evening
+2. **i1 no longer carries the edge, and it was never CPU-bound.** Three containers
+   now (`monarch`, `ontrak`, `mail`), of which the busy one is `monarch`. The survey-day 1.67 load on 4 vCPU was not saturation, and the evening
    spike is `monarch`'s media stack (qbittorrent and the *arr apps) — exactly the
    container `limits.cpu=2` exists to fence, and it **is** fenced: `monarch` is
    pinned to CPUs 0-1, so the load runs on cores the other three do not need. **pm3
@@ -297,19 +311,19 @@ here only so the two surveys can be read against each other.
    8.9 GiB used, but 4.5 GiB free and load 0.89 on 8 vCPU. `capstone` alone is
    5.84 GiB of the 8.9 — 66 % of the host's usage in one container.
 4. **i3 is CPU-idle and the smallest.** Load 0.18 on 8 vCPU, and after giving the
-   edge back it carries four running containers on 5.3 GiB (3.0 GiB available). It
+   edge back it carries six running containers on 5.3 GiB (3.0 GiB available). It
    has the CPU the others lack and the RAM the others have to spare.
 5. **i1's CPU caps were the real defect, and they are fixed; the memory caps still
    oversubscribe on purpose.** Before the 2026-10-01 pass i1's CPU caps summed to
    **24 vCPU on a 4-vCPU host** (`proxy` alone was capped at the whole host), so a
    runaway there could starve everything else. They were set so no container can
-   claim the whole host (the largest cap is **2**); after the 2026-10-02 move i1's
-   four containers are capped `monarch` 2, `ontrak` 1, `mail` 1 and `acme` 1. Incus
+   claim the whole host (the largest cap is **2**); after the 2026-10-02 retirements
+   i1's three containers are capped `monarch` 2, `ontrak` 1 and `mail` 1. Incus
    implements `limits.cpu` as a **cpuset pin**, not a quota, and applies it live:
    each container gets exactly N host CPUs in `cpuset.cpus.effective`, which a
    container cannot exceed even when idle cores exist. Verified 2026-10-02: i1
-   `monarch` 0-1, `ontrak` 2, `mail` 3 (`acme` is stopped). Memory caps still
-   oversubscribe every host — i1 10 GiB of caps on 14.9 GiB, i2 14 GiB on 13.1 GiB,
+   `monarch` 0-1, `ontrak` 2, `mail` 3. Memory caps still oversubscribe every host —
+   i1 9 GiB of caps on 14.9 GiB, i2 14 GiB on 13.1 GiB,
    i3 6.5 GiB of running caps on 5.3 GiB — which is deliberate: a memory cap is a
    per-container runaway guard, not a reservation.
 6. **The invariants this page describes are checked, not asserted.** Every
@@ -337,10 +351,10 @@ The deployed estate and this map agree again; what remains is sizing, not placem
 
 | Host | Belongs there | Reasoning |
 |---|---|---|
-| **i1** (4 vCPU / 14.9 GiB) | `monarch` `.56`, `ontrak` `.21`, `mail` `.15`, stopped `acme` `.49` | `ontrak` is here because the family stack and Ontrak Sync share the box. `monarch` is here for its disk (161 G) and is pinned on purpose. `mail` and the stopped `acme` are the remaining light edge services. Note the page previously called `proxy` **topology-bound** to i1 — it owns `:80/:443/:53` and every service dials it by LAN address. The 2026-10-02 move overrode that reasoning by operator choice; the address still travels, the topology argument does not. |
+| **i1** (4 vCPU / 14.9 GiB) | `monarch` `.56`, `ontrak` `.21`, `mail` `.15` | `ontrak` is here because the family stack and Ontrak Sync share the box. `monarch` is here for its disk (161 G) and is pinned on purpose. `mail` is the remaining light edge service. Note the page previously called `proxy` **topology-bound** to i1 — it owns `:80/:443/:53` and every service dials it by LAN address. The 2026-10-02 move overrode that reasoning by operator choice; the address still travels, the topology argument does not. |
 | **i2** (apps, 8 vCPU / 13.1 GiB) | `capstone`, `dev`, `www`, `atlas`, `genesis`, `rizzaura` | The heavy, RAM-hungry set. `dev` (`.74`) is where the projects run — every project's docker stack — and is the target of the standalone-project migration. `genesis` is small and could sit on i3 by this table's logic; it is on i2 by operator choice (2026-10-01). |
-| **i3** (light, 8 vCPU / 5.3 GiB) | `distro`, `magnate`, `onyx`, `subscribe`, `signara`, `pi`, stopped `patchmon`/`olympus-archive` | Small, self-contained services. Has CPU to spare; only RAM limits it. |
-| **i4** (edge, 2 vCPU / ~7.7 GiB) | `proxy` `.71`, `terminal` `.22`, `vault` `.73`, `vpn` `.43`, stopped `lantest` | The edge and its satellites, moved here on 2026-10-02 at the operator's request. `proxy` is network ingress and identity and the other three are the services it fronts; all four are dialled by LAN address. This is the smallest and least-connected host (2 vCPU, WiFi uplink), so the placement is a deliberate choice rather than a fit — if the WiFi hop costs more than it buys, the answer is a wired NIC on `i4` or moving the edge back to `i1` (§The i4 host). |
+| **i3** (light, 8 vCPU / 5.3 GiB) | `distro`, `magnate`, `onyx`, `subscribe`, `signara`, `pi`, stopped `olympus-archive` | Small, self-contained services. Has CPU to spare; only RAM limits it. |
+| **i4** (edge, 2 vCPU / ~7.7 GiB) | `proxy` `.71`, `terminal` `.22`, `vault` `.73`, `vpn` `.43` | The edge and its satellites, moved here on 2026-10-02 at the operator's request. `proxy` is network ingress and identity and the other three are the services it fronts; all four are dialled by LAN address. This is the smallest and least-connected host (2 vCPU, WiFi uplink), so the placement is a deliberate choice rather than a fit — if the WiFi hop costs more than it buys, the answer is a wired NIC on `i4` or moving the edge back to `i1` (§The i4 host). |
 
 ### Actions (applied 2026-09-27)
 
@@ -391,7 +405,8 @@ The deployed estate and this map agree again; what remains is sizing, not placem
 - ~~The edge services are spread across hosts.~~ **Done 2026-10-01 (evening), then
   redrawn 2026-10-02:** the edge and its satellites (`proxy`, `terminal`, `vault`,
   `vpn`) are on `i4`, each keeping its address because the address is pinned inside
-  the container; `acme` and `mail` stayed on i1. The target map and the estate agree.
+  the container; `mail` stayed on i1 (`acme` has since been retired). The target map
+  and the estate agree.
 - ~~i1's CPU caps sum to twice the host.~~ **Done 2026-10-01 (evening):** the caps
   were 24 vCPU on a 4-vCPU host and were set so no container can claim the whole
   host (largest cap 2). After the 2026-10-02 move i1's four containers are capped
@@ -417,5 +432,6 @@ The deployed estate and this map agree again; what remains is sizing, not placem
 - **The move shifted disk the other way: i1 is back to 13 % and `i4` took the
   images.** The four rootfs copies added tens of GB to `i4`'s `dir` pool (stored
   uncompressed, so larger than the ZFS `USED` figures they came from); `i4`'s root
-  is at **51 %**. `i1` fell back to 13 % once its four sources were deleted. `dev`
-  (`.74`) growth on i2 remains the one to watch.
+  peaked at **51 %** and is **45 %** after a `docker` prune freed 6.8 GB. `i1` fell
+  back to 13 % once its four sources were deleted. `dev` (`.74`) growth on i2 remains
+  the one to watch.
