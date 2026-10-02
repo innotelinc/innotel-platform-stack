@@ -5,16 +5,19 @@
 # `check` label naming the check — so one rule set covers all of them and still says
 # which one fired. The contract lives in `scripts/estate_check.py`; the checks are
 # `scripts/check-container-addresses.py` (`container_address`),
-# `check-container-limits.py` (`container_limits`) and `check-estate-inventory.py`
-# (`estate_inventory`), run by `systemd/estate-checks.{service,timer}` on the
-# Cerulean edge, which writes each into node-exporter's textfile directory.
+# `check-container-limits.py` (`container_limits`), `check-estate-inventory.py`
+# (`estate_inventory`) and `check-host-latency.py` (`host_latency`), run by
+# `systemd/estate-checks.{service,timer}` on the Cerulean edge, which writes each into
+# node-exporter's textfile directory.
 #
 # Why these are worth paging on: each check guards something the estate is reached by.
 # An address is an interface (every A record and published port names one), a CPU cap
-# is a fence that a declared-but-unenforced limit only pretends to be, and the host and
-# pool inventory is what stops a fourth host or a stray pool arriving unrecorded. The
-# 2026-10-01 outage — `ontrak` renumbered `.21` → `.20` — stayed invisible until a
-# person noticed a blank dashboard, which is the case all of this exists to close.
+# is a fence that a declared-but-unenforced limit only pretends to be, the host and pool
+# inventory is what stops a fourth host or a stray pool arriving unrecorded, and latency
+# is the number that says the `i4` WiFi uplink's power save has come back rather than
+# leaving the estate merely feeling slow. The 2026-10-01 outage — `ontrak` renumbered
+# `.21` → `.20` — stayed invisible until a person noticed a blank dashboard, which is the
+# case all of this exists to close.
 #
 # Every rule but one keys on a series, so it can only speak about a check whose
 # textfile reached node-exporter. `EstateCheckAbsent` is the exception: it fires when a
@@ -48,6 +51,7 @@ groups:
           label_replace(absent(innotel_estate_check_last_run_timestamp{check="container_address"}), "check", "container_address", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="container_limits"}), "check", "container_limits", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="estate_inventory"}), "check", "estate_inventory", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="host_latency"}), "check", "host_latency", "check", ".*")
         for: 30m
         labels:
           severity: critical
@@ -118,4 +122,5 @@ groups:
           description: >-
             {{ $value }} warning(s) in the `{{ $labels.check }}` check — drift that is not
             yet a failure (a container still on DHCP, a cap above the host, a pool that
-            has gone). Worth a look before it becomes one.
+            has gone, a host answering in hundreds of milliseconds). Worth a look before
+            it becomes one. For `host_latency`, see systemd/wifi-powersave-off.service.

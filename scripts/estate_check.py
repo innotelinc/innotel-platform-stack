@@ -101,8 +101,11 @@ class HostUnreadable(RuntimeError):
     one-line fix: the exit-2 alert (`EstateCheckCouldNotRun`) already fires, and this is
     what it says when somebody looks.
 
-    Neither file is in this repo, so the docstring is the record of what a host needs —
-    `docs/container-placement.md` §*The i4 host* keeps the same list.
+    Neither file is in this repo, so the two things that make key-only ssh work are
+    written down and made reproducible: `scripts/trust-estate-hosts.py` puts this key in
+    every estate host's `authorized_keys` and names every host in the edge's
+    `/root/.ssh/config`, and its `--check` mode answers whether the trust is still in
+    place. `docs/container-placement.md` §*The i4 host* keeps the same list.
     """
 
     def __init__(self, host: str, target: str, detail: str) -> None:
@@ -155,8 +158,15 @@ def prometheus_text(
     ran_ok: bool,
     now: float,
     prior_success: float | None = None,
+    extra: str | None = None,
 ) -> str:
-    """The textfile body for one check's run. Pure, so the contract is the thing under test."""
+    """The textfile body for one check's run. Pure, so the contract is the thing under test.
+
+    `extra` carries a check's own series on top of the shared contract — `check-host-latency`
+    publishes the round-trip it measured, so the number is diagnosable and not only the
+    verdict. It is appended verbatim, so a check that publishes one must still write its
+    `last_status`/`failures`/`warnings` here for every rule in `estate-checks.yml` to key on.
+    """
     ok = bool(ran_ok and result is not None and result.ok)
     failures = len(result.failures) if result is not None else None
     warnings = len(result.warnings) if result is not None else None
@@ -186,16 +196,26 @@ def prometheus_text(
             f"# TYPE {METRIC}_last_success_timestamp gauge",
             f"{METRIC}_last_success_timestamp{selector} {success:.0f}",
         ]
-    return "\n".join(lines) + "\n"
+    body = "\n".join(lines) + "\n"
+    if extra:
+        body += extra.rstrip("\n") + "\n"
+    return body
 
 
-def write_prom(path: str, check: str, result: Audit | None, ran_ok: bool, now: float | None = None) -> None:
+def write_prom(
+    path: str,
+    check: str,
+    result: Audit | None,
+    ran_ok: bool,
+    now: float | None = None,
+    extra: str | None = None,
+) -> None:
     """Write the textfile atomically, so a scrape never reads a half-written file."""
     now = time.time() if now is None else now
     # The key carries the label selector, because that is what the metric line reads:
     # `name{check="…"} value`. Matching on the bare name would miss every series.
     prior = _prior_metric(path, f'{METRIC}_last_success_timestamp{{check="{check}"}}')
-    body = prometheus_text(check, result, ran_ok, now, prior_success=prior)
+    body = prometheus_text(check, result, ran_ok, now, prior_success=prior, extra=extra)
     directory = os.path.dirname(path) or "."
     handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False, prefix=".estate-check-")
     try:

@@ -28,7 +28,12 @@ RULES = ROOT / "extensions/monitoring/prometheus/rules/estate-checks.yml"
 sys.path.insert(0, str(SCRIPTS))
 
 #: The scripts that publish the shared metric family, each exporting `CHECK`.
-CHECK_SCRIPTS = ["check-container-addresses", "check-container-limits", "check-estate-inventory"]
+CHECK_SCRIPTS = [
+    "check-container-addresses",
+    "check-container-limits",
+    "check-estate-inventory",
+    "check-host-latency",
+]
 
 
 def _load(name: str):

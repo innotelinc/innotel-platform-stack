@@ -24,6 +24,8 @@ tests:
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="estate_inventory"}'
         values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="host_latency"}'
+        values: '0x60'
     alert_rule_test:
       - eval_time: 35m
         alertname: EstateCheckAbsent
@@ -38,6 +40,8 @@ tests:
       - series: 'innotel_estate_check_last_run_timestamp{check="container_address"}'
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="container_limits"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="host_latency"}'
         values: '0x60'
     alert_rule_test:
       - eval_time: 35m
@@ -91,6 +95,15 @@ tests:
               description: >-
                 No `innotel_estate_check_last_run_timestamp` series exists for the
                 `estate_inventory` check — it has not run, or its textfile is not in the
+                directory node-exporter reads. Every other rule here keys on a series
+                that exists, so this is the one that catches the check itself being
+                absent. Check the timer and `TEXTFILE_DIR` on the edge.
+          - exp_labels: {severity: critical, team: platform, check: host_latency}
+            exp_annotations:
+              summary: 'The host_latency check has never reported'
+              description: >-
+                No `innotel_estate_check_last_run_timestamp` series exists for the
+                `host_latency` check — it has not run, or its textfile is not in the
                 directory node-exporter reads. Every other rule here keys on a series
                 that exists, so this is the one that catches the check itself being
                 absent. Check the timer and `TEXTFILE_DIR` on the edge.
