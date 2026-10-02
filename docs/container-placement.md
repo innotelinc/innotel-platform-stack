@@ -97,7 +97,9 @@ estate as it is, not as it was.
   the latency half is the `i4` WiFi power-save regression, measured rather than felt).
   They share one metric family — `innotel_estate_check`, one series per check via a
   `check` label — so `prometheus/rules/estate-checks.yml` alerts on all four
-  (`EstateCheckFailing`, `...CouldNotRun`, `...Stale`, `...NotPinned`). The edge reaches
+  (`EstateCheckFailing`, `...CouldNotRun`, `...Stale`, `...NotPinned`), and the
+  provisioned `grafana/dashboards/estate-checks.json` shows them (a green stat, a
+  per-check table, and the per-address latency chart). The edge reaches
   the hosts with a dedicated ssh key, `/root/.ssh/container-address`, authorized
   `from="192.168.1.71"` only, so the scheduled run needs no password on disk. A check
   that cannot reach a host publishes status 0 rather than nothing, because "no data"
