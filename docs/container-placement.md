@@ -84,17 +84,19 @@ estate as it is, not as it was.
   `limits.cpu` count (`proxy` `0-1`, `monarch` `2-3`, one CPU each on the rest).
   (The 2026-09-27 note below that `limits.cpu` waits for a restart is wrong, and is
   corrected here.)
-- **The address invariant is now scheduled and alerting.**
-  `systemd/container-address-check.{service,timer}` runs
-  `scripts/check-container-addresses.py` every 30 minutes *on the Cerulean edge*
-  and writes `container-address.prom` into node-exporter's textfile directory;
-  `extensions/monitoring/prometheus/rules/container-address.yml` alerts on it
-  (`ContainerAddressMoved`, `ContainerAddressCheckCouldNotRun`,
-  `ContainerAddressCheckStale`, `ContainerAddressNotPinned`). The edge reaches the
-  three hosts with a dedicated ssh key, `/root/.ssh/container-address`, authorized
-  `from="192.168.1.71"` only, so the scheduled run needs no password on disk. A
-  check that cannot reach a host publishes status 0 rather than nothing, because
-  "no data" is how the outage stayed invisible. Verified running 2026-10-01.
+- **The estate's host invariants are scheduled and alerting.**
+  `systemd/estate-checks.{service,timer}` runs three checks every 30 minutes *on the
+  Cerulean edge* and writes each one's textfile into node-exporter's directory:
+  `check-container-addresses.py` (every address an A record names),
+  `check-container-limits.py` (a declared `limits.cpu` is the cpuset actually pinned),
+  and `check-estate-inventory.py` (no host or storage pool this page does not know).
+  They share one metric family — `innotel_estate_check`, one series per check via a
+  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all three
+  (`EstateCheckFailing`, `...CouldNotRun`, `...Stale`, `...NotPinned`). The edge reaches
+  the hosts with a dedicated ssh key, `/root/.ssh/container-address`, authorized
+  `from="192.168.1.71"` only, so the scheduled run needs no password on disk. A check
+  that cannot reach a host publishes status 0 rather than nothing, because "no data"
+  is how the outage stayed invisible. Verified running 2026-10-01.
 
 ## Changes applied 2026-09-27
 
@@ -176,6 +178,16 @@ it is dialled by a name. **Deliberately absent from `EXPECTED` in
 `scripts/check-container-addresses.py`** — the check covers the estate, and a bench
 container is expected to be recreated at will.
 
+**Decision (2026-10-01): it stays, with that purpose.** It carries nothing the estate
+dials and no check keys on anything it runs, so retiring it would buy back a 2-vCPU /
+7 GiB box nothing is short of; keeping it keeps the one place `lanrouted` networking
+can be tried without touching a host that serves addresses. Its cost is the trust it
+holds — a root ssh and an `incus` remote on the estate hosts — so it stays in the
+inventory check (`estate_inventory`) as a known, *optional* host (its absence is a
+warning, not an outage). If `lanrouted` work ends, retire it properly: remove its
+remote from the three estate hosts and power it down, rather than leave trusted,
+idle hardware on the network.
+
 That password is **not written down here** — golden rule 4 (no credential in any
 repo file) applies to documentation as much as to code, and a literal in a doc
 ships in every clone. A provisioning script takes it from the environment or from
@@ -254,12 +266,13 @@ here only so the two surveys can be read against each other.
    Memory caps still oversubscribe every host — i1 19 GiB of caps on
    14.9 GiB, i2 14 GiB on 13.1 GiB, i3 6.5 GiB of running caps on 5.3 GiB — which
    is deliberate: a memory cap is a per-container runaway guard, not a reservation.
-6. **No running container's address can drift — and the check now watches.** Every
-   container is static in its own manager, so a recreation cannot renumber it, and
-   the scheduled check on the Cerulean edge re-runs every 30 minutes and alerts on
-   drift, on a run that could not reach a host, and on a run that has stopped
-   succeeding. It reports 0 failures and 0 warnings on 2026-10-01 and will name the
-   first container that regresses.
+6. **The invariants this page describes are checked, not asserted.** Every
+   container's address is static in its own manager, so a recreation cannot renumber
+   it; every declared `limits.cpu` is the cpuset actually pinned (finding 5); and the
+   host and pool inventory is compared against reality — which is how `i4` and
+   `main-pool` stopped being invisible. Three checks run every 30 minutes on the
+   Cerulean edge and alert on a failure, on a run that could not reach a host, and on
+   a run that has stopped succeeding. All three report nothing wrong on 2026-10-01.
 7. **No host can absorb the two heavies.** `monarch` (3.76 GiB) fits neither i2
    (4.5 GiB free, but it is the app host) nor i3 (5.3 GiB total); `capstone`
    (5.84 GiB) fits nowhere but i2. So the heavies stay where they are, and any real
@@ -339,11 +352,15 @@ only moves left are *light* containers meeting idle CPU, not heavies meeting RAM
   needed and none is pending. Verify a cap with
   `cat /sys/fs/cgroup/lxc.payload.<c>/cpuset.cpus.effective` (count the CPUs it
   names) — **not** `cpu.max`, which stays `max` because there is no quota.
-- **The scheduled check has a single runner.** It runs on the Cerulean edge
-  (`proxy`), which is itself an i1 container: if the edge is down, the check cannot
-  report, and the `ContainerAddressCheckStale` rule is what catches that. The ssh
-  key it uses (`/root/.ssh/container-address`) is authorized `from="192.168.1.71"`
-  only and lives on the edge; rotate it with the host inventory if the edge moves.
+- **The scheduled checks have a single runner.** They run on the Cerulean edge
+  (`proxy`), which is itself an i1 container: if the edge cannot read a host the
+  `EstateCheckCouldNotRun` rule fires, and if a check stops running entirely
+  `EstateCheckStale` does. (If the whole edge is down, nothing reports at all — that
+  is a different alert, and it is the honest limit of a check that runs on a host it
+  also monitors.) The ssh key they use (`/root/.ssh/container-address`) is authorized
+  `from="192.168.1.71"` only and lives on the edge. The scripts and units live at
+  `/opt/innotel/estate-checks/` and `/etc/systemd/system/estate-checks.*` there; the
+  platform-stack copies are the source.
 - **i1's root disk grew to 14 %** after the edge moved back — the moved rootfs
   images added several GB (the `vpn` image alone is 3.35 GB). Comfortable on a 98 G
   disk, but it is the number that moved, and `dev` (`.74`) growth on i2 remains the
