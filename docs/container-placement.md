@@ -86,7 +86,7 @@ estate as it is, not as it was.
   (The 2026-09-27 note below that `limits.cpu` waits for a restart is wrong, and is
   corrected here.)
 - **The estate's host invariants are scheduled and alerting.**
-  `systemd/estate-checks.{service,timer}` runs five checks every 30 minutes *on the
+  `systemd/estate-checks.{service,timer}` runs six checks every 30 minutes *on the
   Cerulean edge* and writes each one's textfile into node-exporter's directory:
   `check-container-addresses.py` (every address an A record names),
   `check-container-limits.py` (a declared `limits.cpu` is the cpuset actually pinned),
@@ -95,12 +95,15 @@ estate as it is, not as it was.
   container in the address table — answers at all, and answers in milliseconds rather
   than hundreds; the reachability half closes the outage one layer below a renumber, and
   the latency half is the `i4` WiFi power-save regression, measured rather than felt), and
-  `check-host-disk.py` (each host's root filesystem has room — 80 % warns, 90 % fails).
+  `check-host-disk.py` (each host's root filesystem has room — 80 % warns, 90 % fails),
+  and `check-alert-delivery.py` (the estate's one Alertmanager actually *delivers*: it
+  injects a short-lived probe alert through the receiver's own v2 API and reads the mail
+  server for the delivery — the one thing `amtool check-config` cannot tell you).
   They share one metric family — `innotel_estate_check`, one series per check via a
-  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all five
+  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all six
   (`EstateCheckFailing`, `...CouldNotRun`, `...Stale`, `...NotPinned`), and the
   provisioned `grafana/dashboards/estate-checks.json` shows them (a green stat, a
-  per-check table, and the per-address latency chart). The edge reaches
+  per-check table, whether the receiver delivered, and the per-address latency chart). The edge reaches
   the hosts with a dedicated ssh key, `/root/.ssh/container-address`, authorized
   `from="192.168.1.71"` only, so the scheduled run needs no password on disk. A check
   that cannot reach a host publishes status 0 rather than nothing, because "no data"
@@ -178,6 +181,17 @@ estate as it is, not as it was.
   corrected this page's own assumption: the host to watch is **i3 at 68 %**, not i2 —
   i1 13 %, i2 47 %, i3 68 %, i4 39 %. All are under the 80 % line, so all are green; i3
   is the one with the least room, and it is now a number rather than a memory.
+- **Receiving alerts is now checked, not assumed.** The receiver's own history is the
+  argument for `check-alert-delivery.py`: it passed `amtool check-config` with `SUCCESS`
+  while delivering nowhere, and later while the relay refused its `EHLO` and its
+  certificate — every state looked healthy and said nothing. The check makes the
+  receiver *talk*: it adds one probe alert (`EstateDeliveryProbe<epoch>`) through
+  Alertmanager's v2 API, then reads the mail server's delivery log for a delivery from
+  the receiver's address to its recipient within the window. No delivery is a **failure**
+  naming the receiver's own last notify error; a host it cannot read is exit 2, never
+  silence. It needs `i3` (Alertmanager) and `i1` (Stalwart), so it keeps its own two-host
+  table rather than joining the four-host coverage guard. Verified live 2026-10-02: the
+  probe alert was seen delivered to `admin@innotel.us`.
 - **The edge is watched from off the edge, and the report goes out by mail.**
   `scripts/check-edge-liveness.py` runs on `i1` under `systemd/edge-liveness.{service,timer}`
   every five minutes and TCP-connects to the edge's doors; two attempts per endpoint, so
@@ -516,6 +530,38 @@ The deployed estate and this map agree again; what remains is sizing, not placem
   skip verification, off by default) — commit `d6d8ad1`. Its port stays
   loopback-only (`127.0.0.1:9093` on `i3`), so the edge-dark watcher on `i1`
   still mails through the mail server directly rather than POSTing to it.
+  A receiver that delivers today can go silent tomorrow (a changed relay, an expired
+  path), so delivery is not left as a one-off proof: `check-alert-delivery.py` re-proves
+  it every run — see §*Receiving alerts is now checked, not assumed*.
+- **The signing domain's mail is authenticated now — 2026-10-03.** Alertmanager's
+  receiver delivers through the estate's Stalwart, but mail from `signara.innotel.us`
+  (the domain Signara signs as) had no SPF, DKIM or DMARC at all — the domain existed
+  only as web names. `signara.innotel.us` is now a Stalwart domain (managed with
+  `admin@innotel.us`) with automatic DKIM, and its SPF, DKIM (ed25519 + rsa) and
+  DMARC records are published in the zone the public actually sees — **Technitium on
+  the edge (`.71`)**, the server `ns1/ns2.innotel.us` answer for, *not* the older BIND
+  on `www` (`.80`, a separate copy of the zone the LAN resolver reads). Verified live
+  with `dig` against `.71` and the public resolver. The parent domain's own DKIM keys
+  (Stalwart had generated them but never published them) are live too, so mail sent
+  as `@innotel.us` verifies.
+  Three operational facts, all learned the hard way:
+  - **Stalwart's automatic DNS publishing does not work.** Its `DnsServer` is a TSIG
+    dynamic update at `192.168.1.80`, but that zone allows only `key "cerulean"`, so
+    every `DnsManagement` task fails and the keys stay `pending` — a rotation will not
+    publish itself. The records were published by hand and the four keys activated
+    through the JMAP API (`x:DkimSignature/set`, `stage=active`).
+  - **The mail server's management plane has a credential again.** Stalwart v0.16
+    honours `STALWART_RECOVERY_ADMIN=admin:…` while running normally, so it is pinned
+    in `/etc/stalwart/stalwart.env` (0640) on `mail` — the management login for
+    `http://127.0.0.1:8080/jmap/`. It replaced a management plane with no known
+    credential.
+  - **Technitium's console password was reset** (its stored password no longer
+    matched) by removing `auth.config` and restarting `cerulean-technitium`; the live
+    admin password now matches `TECHNITIUM_ADMIN_PASSWORD` in Cerulean's `.env`, so
+    Cerulean's own DNS calls work again. A brief DNS blip, then healthy.
+  Stalwart still refuses to *relay* unauthenticated external mail (`550 Relay not
+  allowed`), so the customer-facing send path still needs an authenticated submission
+  account — the delivery half, not the authentication half.
 - **The move shifted disk the other way: i1 is back to 13 % and `i4` took the
   images.** The four rootfs copies added tens of GB to `i4`'s `dir` pool (stored
   uncompressed, so larger than the ZFS `USED` figures they came from); `i4`'s root

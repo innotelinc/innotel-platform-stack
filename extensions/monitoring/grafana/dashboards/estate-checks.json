@@ -1,5 +1,5 @@
 {
-  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, and how long does every dialled address take to answer (the i4 WiFi power-save number). The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
+  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), and does the alert receiver actually deliver mail. The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
   "annotations": { "list": [] },
   "editable": false,
   "graphTooltip": 1,
@@ -43,7 +43,7 @@
       "gridPos": { "h": 6, "w": 4, "x": 5, "y": 0 },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 5 }] },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 6 }] },
           "color": { "mode": "thresholds" }
         },
         "overrides": []
@@ -77,6 +77,35 @@
       "transformations": [
         { "id": "merge", "options": {} },
         { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "check": "check" } } }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Alert receiver delivered",
+      "description": "1 only when the probe alert injected through the estate's Alertmanager was seen delivered by the mail server. A receiver that is configured but silenced publishes 0 here while every other panel stays green — the state check-alert-delivery.py exists to make visible.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "SILENT", "color": "red" }, "1": { "text": "DELIVERED", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_alert_delivered",
+          "instant": true,
+          "legendFormat": "receiver",
+          "refId": "A"
+        }
       ]
     },
     {

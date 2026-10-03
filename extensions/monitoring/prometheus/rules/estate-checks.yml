@@ -6,8 +6,9 @@
 # which one fired. The contract lives in `scripts/estate_check.py`; the checks are
 # `scripts/check-container-addresses.py` (`container_address`),
 # `check-container-limits.py` (`container_limits`), `check-estate-inventory.py`
-# (`estate_inventory`), `check-address-latency.py` (`address_latency`) and
-# `check-host-disk.py` (`host_disk`), run by
+# (`estate_inventory`), `check-address-latency.py` (`address_latency`),
+# `check-host-disk.py` (`host_disk`) and `check-alert-delivery.py` (`alert_delivery`),
+# run by
 # `systemd/estate-checks.{service,timer}` on the Cerulean edge, which writes each into
 # node-exporter's textfile directory.
 #
@@ -19,9 +20,12 @@
 # numbered) and the number that says the `i4` WiFi uplink's power save has come back
 # rather than leaving the estate merely feeling slow. `host_disk` is the root filesystem
 # headroom, watched because "i2 is the one to watch" was a note read by hand and a disk
-# fills by arithmetic. The 2026-10-01 outage — `ontrak` renumbered
-# `.21` → `.20` — stayed invisible until a person noticed a blank dashboard, which is the
-# case all of this exists to close.
+# fills by arithmetic. `alert_delivery` is the receiver itself: it injects a probe alert
+# through the estate's one Alertmanager and reads the mail server for its delivery, so a
+# receiver that is configured-but-silent — the state it sat in for its whole life, past
+# every `amtool check-config` — is a finding rather than an assumption. The 2026-10-01
+# outage — `ontrak` renumbered `.21` → `.20` — stayed invisible until a person noticed a
+# blank dashboard, which is the case all of this exists to close.
 #
 # Every rule but one keys on a series, so it can only speak about a check whose
 # textfile reached node-exporter. `EstateCheckAbsent` is the exception: it fires when a
@@ -57,6 +61,7 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="estate_inventory"}), "check", "estate_inventory", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="address_latency"}), "check", "address_latency", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="host_disk"}), "check", "host_disk", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="alert_delivery"}), "check", "alert_delivery", "check", ".*")
         for: 30m
         labels:
           severity: critical

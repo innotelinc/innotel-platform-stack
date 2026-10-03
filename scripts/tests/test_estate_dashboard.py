@@ -61,6 +61,11 @@ class DashboardCase(unittest.TestCase):
     def test_it_charts_the_disk_headroom_the_check_publishes(self):
         self.assertIn("innotel_estate_check_host_disk_percent", self.raw)
 
+    def test_it_shows_whether_the_alert_receiver_delivered(self):
+        # The one number that says a silenced receiver is not a healthy one; if the check
+        # is renamed the panel must go with it, or the dashboard shows a stale green.
+        self.assertIn("innotel_estate_check_alert_delivered", self.raw)
+
     def test_the_rationale_is_written_where_the_next_reader_looks(self):
         # Grafana ignores unknown top-level keys, which is what lets `__comment` carry the
         # "why" beside the JSON rather than in a separate doc nobody opens.

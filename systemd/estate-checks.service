@@ -1,5 +1,5 @@
 [Unit]
-Description=Estate host checks — addresses, CPU caps, the host and pool inventory, latency, and disk headroom
+Description=Estate host checks — addresses, CPU caps, the host and pool inventory, latency, disk headroom, and that the alert receiver delivers
 Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/container-placement.md
 
 # Each check reads the estate hosts over ssh, so the LAN has to be up first. None of
@@ -31,3 +31,4 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-limits.py
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-inventory.py --prom ${TEXTFILE_DIR}/estate-check-estate-inventory.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-address-latency.py --prom ${TEXTFILE_DIR}/estate-check-address-latency.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-host-disk.py --prom ${TEXTFILE_DIR}/estate-check-host-disk.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-alert-delivery.py --prom ${TEXTFILE_DIR}/estate-check-alert-delivery.prom

@@ -34,6 +34,7 @@ CHECK_SCRIPTS = [
     "check-estate-inventory",
     "check-address-latency",
     "check-host-disk",
+    "check-alert-delivery",
 ]
 
 
