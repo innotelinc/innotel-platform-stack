@@ -977,10 +977,12 @@ services:
     # for rollback with `--profile legacy-storage`, alongside its volume, which
     # still holds every object as it was.
     profiles: ['legacy-storage']
-    # MinIO retired its Docker Hub images (pull access denied), so a fresh host
-    # cannot pull this from docker.io — MinIO's own registry serves the same
-    # release. Cached hosts keep working either way.
-    image: quay.io/minio/minio:RELEASE.2024-09-13T20-26-02Z
+    # MinIO no longer serves anonymous pulls from anywhere public — docker.io
+    # `minio/minio` is gone (404) and quay.io `minio/minio` answers 401 — so this
+    # points at the estate's GHCR mirror, built from the maintained community CE
+    # build `pgsty/minio` (ghcr.io/innotelinc/capstone/minio, published by
+    # Capstone's release pipeline).
+    image: ${SIGNARA_MINIO_IMAGE:-ghcr.io/innotelinc/capstone/minio:RELEASE.2026-08-04T00-00-00Z}
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
