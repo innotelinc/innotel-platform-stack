@@ -1,5 +1,5 @@
 {
-  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), and does the alert receiver actually deliver mail. The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
+  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), whether the alert receiver actually delivers mail, and whether the mail domains' SPF/DKIM/DMARC records resolve in the public zone. The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
   "annotations": { "list": [] },
   "editable": false,
   "graphTooltip": 1,
@@ -43,7 +43,7 @@
       "gridPos": { "h": 6, "w": 4, "x": 5, "y": 0 },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 6 }] },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 7 }] },
           "color": { "mode": "thresholds" }
         },
         "overrides": []
@@ -220,6 +220,23 @@
           "legendFormat": "{{check}}",
           "refId": "A"
         }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Mail auth records",
+      "description": "How many of the mail domains' SPF/DKIM/DMARC records resolved in the zone the public reads, out of how many must. A drop here is a record that stopped resolving — for example a rotation Stalwart generated but, because the public zone refuses its TSIG updates, never published. See check-mail-auth.py.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 38 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }] } },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_auth_records_ok", "instant": true, "legendFormat": "resolved", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_auth_records_expected", "instant": true, "legendFormat": "expected", "refId": "B" }
       ]
     }
   ],
