@@ -35,6 +35,7 @@ CHECK_SCRIPTS = [
     "check-address-latency",
     "check-host-disk",
     "check-alert-delivery",
+    "check-mail-auth",
 ]
 
 

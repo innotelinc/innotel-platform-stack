@@ -7,8 +7,8 @@
 # `scripts/check-container-addresses.py` (`container_address`),
 # `check-container-limits.py` (`container_limits`), `check-estate-inventory.py`
 # (`estate_inventory`), `check-address-latency.py` (`address_latency`),
-# `check-host-disk.py` (`host_disk`) and `check-alert-delivery.py` (`alert_delivery`),
-# run by
+# `check-host-disk.py` (`host_disk`), `check-alert-delivery.py` (`alert_delivery`) and
+# `check-mail-auth.py` (`mail_auth`), run by
 # `systemd/estate-checks.{service,timer}` on the Cerulean edge, which writes each into
 # node-exporter's textfile directory.
 #
@@ -25,7 +25,11 @@
 # receiver that is configured-but-silent — the state it sat in for its whole life, past
 # every `amtool check-config` — is a finding rather than an assumption. The 2026-10-01
 # outage — `ontrak` renumbered `.21` → `.20` — stayed invisible until a person noticed a
-# blank dashboard, which is the case all of this exists to close.
+# blank dashboard, which is the case all of this exists to close. `mail_auth` is the
+# certificate under the mail: it reads the SPF, DKIM and DMARC records back from the zone
+# the public sees for every domain the estate signs as, because Stalwart generates the
+# keys but its automatic DNS publishing is refused by that zone, so a missing or rotated
+# record is otherwise only visible as mail that quietly fails verification.
 #
 # Every rule but one keys on a series, so it can only speak about a check whose
 # textfile reached node-exporter. `EstateCheckAbsent` is the exception: it fires when a
@@ -62,6 +66,7 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="address_latency"}), "check", "address_latency", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="host_disk"}), "check", "host_disk", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="alert_delivery"}), "check", "alert_delivery", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="mail_auth"}), "check", "mail_auth", "check", ".*")
         for: 30m
         labels:
           severity: critical

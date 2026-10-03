@@ -66,6 +66,11 @@ class DashboardCase(unittest.TestCase):
         # is renamed the panel must go with it, or the dashboard shows a stale green.
         self.assertIn("innotel_estate_check_alert_delivered", self.raw)
 
+    def test_it_shows_how_many_mail_auth_records_resolved(self):
+        # The panel that makes a dropped SPF/DKIM/DMARC record visible; if the check's
+        # metric is renamed the panel must go with it, or the dashboard shows a stale green.
+        self.assertIn("innotel_estate_check_mail_auth_records_ok", self.raw)
+
     def test_the_rationale_is_written_where_the_next_reader_looks(self):
         # Grafana ignores unknown top-level keys, which is what lets `__comment` carry the
         # "why" beside the JSON rather than in a separate doc nobody opens.

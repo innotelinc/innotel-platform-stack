@@ -86,7 +86,7 @@ estate as it is, not as it was.
   (The 2026-09-27 note below that `limits.cpu` waits for a restart is wrong, and is
   corrected here.)
 - **The estate's host invariants are scheduled and alerting.**
-  `systemd/estate-checks.{service,timer}` runs six checks every 30 minutes *on the
+  `systemd/estate-checks.{service,timer}` runs seven checks every 30 minutes *on the
   Cerulean edge* and writes each one's textfile into node-exporter's directory:
   `check-container-addresses.py` (every address an A record names),
   `check-container-limits.py` (a declared `limits.cpu` is the cpuset actually pinned),
@@ -98,9 +98,12 @@ estate as it is, not as it was.
   `check-host-disk.py` (each host's root filesystem has room — 80 % warns, 90 % fails),
   and `check-alert-delivery.py` (the estate's one Alertmanager actually *delivers*: it
   injects a short-lived probe alert through the receiver's own v2 API and reads the mail
-  server for the delivery — the one thing `amtool check-config` cannot tell you).
+  server for the delivery — the one thing `amtool check-config` cannot tell you), and
+  `check-mail-auth.py` (each mail domain's SPF, DKIM and DMARC records resolve in the
+  zone the public reads, with the DKIM selectors versioned in the check because Stalwart
+  cannot publish them itself — see §*Open items*).
   They share one metric family — `innotel_estate_check`, one series per check via a
-  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all six
+  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all seven
   (`EstateCheckFailing`, `...CouldNotRun`, `...Stale`, `...NotPinned`), and the
   provisioned `grafana/dashboards/estate-checks.json` shows them (a green stat, a
   per-check table, whether the receiver delivered, and the per-address latency chart). The edge reaches
@@ -181,6 +184,16 @@ estate as it is, not as it was.
   corrected this page's own assumption: the host to watch is **i3 at 68 %**, not i2 —
   i1 13 %, i2 47 %, i3 68 %, i4 39 %. All are under the 80 % line, so all are green; i3
   is the one with the least room, and it is now a number rather than a memory.
+- **Mail authentication is now checked, not assumed.** `check-mail-auth.py` reads the
+  SPF, DKIM and DMARC records back from the **authoritative** zone the public sees
+  (Technitium on the edge, `.71` — not the LAN resolver and not the older BIND copy), one
+  `dig` per record, and fails on a `v=spf1` / `v=DMARC1` / `v=DKIM1` record that does not
+  resolve. A zone that cannot be read at all is exit 2, never a domain that looks
+  unauthenticated. The DKIM selectors are a versioned table in the check (`v1-ed25519-…`
+  and `v1-rsa-…` for `innotel.us` and `signara.innotel.us`): a rotation edits the zone
+  *and* that table, which is where the estate catches a key Stalwart generated but, its
+  TSIG dynamic update being refused, never published. Verified live 2026-10-03: 8/8
+  records resolved. See §*Open items* for why this cannot be read from the mail server.
 - **Receiving alerts is now checked, not assumed.** The receiver's own history is the
   argument for `check-alert-delivery.py`: it passed `amtool check-config` with `SUCCESS`
   while delivering nowhere, and later while the relay refused its `EHLO` and its
@@ -549,7 +562,9 @@ The deployed estate and this map agree again; what remains is sizing, not placem
     dynamic update at `192.168.1.80`, but that zone allows only `key "cerulean"`, so
     every `DnsManagement` task fails and the keys stay `pending` — a rotation will not
     publish itself. The records were published by hand and the four keys activated
-    through the JMAP API (`x:DkimSignature/set`, `stage=active`).
+    through the JMAP API (`x:DkimSignature/set`, `stage=active`). `check-mail-auth.py` is
+    the safety net for the gap: it reads what the public zone actually serves every 30
+    minutes, so a rotation that fails to publish is a finding rather than silent mail.
   - **The mail server's management plane has a credential again.** Stalwart v0.16
     honours `STALWART_RECOVERY_ADMIN=admin:…` while running normally, so it is pinned
     in `/etc/stalwart/stalwart.env` (0640) on `mail` — the management login for
