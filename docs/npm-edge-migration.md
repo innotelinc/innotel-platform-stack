@@ -3,9 +3,10 @@
 **Status: cutover complete (2026-09-15).** The edge serves live traffic from the
 primary host on its real ports, the full certificate set has been re-issued as
 wildcards by Cerulean, and `.71` is out of the wiring — nothing resolves,
-routes or forwards to it. Two follow-ups remain, both owner actions: the
-`rizzaura.net` delegation at the registrar (§5) and physically powering `.71`
-off (§6).
+routes or forwards to it. ~~Two follow-ups remain, both owner actions: the
+`rizzaura.net` delegation at the registrar (§5)~~ **the `rizzaura.net`
+delegation propagated and both its certificates are issued and attached
+(2026-10-02, §5)**; physically powering `.71` off (§6) remains an owner action.
 
 ## 1. What moved
 
@@ -98,7 +99,17 @@ been out of the routing path since step 1), but nothing about the DNS depends
 on `.71`: no internal `A` records pointed at it, and no checkout env references
 it any more.
 
-## 5. Remaining: rizzaura.net delegation (owner action)
+## 5. rizzaura.net delegation — resolved 2026-10-02
+
+The registrar now delegates `rizzaura.net` to `ns1/ns2.innotel.us` (confirmed
+against public DoH). Both orders were re-issued through Cerulean's DNS-01 path
+(wildcard row 41 / apex row 42; the certificate carries
+`DNS:*.rizzaura.net, DNS:rizzaura.net`), imported into NPM as custom
+certificates `cerulean-rizzaura.net-wildcard` / `cerulean-rizzaura.net`, and
+attached to the 8 `rizzaura.net` proxy hosts — which were then **enabled**
+(they had been left disabled) with `ssl_forced` and HTTP/2 on. Every name
+(`rizzaura.net`, `www`, `app`, `api`, `auth`, `rankings`, `community`, `admin`,
+`subscribe`) now serves over TLS. The original failure analysis is kept below.
 
 The `rizzaura.net` wildcard and apex orders failed **at Let's Encrypt** ("No
 TXT record found at `_acme-challenge.rizzaura.net`") while every innotel.us
@@ -112,18 +123,20 @@ order succeeded. Cause, confirmed with `dig +trace`:
   NS set) but the public never asks us: the world resolves rizzaura.net names
   from the old provider's stale zone.
 
-**Fix:** at the rizzaura.net registrar, set the domain's nameservers to
+**Fix (applied):** at the rizzaura.net registrar, set the domain's nameservers to
 `ns1.innotel.us` / `ns2.innotel.us` (the same delegation pattern `.us` already
 serves for innotel.us). Then re-run the idempotent bulk script — only the two
-`error` rizzaura rows will issue, and their 9 hosts get attached automatically:
+`error` rizzaura rows will issue, and their hosts get attached automatically
+(equivalently, issue `*.rizzaura.net` + apex through Cerulean's service bridge,
+which is what was done 2026-10-02):
 
     docker cp 1-primary/cerulean/scripts/npm-bulk-wildcard-reissue.js cerulean:/tmp/
     docker exec cerulean node /tmp/npm-bulk-wildcard-reissue.js
 
 (The rows already exist in Cerulean with status `error`; equivalently,
-Certificates → Renew in the portal re-issues just those two.) Until then the 9
-rizzaura.net hosts stay HTTP-only; everything else on the edge has a
-certificate attached.
+Certificates → Renew in the portal re-issues just those two.) With that done,
+every public host on the edge carries a certificate; the only remaining
+HTTP-only names are the 4 outside our DNS authority (see §3).
 
 ## 6. Retiring .71 — wiring is gone, power-off is owner action
 
