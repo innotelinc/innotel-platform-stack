@@ -4,7 +4,12 @@
 
 services:
   minio:
-    image: minio/minio:latest
+    # Upstream MinIO no longer serves anonymous pulls from anywhere public —
+    # docker.io `minio/minio` is gone (404) and quay.io `minio/minio` answers
+    # 401 — so this points at the estate's GHCR mirror of the maintained
+    # community CE build `pgsty/minio`, published by Capstone's release
+    # pipeline (see groups/2-voice.yml).
+    image: ${MINIO_IMAGE:-ghcr.io/innotelinc/capstone/minio:RELEASE.2026-08-04T00-00-00Z}
     container_name: ext-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
