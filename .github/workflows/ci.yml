@@ -153,8 +153,12 @@ jobs:
       - name: Prometheus alert rules (promtool unit tests)
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD":/work -w /work prom/prometheus:v3.13.3 \
-            promtool test rules extensions/monitoring/prometheus/rules/tests/estate-checks.test.yml
+          # The image's entrypoint is `prometheus`, so `promtool` must be the
+          # entrypoint override — passing it as an argument is parsed as a
+          # Prometheus flag ("unexpected promtool") and the step fails open.
+          docker run --rm --entrypoint promtool -v "$PWD":/work -w /work \
+            prom/prometheus:v3.13.3 \
+            test rules extensions/monitoring/prometheus/rules/tests/estate-checks.test.yml
 
       - name: Python syntax
         run: python3 -m py_compile scripts/*.py scripts/tests/*.py
