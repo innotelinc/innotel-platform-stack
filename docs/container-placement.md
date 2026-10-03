@@ -100,8 +100,9 @@ estate as it is, not as it was.
   injects a short-lived probe alert through the receiver's own v2 API and reads the mail
   server for the delivery — the one thing `amtool check-config` cannot tell you), and
   `check-mail-auth.py` (each mail domain's SPF, DKIM and DMARC records resolve in the
-  zone the public reads, with the DKIM selectors versioned in the check because Stalwart
-  cannot publish them itself — see §*Open items*).
+  zone the public reads, with the DKIM selectors versioned in the check — Stalwart now
+  publishes a rotation itself, and this reads what the public zone actually serves —
+  see §*Open items*).
   They share one metric family — `innotel_estate_check`, one series per check via a
   `check` label — so `prometheus/rules/estate-checks.yml` alerts on all seven
   (`EstateCheckFailing`, `...CouldNotRun`, `...Stale`, `...NotPinned`), and the
@@ -190,10 +191,10 @@ estate as it is, not as it was.
   `dig` per record, and fails on a `v=spf1` / `v=DMARC1` / `v=DKIM1` record that does not
   resolve. A zone that cannot be read at all is exit 2, never a domain that looks
   unauthenticated. The DKIM selectors are a versioned table in the check (`v1-ed25519-…`
-  and `v1-rsa-…` for `innotel.us` and `signara.innotel.us`): a rotation edits the zone
-  *and* that table, which is where the estate catches a key Stalwart generated but, its
-  TSIG dynamic update being refused, never published. Verified live 2026-10-03: 8/8
-  records resolved. See §*Open items* for why this cannot be read from the mail server.
+  and  `v1-rsa-…` for `innotel.us` and `signara.innotel.us`): a rotation edits the zone
+  *and* that table. Stalwart publishes DKIM to Technitium itself now (see §*Open
+  items*), and this check is the proof it did — it reads the public zone, not the mail
+  server. Verified live 2026-10-03: 8/8 records resolved.
 - **Receiving alerts is now checked, not assumed.** The receiver's own history is the
   argument for `check-alert-delivery.py`: it passed `amtool check-config` with `SUCCESS`
   while delivering nowhere, and later while the relay refused its `EHLO` and its
@@ -558,13 +559,18 @@ The deployed estate and this map agree again; what remains is sizing, not placem
   (Stalwart had generated them but never published them) are live too, so mail sent
   as `@innotel.us` verifies.
   Three operational facts, all learned the hard way:
-  - **Stalwart's automatic DNS publishing does not work.** Its `DnsServer` is a TSIG
-    dynamic update at `192.168.1.80`, but that zone allows only `key "cerulean"`, so
-    every `DnsManagement` task fails and the keys stay `pending` — a rotation will not
-    publish itself. The records were published by hand and the four keys activated
-    through the JMAP API (`x:DkimSignature/set`, `stage=active`). `check-mail-auth.py` is
-    the safety net for the gap: it reads what the public zone actually serves every 30
-    minutes, so a rotation that fails to publish is a finding rather than silent mail.
+  - **Stalwart publishes its DKIM records to Technitium itself now — 2026-10-03.** It
+    used to do a TSIG dynamic update at `192.168.1.80` (the older BIND copy of the
+    zone), which allowed only `key "cerulean"`, so every `DnsManagement` task failed and
+    the keys stayed `pending`. That is fixed at both ends: Technitium's `innotel.us`
+    zone now accepts dynamic updates from the `cerulean` key (hmac-sha256) under an
+    update security policy that permits only `TXT` records at `*._domainkey.innotel.us`,
+    and Stalwart's `DnsServer` points at `192.168.1.71` with that key. Publishing is
+    narrowed to DKIM (`publishRecords.dkim` only) as well, so SPF, DMARC, MX and the rest
+    are left exactly as published. Verified live 2026-10-03: the `innotel.us` keys
+    rotated to `v1-*-20261003` and appeared in Technitium within the polling interval,
+    one SOA bump and no other record touched. `check-mail-auth.py` still reads the public
+    zone every 30 minutes, so a rotation that fails to publish stays a finding.
   - **The mail server's management plane has a credential again.** Stalwart v0.16
     honours `STALWART_RECOVERY_ADMIN=admin:…` while running normally, so it is pinned
     in `/etc/stalwart/stalwart.env` (0640) on `mail` — the management login for
