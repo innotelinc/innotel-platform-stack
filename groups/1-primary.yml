@@ -715,6 +715,16 @@ services:
       AI_API_URL: "${AI_API_URL:-https://api.openai.com/v1}"
       AI_API_KEY: "${AI_API_KEY:-}"
       AI_MODEL: "${AI_MODEL:-gpt-4o-mini}"
+      # Genie preview subdomain ($5 plan). After checkout Magnate claims the
+      # subscriber's name from Genie (GENIE_PREVIEW_API_URL + _CLAIM_TOKEN, the
+      # same value Genie holds in PREVIEW_CLAIM_TOKEN); GENIE_PREVIEW_DOMAIN is
+      # the wildcard suffix shown on the success page. These MUST be passed
+      # through: lib/genie.ts reads them from process.env, so a value that only
+      # lives in .env never reaches the container and the claim silently stays
+      # off. Leave the token empty to sell the plan without an automatic claim.
+      GENIE_PREVIEW_API_URL: "${GENIE_PREVIEW_API_URL:-}"
+      GENIE_PREVIEW_CLAIM_TOKEN: "${GENIE_PREVIEW_CLAIM_TOKEN:-}"
+      GENIE_PREVIEW_DOMAIN: "${GENIE_PREVIEW_DOMAIN:-genie.innotel.us}"
       # Authentik (Cerulean SSO) — the admin panel's identity provider.
       # These MUST be passed through: lib/oidc.ts reads them from process.env,
       # so a value that only lives in .env (compose substitution) never reaches
@@ -749,6 +759,13 @@ services:
     networks: [magnate-net]
     volumes:
       - ../../1-primary/magnate/data:/app/data
+      # The image bakes docker-entrypoint.sh, but a rebuild is not always
+      # possible in place (the Next.js build OOMs on memory-tight hosts — this
+      # one is capped at 1 GiB), and the entrypoint carries the Vault
+      # reference resolution that must run before boot. Bind-mount the
+      # checkout's copy over the baked one so an entrypoint change ships
+      # without a rebuild.
+      - ../../1-primary/magnate/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
 
   # ── Authentik — optional local identity replacement ──
   # Default deployments use the shared external Authentik instance. Enable the
