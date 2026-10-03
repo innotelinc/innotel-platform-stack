@@ -580,9 +580,30 @@ The deployed estate and this map agree again; what remains is sizing, not placem
     matched) by removing `auth.config` and restarting `cerulean-technitium`; the live
     admin password now matches `TECHNITIUM_ADMIN_PASSWORD` in Cerulean's `.env`, so
     Cerulean's own DNS calls work again. A brief DNS blip, then healthy.
-  Stalwart still refuses to *relay* unauthenticated external mail (`550 Relay not
-  allowed`), so the customer-facing send path still needs an authenticated submission
-  account — the delivery half, not the authentication half.
+  - **The authenticated submission path exists now — 2026-10-03.** Stalwart refuses to
+    *relay* unauthenticated external mail (`550 Relay not allowed`), so the alert
+    receiver was moved off its unauthenticated `:25` hop. Two config objects were added
+    to Stalwart (via the JMAP management API, so they live in the config store and
+    survive restarts): a `NetworkListener` named `submission` bound to `[::]:587`
+    (SMTP + STARTTLS, `tlsImplicit false`) and a **User** account
+    `alertmanager@innotel.us` in the `innotel.us` domain carrying one `Password`
+    credential. The listener id is load-bearing: Stalwart decides submission-vs-inbound
+    from the listener *name* (`!= "smtp"` means submission, i.e. require auth), not the
+    port. Signara's `.env` on i3 now sets `SMTP_PORT=587`, `SMTP_USER`/`SMTP_PASS` for
+    that account (keeping `SMTP_HELLO=signara.innotel.us` and `SMTP_TLS_INSECURE=true`
+    for Stalwart's self-signed cert), and `signara-alertmanager-1` was recreated.
+    Verified live with `scripts/check-alert-delivery.py` and the `mail` log:
+    `auth.success listenerId = "submission", localPort = 587 … accountName =
+    "alertmanager@innotel.us"`, EHLO `signara.innotel.us`, then
+    `Delivery completed … from = "alertmanager@innotel.us", to = ["admin@innotel.us"]`.
+    Adding the listener needed `systemctl restart stalwart` on `mail` to bind it — a
+    `ReloadSettings` action reloads settings but does not rebind listeners.
+  - **The estate still cannot deliver to external MTAs directly.** The ISP blocks
+    outbound TCP/25 estate-wide (`gmail-smtp-in` is unreachable on `:25` from `i1`,
+    `mail` and the edge, while `:587` works), so `remote`-queue mail is accepted,
+    authenticated and queued but cannot leave. Customer-facing send therefore needs a
+    smarthost that speaks 587/465, not direct-to-MX. The alert path is unaffected: it
+    delivers to a local mailbox (`admin@innotel.us`) over the `local` queue.
 - **The move shifted disk the other way: i1 is back to 13 % and `i4` took the
   images.** The four rootfs copies added tens of GB to `i4`'s `dir` pool (stored
   uncompressed, so larger than the ZFS `USED` figures they came from); `i4`'s root
