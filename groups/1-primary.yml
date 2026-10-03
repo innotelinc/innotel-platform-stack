@@ -1179,6 +1179,14 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      # The FQDN Alertmanager says EHLO with. Left unset it renders as
+      # `localhost`, which a strict relay (Stalwart) refuses with
+      # `550 5.5.0 Invalid EHLO domain`; the entrypoint defaults it to a dotted
+      # name when empty.
+      SMTP_HELLO: ${SMTP_HELLO:-signara.innotel.us}
+      # `true` keeps STARTTLS but skips verifying the relay's certificate; set
+      # it for an internal relay reached by IP with a self-signed certificate.
+      SMTP_TLS_INSECURE: ${SMTP_TLS_INSECURE:-false}
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
     volumes:
       - ../../1-primary/signara/infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
@@ -1263,7 +1271,11 @@ services:
   genesis:   # from genesis
     build:
       context: ../../1-primary/genesis
-    image: ghcr.io/innotelinc/genesis:latest
+    # CI publishes `latest` and an immutable `:<short-sha>` per merge to main
+    # (`.github/workflows/ci.yml`). A host pins the SHA tag with
+    # GENESIS_IMAGE_TAG, so what runs is a reviewed commit and a rollback is a
+    # tag change — see docs/Deployment.md.
+    image: ghcr.io/innotelinc/genesis:${GENESIS_IMAGE_TAG:-latest}
     container_name: genesis
     restart: unless-stopped
     env_file:
@@ -1284,6 +1296,11 @@ services:
       # The SQLite database and its WAL live here; losing the container must not
       # lose the record.
       - genesis-data:/app/data
+      # This product's Cerulean Vault token, read-only. Cerulean's Vault bootstrap
+      # mints it (VAULT_PRODUCT_TOKENS=genesis there) and renews it in place; the
+      # stack only ever reads it. docker-entrypoint.sh resolves the `vault://`
+      # references in .env with it. See data/vault/token/ (gitignored).
+      - ../../1-primary/genesis/data/vault/token:/vault/token:ro
     healthcheck:
       test:
         - CMD
