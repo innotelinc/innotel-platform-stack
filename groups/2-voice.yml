@@ -128,7 +128,7 @@ services:
       # browsers fetch recordings/transcripts straight from MinIO through that
       # route — and the edge can only reach the host's LAN address, never its
       # loopback. See npm-proxy-hosts.py MEDIA_* and MINIO_PUBLIC_ENDPOINT.
-      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:9200:9000"
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.30}:9200:9000"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -976,9 +976,9 @@ services:
       # loopback leg was dropped once dograh — its last client — stopped dialling
       # 127.0.0.1. 8089 keeps a loopback leg because no client has been measured
       # on it yet; check `ss -tnp | grep :8089` before narrowing that one.
-      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:8088:8088" # Asterisk HTTP / ARI (LAN + edge proxy)
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.30}:8088:8088" # Asterisk HTTP / ARI (LAN + edge proxy)
       - "127.0.0.1:8089:8089"                            # PJSIP WebSocket (WSS, host-mode)
-      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:8089:8089" # PJSIP WebSocket (WSS, LAN + edge proxy)
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.30}:8089:8089" # PJSIP WebSocket (WSS, LAN + edge proxy)
       # AMI answers on the host LAN IP and nothing else — not 0.0.0.0, not a
       # docker address (project rule: README → Addressing). Binding it on every
       # interface is what let public scanners reach 5038 and fill the security
@@ -993,7 +993,7 @@ services:
       # (zeus/docker-compose.full.yml) and needs the same pin —
       # that file currently publishes it on 0.0.0.0. See docs/operations.md →
       # "The PBX".
-      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}:5038:5038"  # Asterisk AMI (LAN IP only)
+      - "${PJSIP_MEDIA_ADDRESS:-192.168.1.30}:5038:5038"  # Asterisk AMI (LAN IP only)
       - "${FREEPBX_WEBMIN_PORT:-10000}:10000" # Webmin admin panel (optional; host port configurable)
       - "${FREEPBX_RTP_PORT_START:-10101}-${FREEPBX_RTP_PORT_END:-10120}:10101-10120/udp" # RTP media (20 ports / 10 active calls)
     environment:
@@ -1007,7 +1007,7 @@ services:
       # so LAN softphones aren't told to send RTP to the public IP. See
       # pbx/entrypoint-dograh.sh inject_pjsip_media_address.
       PJSIP_LOCAL_NET: ${PJSIP_LOCAL_NET:-192.168.1.0/255.255.255.0}
-      PJSIP_MEDIA_ADDRESS: ${PJSIP_MEDIA_ADDRESS:-192.168.1.46}
+      PJSIP_MEDIA_ADDRESS: ${PJSIP_MEDIA_ADDRESS:-192.168.1.30}
       PJSIP_LAN_ENDPOINTS: ${PJSIP_LAN_ENDPOINTS:-101}
       # STUN/TURN relay wiring: the entrypoint pushes these into FreePBX's
       # SIP Settings so Asterisk's RTP engine + WebRTC endpoints use coturn.
@@ -1117,7 +1117,7 @@ services:
       # The host LAN IP, not a compose service name: docker addresses do not
       # resolve correctly for this project, and the [pbxportal] ACL admits the
       # LAN address the host masquerades this connection to.
-      ASTERISK_AMI_HOST: "${PJSIP_MEDIA_ADDRESS:-192.168.1.46}"
+      ASTERISK_AMI_HOST: "${PJSIP_MEDIA_ADDRESS:-192.168.1.30}"
       ASTERISK_AMI_PORT: "5038"
       ASTERISK_AMI_USERNAME: ${FREEPBX_AMI_USER:-pbxportal}
       ASTERISK_AMI_SECRET: ${FREEPBX_AMI_SECRET:-}
@@ -1602,6 +1602,22 @@ services:
       - apparmor=unconfined
     depends_on:
       - zeus-freepbx
+    # The portal WRITES two files the PBX owns: `pjsip.endpoint_custom_post.conf`
+    # (the `[<ext>](+)` WebRTC blocks) and `pjsip_media_custom.conf` (the
+    # per-endpoint `media_address`). They live on the shared `asterisk-config`
+    # volume, and the PBX's boot entrypoint runs `fwconsole chown`, which leaves
+    # them 0664 asterisk:asterisk — owner+group only. This container runs as
+    # `nextjs` (uid 1001), so its write throws EACCES and Repair reports the
+    # state it failed to change: the button silently does nothing.
+    #
+    # NOTE: `group_add: [asterisk]` does NOT fix this. The entrypoint drops
+    # privileges with `su-exec nextjs:nodejs`, which RESETS the supplementary
+    # group set, so the granted gid never reaches the Node server (measured on
+    # .30: `su-exec nextjs:nodejs id` shows `groups=1001`). The fix is on the
+    # PBX side — the files are given the portal's PRIMARY gid instead
+    # (`pbx/portal_config_access.py`, run from docker-entrypoint-full.sh and the
+    # zeus-pbx-sync timer). No group_add is needed, and adding one would only
+    # paper over the fact that it cannot work.
     # HOST networking, deliberately — PROJECT RULE: LAN addresses only.
     #
     # On the bridge (pbx-net, 172.31.0.0/16) every call the portal makes to the
@@ -1609,7 +1625,7 @@ services:
     # permit and the FreePBX access log both end up keyed on a Docker address —
     # and Docker addresses do not resolve correctly for this project. Joining the
     # host namespace instead lets the portal reach every service on this host's
-    # LAN IP, so Asterisk sees 192.168.1.46 and only the LAN subnet is ever
+    # LAN IP, so Asterisk sees 192.168.1.30 and only the LAN subnet is ever
     # permitted (no `permit = 172.16.0.0/12` anywhere).
     #
     # Consequences: the portal listens on the host port directly (PORT below)
@@ -1626,6 +1642,10 @@ services:
       # 3001 here IS the port NPM forwards to. Matches docker-compose.yml, so
       # the full stack stays off the shared :3000 owned by the Signara frontend.
       PORT: "3001"
+      # Shared gateway; credentials are resolved from Cerulean Vault at boot.
+      VOICEMAIL_SUMMARY_URL: ${VOICEMAIL_SUMMARY_URL:-http://192.168.1.71:20128/v1}
+      VOICEMAIL_SUMMARY_MODEL: ${VOICEMAIL_SUMMARY_MODEL:-}
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-}
       # Next binds to $HOSTNAME — pin it so the server listens on all local
       # interfaces (0.0.0.0) instead of failing with EADDRNOTAVAIL.
       HOSTNAME: "0.0.0.0"

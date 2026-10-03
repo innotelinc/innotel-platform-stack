@@ -164,6 +164,8 @@ services:
       # to dial. What is lifted here is the SSO hop, not the credential: OmniRoute's
       # own password still covers `/api/auth/login`, and `/api/keys` still needs the
       # session that call returns. Nothing else under `/api/` is exempt.
+      # Distro reads the running release here; OmniRoute retains its own auth.
+      - '--skip-auth-route=GET=^/api/system/version(\?.*)?$'
       - '--skip-auth-route=^/api/auth/login(\?.*)?$'
       - '--skip-auth-route=^/api/keys(\?.*)?$'
       - --skip-auth-route=^/api/keys/

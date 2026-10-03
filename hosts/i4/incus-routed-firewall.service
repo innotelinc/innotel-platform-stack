@@ -1,0 +1,19 @@
+[Unit]
+Description=Persist incus routed-NIC forwarding for i4's Wi-Fi uplink
+Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/container-placement.md
+After=network-online.target incus-startup.service incus.service docker.service
+Wants=network-online.target incus-startup.service
+Before=incus-user.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/default/incus-routed-firewall
+ExecStart=/usr/local/sbin/incus-routed-firewall start
+ExecReload=/usr/local/sbin/incus-routed-firewall start
+ExecStop=/usr/local/sbin/incus-routed-firewall stop
+# The rules sit early in FORWARD; exit non-zero if we could not place them.
+SuccessExitStatus=0
+
+[Install]
+WantedBy=multi-user.target

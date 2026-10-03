@@ -1,0 +1,65 @@
+#!/bin/sh
+# i4 — persist incus routed-NIC forwarding over the Wi-Fi uplink.
+#
+# i4's only uplink is Wi-Fi (wlp1s0), so its containers cannot be bridged onto
+# the LAN (the AP rejects their MACs). Instead a container uses an incus
+# `routed` NIC (nictype: routed, parent: wlp1s0): the host holds a /32 route to
+# the container and answers ARP for it (proxy ARP), so the container keeps a
+# real 192.168.1.x address. Packets for it cross the FORWARD chain between
+# wlp1s0 and the container's veth.
+#
+# Docker sets the FORWARD policy to DROP, and incus does not add FORWARD ACCEPT
+# rules for routed NICs, so those two rules must be re-inserted after every
+# boot (and after any Docker/incus firewall reload). The proxy-ARP / forwarding
+# sysctls live in /etc/sysctl.d/99-incus-routed.conf; this script re-asserts
+# them too, because systemd-sysctl runs before wlp1s0 exists and the
+# interface-scoped keys would otherwise be skipped at boot.
+#
+# Idempotent: it checks for each rule (iptables -C) before inserting it, so it
+# is safe to run repeatedly and safe when Docker has already rebuilt its chains.
+
+set -eu
+
+UPLINK="${UPLINK:-wlp1s0}"
+CTR_IF="${CTR_IF:-veth+}"
+
+SYSCTLS="
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.proxy_arp=1
+net.ipv4.conf.${UPLINK}.proxy_arp=1
+net.ipv4.conf.all.rp_filter=0
+net.ipv4.conf.default.rp_filter=0
+"
+
+apply_sysctls() {
+    for kv in $SYSCTLS; do
+        sysctl -qw "$kv" 2>/dev/null || true
+    done
+}
+
+rule_in()  { iptables -C FORWARD -i "$UPLINK" -o "$CTR_IF" -j ACCEPT 2>/dev/null; }
+rule_out() { iptables -C FORWARD -i "$CTR_IF" -o "$UPLINK" -j ACCEPT 2>/dev/null; }
+
+start() {
+    apply_sysctls
+    rule_in  || iptables -I FORWARD 1 -i "$UPLINK" -o "$CTR_IF" -j ACCEPT
+    rule_out || iptables -I FORWARD 1 -i "$CTR_IF" -o "$UPLINK" -j ACCEPT
+}
+
+stop() {
+    while rule_in;  do iptables -D FORWARD -i "$UPLINK" -o "$CTR_IF" -j ACCEPT; done
+    while rule_out; do iptables -D FORWARD -i "$CTR_IF" -o "$UPLINK" -j ACCEPT; done
+}
+
+status() {
+    echo "uplink=$UPLINK ctr_if=$CTR_IF"
+    iptables -S FORWARD | grep -E -- "-[io] ($UPLINK|$CTR_IF)" || echo "(no matching FORWARD rules)"
+    for kv in $SYSCTLS; do sysctl -n "$kv" 2>/dev/null | sed "s|^|${kv} = |"; done
+}
+
+case "${1:-}" in
+    start)  start ;;
+    stop)   stop ;;
+    status) status ;;
+    *) echo "usage: $0 {start|stop|status}" >&2; exit 2 ;;
+esac
