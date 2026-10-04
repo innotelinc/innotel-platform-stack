@@ -163,14 +163,13 @@ OWN_HOST_REPOS = {
     # `scripts/verify-sso.py` from here. Not the retired training range above: that
     # was `5-dev/ontrak`, a different thing with the same name.
     "1-primary/ontrak": "the family runs on the ontrak container (i1, .21), not from a group host",
-    # OnTrak Sync (CodeOps) — the family's data-sync API and web app. Its compose
-    # binds `192.168.1.21` for both services (`ONTRAK_API_BIND` :8420,
-    # `ONTRAK_WEB_BIND` :8421), which is the OnTrak container on i1 and an address
-    # a group-1 host does not have. So it is deployed there with the rest of the
-    # family, and declaring it in the group compose would start a second copy on
-    # the wrong machine — the same shape as its sibling above, and it was the
-    # other finding rule 1 surfaced.
-    "1-primary/ontrak-sync": "binds 192.168.1.21 (the ontrak container on i1), not a group-1 host",
+    # OnTrak Sync (CodeOps) needs no entry of its own any more. It used to be
+    # checked out at `1-primary/ontrak-sync` as well as under the family repo; that
+    # standalone checkout was removed, so the family's `ontrak-sync/` subtree is the
+    # single copy and the `1-primary/ontrak` exclusion above already covers it. It
+    # still binds `192.168.1.21` (`ONTRAK_API_BIND` :8420, `ONTRAK_WEB_BIND` :8421)
+    # — the ontrak container on i1, an address a group-1 host does not have — so a
+    # group compose that declared it would start a second copy on the wrong machine.
 }
 
 # Every compose-shaped file a member repo may carry, not just the default one:
