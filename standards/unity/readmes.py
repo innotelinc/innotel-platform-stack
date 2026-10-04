@@ -20,7 +20,6 @@ REPOS = [
     "1-primary/cerulean",
     "1-primary/magnate",
     "1-primary/npm",
-    "1-primary/ontrak-sync",
     "1-primary/signara",
     "1-primary/verifier",
     "2-voice/capstone",

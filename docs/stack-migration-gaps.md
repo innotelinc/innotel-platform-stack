@@ -940,7 +940,9 @@ services:
   a group-1 host does not have. That is rule 8's case exactly, so the repo is
   recorded in `OWN_HOST_REPOS` with the measurement, and the drift check now
   reports every group compose as declaring what its member repos run (**exit 0**,
-  down from three findings).
+  down from three findings). (The standalone `1-primary/ontrak-sync` checkout has
+  since been removed: the family repo's `ontrak-sync/` subtree is the single copy,
+  covered by the `1-primary/ontrak` exclusion.)
 
 What the pass left alone, and why:
 
