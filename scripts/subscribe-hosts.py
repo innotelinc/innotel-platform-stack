@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import sys
 import urllib.error
 import urllib.request
@@ -132,12 +133,39 @@ class Npm:
 
 
 def cert_index(certs: list[dict]) -> dict[str, int]:
-    """Every name a certificate covers -> certificate id (lowercased)."""
+    """Every name a certificate covers -> certificate id (lowercased).
+
+    A wildcard is reconstructed from the name Cerulean gives it. NPM's upload
+    route rewrites a custom certificate's `domain_names` to just its CN, so a
+    `*.monarch.innotel.us` wildcard is listed here as `monarch.innotel.us` and
+    nothing in the response says it is a wildcard — except the `-wildcard`
+    suffix Cerulean puts on `nice_name`. Without this, every subscribe host
+    looks uncovered and the tool would request a fresh certificate for all of
+    them, every run.
+    """
     index: dict[str, int] = {}
     for cert in certs:
+        wildcard = "-wildcard" in (cert.get("nice_name") or "").lower()
         for name in cert.get("domain_names") or []:
-            index.setdefault(name.lower(), cert["id"])
+            name = name.lower()
+            index.setdefault(name, cert["id"])
+            if wildcard and not name.startswith("*."):
+                index.setdefault(f"*.{name}", cert["id"])
     return index
+
+
+def resolves(name: str) -> bool:
+    """Whether a name resolves at all — a prerequisite for an HTTP-01 cert.
+
+    Requesting a certificate for a name with no DNS record cannot succeed; it
+    only spends Let's Encrypt's failure budget and leaves a dead proxy host
+    behind. So a name that does not resolve is reported and skipped instead.
+    """
+    try:
+        socket.getaddrinfo(name, None)
+        return True
+    except OSError:
+        return False
 
 
 def covering_cert(index: dict[str, int], name: str) -> int | None:
@@ -241,6 +269,10 @@ def main() -> int:
     parser.add_argument("--check", action="store_true",
                         help="report drift without writing; exit 1 if out of sync")
     parser.add_argument("--api-url", default=None)
+    parser.add_argument("--only", action="append", default=[], metavar="SERVICE",
+                        help="limit to these services (repeatable). The apex "
+                             "directory is included only when no --only is given, "
+                             "so a scoped run never rewrites unrelated hosts.")
     args = parser.parse_args()
 
     api_url = args.api_url or os.environ.get("NPM_API_URL") or DEFAULT_API_URL
@@ -262,8 +294,17 @@ def main() -> int:
         print(f"FAIL no subscribe pages in {PAGES} — run sync-subscribe-pages.py",
               file=sys.stderr)
         return 1
+    only = {s.strip().lower() for s in args.only if s.strip()}
+    if only:
+        unknown = only - set(services)
+        if unknown:
+            print(f"FAIL --only names no page: {', '.join(sorted(unknown))}",
+                  file=sys.stderr)
+            return 1
+        services = [s for s in services if s in only]
     managed = [s for s in services if s not in NOT_MANAGED]
-    names = ["subscribe.innotel.us"] + [f"subscribe.{s}.innotel.us" for s in managed]
+    names = ([] if only else ["subscribe.innotel.us"]) + \
+        [f"subscribe.{s}.innotel.us" for s in managed]
 
     print(f"portal: http://{portal_host}:{portal_port}  ·  edge NPM: {api_url}")
     for service, why in sorted(NOT_MANAGED.items()):
@@ -290,6 +331,16 @@ def main() -> int:
     for name in names:
         label = "subscribe.innotel.us (apex directory)" if name == "subscribe.innotel.us" \
             else name.replace(".innotel.us", "")
+        # A name with no DNS cannot get an HTTP-01 certificate, and a host
+        # without it would be unreachable anyway — report it and skip, rather
+        # than spend Let's Encrypt's failure budget on it every run.
+        if not resolves(name):
+            print(f"FAIL {label} — {name} does not resolve; add its DNS record "
+                  "first (a certificate cannot be issued for it, and a host "
+                  "without it would be unreachable)")
+            failed.append(name)
+            continue
+
         cert_id = covering_cert(index, name)
         if cert_id is None:
             if args.check:
