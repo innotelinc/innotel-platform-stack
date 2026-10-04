@@ -40,9 +40,9 @@ TEMPLATE = STACK / "web" / "subscribe" / "template.html"
 # Services we render. The slug is both the directory/file name and the
 # ?service= value on Magnate's price API — they must stay identical.
 SERVICES = [
-    "magnate", "monarch", "zeus", "capstone", "oasis", "onyx", "signara",
-    "atlas", "atheniq", "olympus", "plutus", "distro", "rizzaura", "zapit",
-    "cerulean",
+    "magnate", "monarch", "jellyfin", "zeus", "capstone", "oasis", "onyx",
+    "signara", "atlas", "atheniq", "olympus", "plutus", "distro", "genesis",
+    "ontrak", "verifier", "genie", "rizzaura", "zapit", "cerulean",
 ]
 
 # Which mesh group dir a service's repo is checked out under. Every repo dir
@@ -50,8 +50,9 @@ SERVICES = [
 GROUP_OF = {
     "cerulean": "1-primary", "atheniq": "1-primary", "magnate": "1-primary",
     "signara": "1-primary", "sign": "1-primary", "verifier": "1-primary",
+    "genesis": "1-primary", "ontrak": "1-primary", "genie": "1-primary",
     "capstone": "2-voice", "zeus": "2-voice",
-    "monarch": "3-media", "plutus": "3-media",
+    "monarch": "3-media", "plutus": "3-media", "jellyfin": "3-media",
     # NPM Edge moved to Group 1: the edge sits with the trust layer that issues
     # the certificates it terminates, not with the media stacks it routes.
     "npm": "1-primary",
@@ -91,6 +92,11 @@ DEFAULTS = {
     "rizzaura": {"name": "Rizz Aura", "tagline": "Your community, your rules", "accent": "#f472b6"},
     "zapit": {"name": "ZapIt", "tagline": "Short links, fast", "accent": "#38bdf8"},
     "cerulean": {"name": "Cerulean", "tagline": "One login for the whole platform", "accent": "#3aa0ff"},
+    "genesis": {"name": "Genesis", "tagline": "One workflow from idea to a registered business", "accent": "#4ade80"},
+    "ontrak": {"name": "OnTrak", "tagline": "Self-hosted IT support training, ticketing and evidence", "accent": "#fb923c"},
+    "verifier": {"name": "Verifier", "tagline": "Conformity and attribution guard for the whole stack", "accent": "#94a3b8"},
+    "genie": {"name": "Genie", "tagline": "Your own preview subdomain under genie.innotel.us", "accent": "#a78bfa"},
+    "jellyfin": {"name": "Jellyfin", "tagline": "Your own private streaming server", "accent": "#00a4dc"},
 }
 
 # Accent tints used for the gradient wash, derived per page from --accent.
