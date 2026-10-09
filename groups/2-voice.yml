@@ -70,6 +70,10 @@ x-sso-gateway: &sso-gateway
 
 services:
   postgres:   # from capstone
+    # dograh-api blocks on all three of postgres/redis/minio; without a restart
+    # policy a stop (a host reboot, an OOM, a `compose down` of one service)
+    # left it crash-looping on ConnectionRefused with every other service green.
+    restart: unless-stopped
     image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: postgres
@@ -88,6 +92,7 @@ services:
 
 
   redis:   # from capstone
+    restart: unless-stopped
     image: redis:7
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redissecret}"]
     ports:
@@ -103,6 +108,7 @@ services:
 
 
   minio:   # from capstone
+    restart: unless-stopped
     # Mirrored into this repo's GHCR namespace by the release pipeline
     # (.github/workflows/release.yml). Upstream MinIO no longer serves
     # anonymous pulls from anywhere public — docker.io `minio/minio` is gone
@@ -525,7 +531,7 @@ services:
       context: ../../2-voice/capstone
       dockerfile: n8n.Dockerfile
     image: ${N8N_IMAGE:-capstone-n8n-otel:local}
-    pull_policy: build
+    pull_policy: missing
     container_name: n8n
     restart: unless-stopped
     # Memory posture: workflow runs are bursty; NODE_OPTIONS (in the env block
@@ -781,7 +787,7 @@ services:
       context: ../../2-voice/capstone
       dockerfile: workflow-studio.Dockerfile
     image: ${WORKFLOW_STUDIO_IMAGE:-capstone-workflow-studio:local}
-    pull_policy: build
+    pull_policy: missing
     container_name: workflow-studio
     restart: unless-stopped
     ports:
@@ -1145,7 +1151,7 @@ services:
       context: ../../2-voice/capstone/dashboard-backend
       dockerfile: Dockerfile
     image: ${DASHBOARD_API_IMAGE:-capstone-dashboard-api:local}
-    pull_policy: build
+    pull_policy: missing
     container_name: dashboard-api
     restart: unless-stopped
     ports:
@@ -1222,6 +1228,22 @@ services:
       # (docker exec). addon: Zeus shared PBX — dashboard only manages dograh;
       # the shared box applies the *_custom.conf moniker on sync.
       CAPSTONE_DEPLOY_MODE: "${CAPSTONE_DEPLOY_MODE:-standalone}"
+      # PBX self-healing (standalone mode only). The bundled freepbx sits behind
+      # profiles: ["standalone"], so a profile-less `docker compose up -d` stops
+      # it; the API starts it on the next PBX action and a background watchdog
+      # recovers it otherwise. Seconds; PBX_WATCHDOG_INTERVAL=0 disables the
+      # watchdog.
+      PBX_START_WAIT_S: "${PBX_START_WAIT_S:-60}"
+      PBX_WATCHDOG_INTERVAL: "${PBX_WATCHDOG_INTERVAL:-60}"
+      # FreePBX serialises `fwconsole reload` with a lock file, so a reload can
+      # collide with one already in flight (the pbx-sync timer, another page's
+      # repair). A collision is waited out and retried rather than reported as a
+      # failed repair. Seconds; PBX_RELOAD_MAX_WAIT=0 fails fast instead.
+      PBX_RELOAD_MAX_WAIT: "${PBX_RELOAD_MAX_WAIT:-60}"
+      PBX_RELOAD_POLL: "${PBX_RELOAD_POLL:-2}"
+      # Keep the docker-derived /health, /services and /stats caches warm so a
+      # request never pays the cold `docker stats` walk. Seconds; 0 disables.
+      DASHBOARD_CACHE_WARM_INTERVAL: "${DASHBOARD_CACHE_WARM_INTERVAL:-5}"
       # Shared Magnate storefront for entitlement checks (RevenueOps);
       # empty when running standalone (no billing).
       MAGNATE_PUBLIC_URL: "${MAGNATE_PUBLIC_URL:-}"
@@ -1253,7 +1275,7 @@ services:
       context: ../../2-voice/capstone/dashboard
       dockerfile: Dockerfile
     image: ${DASHBOARD_IMAGE:-capstone-dashboard:local}
-    pull_policy: build
+    pull_policy: missing
     container_name: dashboard
     restart: unless-stopped
     environment:
@@ -1401,6 +1423,19 @@ services:
     image: ${ZEUS_PBX_IMAGE:-ghcr.io/innotelinc/zeus:latest-fullstack}
     container_name: zeus-freepbx
     restart: unless-stopped
+    # Asterisk signs its own SIP requests with this hostname. For a client
+    # inside `local_net` — a browser on the LAN, the case the softphone runs in
+    # when it is opened on-site — the external_signaling_* pair does not apply,
+    # so the local identity is what lands in the From and Contact headers of
+    # every INVITE/NOTIFY. Docker's default is the 12-hex-char container id,
+    # and a bare label that starts with a digit is not a hostname under
+    # SIP.js's ABNF (`toplabel` must begin with a letter): it logged
+    # "error parsing header 'Contact'" and dropped the INVITE, so the browser
+    # softphone could register but never receive a call. A valid, stable name
+    # is the whole fix; `external_signaling_hostname` cannot substitute, it is
+    # mutually exclusive with the external_signaling_address FreePBX already
+    # renders onto the transport.
+    hostname: zeus-pbx
     security_opt:
       - apparmor=unconfined
     ports:
