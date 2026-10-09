@@ -17,13 +17,15 @@ for a host that does not answer. This check is the difference: it pings every ad
 estate dials, so "the address is there" and "the address answers" are both watched.
 
 It also carries the number that made the 2026-10-02 `i4` WiFi **power-save** regression
-visible. `i4`'s only uplink is WiFi, the edge sits behind it, and with power save on an
+visible. `i4` was WiFi-only then, the edge sits behind it, and with power save on an
 *idle* container answered in **100–900 ms** while the busy edge looked fine: the radio held
 frames until the next DTIM beacon (~312 ms). Turning it off
-(`systemd/wifi-powersave-off.service`) put every container back at **~7 ms**. The lesson is
+(`systemd/wifi-powersave-off.service`) put every container back at **~7 ms**. i4 has since
+moved to a bridged USB uplink with the radio down (see `docs/container-placement.md`
+§The i4 host), so that hop is no longer on the path. The lesson still stands, because it is
 not "turn power save off" — it is that the regression was **felt, not measured**, and a
-host re-image or a driver default can put it back. See `docs/container-placement.md`
-§The i4 host and §The i4 host's trust.
+host re-image, a driver default or a move back to the radio can put it back. See
+`docs/container-placement.md` §The i4 host and §The i4 host's trust.
 
 WHAT IT PROBES
 --------------
@@ -241,9 +243,12 @@ def audit(readings: list[Reading]) -> Audit:
                 )
             )
             continue
-        # Partial loss is a note, not a warning: on this topology (routed NICs over a WiFi
-        # uplink) a lost first burst is normal, and a warning here would page every run.
-        # It is still printed, because a link that starts dropping more is worth seeing.
+        # Partial loss is a note, not a warning: that was calibrated on the WiFi-uplink
+        # topology (routed NICs, a first burst routinely lost to power save), where a
+        # warning would have paged on every run. i4 is now bridged over a wired uplink, so
+        # the calibration is stale — retightening it is a separate call with its own
+        # measurement, not a side effect of the host moving. It is still printed, because a
+        # link that starts dropping more is worth seeing.
         if reading.lost:
             out.findings.append(
                 Finding(

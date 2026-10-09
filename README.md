@@ -732,8 +732,8 @@ Rules that hold in both:
 | ONYX (StorageOps) | [innotelinc/onyx](https://github.com/innotelinc/onyx) | [docs/stack.md](https://github.com/innotelinc/onyx/blob/main/docs/stack.md) |
 | Magnate (RevenueOps) | [innotelinc/magnate](https://github.com/innotelinc/magnate) | [docs/stack.md](https://github.com/innotelinc/magnate/blob/main/docs/stack.md) |
 | Monarch (MediaOps) | [innotelinc/monarch](https://github.com/innotelinc/monarch) | [docs/stack.md](https://github.com/innotelinc/monarch/blob/main/docs/stack.md) |
-| Zeus (VoiceOps) | [innotelinc/zeus](https://github.com/innotelinc/zeus) | [docs/stack.md](https://github.com/innotelinc/zeus/blob/main/docs/stack.md) |
-| Oasis (MailOps) | [innotelinc/oasis](https://github.com/innotelinc/oasis) | [docs/stack.md](https://github.com/innotelinc/oasis/blob/main/docs/stack.md) |
+| Zeus (VoiceOps) | [innotelinc/zeus](https://github.com/innotelinc/zeus) | [docs/stack.md](https://github.com/innotelinc/zeus/blob/master/docs/stack.md) |
+| Oasis (MailOps) | [innotelinc/oasis](https://github.com/innotelinc/oasis) | [docs/stack.md](https://github.com/innotelinc/oasis/blob/master/docs/stack.md) |
 | Signara (DocumentOps) | [innotelinc/signara](https://github.com/innotelinc/signara) | [docs/stack.md](https://github.com/innotelinc/signara/blob/main/docs/stack.md) |
 | Capstone (AgentOps) | [innotelinc/capstone](https://github.com/innotelinc/capstone) | [docs/stack.md](https://github.com/innotelinc/capstone/blob/main/docs/stack.md) |
 | NPM Edge (EdgeOps) | [innotelinc/npm](https://github.com/innotelinc/npm) | [ABOUT.md](https://github.com/innotelinc/npm/blob/develop/ABOUT.md) |
