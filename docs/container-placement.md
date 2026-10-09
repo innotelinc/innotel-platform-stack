@@ -87,7 +87,7 @@ estate as it is, not as it was.
   (The 2026-09-27 note below that `limits.cpu` waits for a restart is wrong, and is
   corrected here.)
 - **The estate's host invariants are scheduled and alerting.**
-  `systemd/estate-checks.{service,timer}` runs seven checks every 30 minutes *on the
+  `systemd/estate-checks.{service,timer}` runs eight checks every 30 minutes *on the
   Cerulean edge* and writes each one's textfile into node-exporter's directory:
   `check-container-addresses.py` (every address an A record names),
   `check-container-limits.py` (a declared `limits.cpu` is the cpuset actually pinned),
@@ -103,9 +103,12 @@ estate as it is, not as it was.
   `check-mail-auth.py` (each mail domain's SPF, DKIM and DMARC records resolve in the
   zone the public reads, with the DKIM selectors versioned in the check — Stalwart now
   publishes a rotation itself, and this reads what the public zone actually serves —
-  see §*Open items*).
+  see §*Open items*), and
+  `check-mail-relay.py` (the **outbound** half: non-local recipients route at a
+  smarthost, that route exists and answers, every sending domain has an *active* DKIM
+  signature, and the queue drains — each of which has broken here with no symptom).
   They share one metric family — `innotel_estate_check`, one series per check via a
-  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all seven
+  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all eight
   (`EstateCheckFailing`, `...CouldNotRun`, `...Stale`, `...NotPinned`), and the
   provisioned `grafana/dashboards/estate-checks.json` shows them (a green stat, a
   per-check table, whether the receiver delivered, and the per-address latency chart). The edge reaches
@@ -196,8 +199,11 @@ estate as it is, not as it was.
   Alertmanager's v2 API, then reads the mail server's delivery log for a delivery from
   the receiver's address to its recipient within the window. No delivery is a **failure**
   naming the receiver's own last notify error; a host it cannot read is exit 2, never
-  silence. It needs `i3` (Alertmanager) and `i1` (Stalwart), so it keeps its own two-host
-  table rather than joining the four-host coverage guard. Verified live 2026-10-02: the
+  silence. It needs `i3` (Alertmanager) and the host carrying `mail`, so it keeps its own
+  two-host table rather than joining the four-host coverage guard — and it **derives**
+  the mail server's host from the container address table rather than pinning it, because
+  that server moves (`mail` went `i1` → `i4` on 2026-10-09, and a check still reading `i1`
+  exits 2 instead of noticing). Verified live 2026-10-02: the
   probe alert was seen delivered to `admin@innotel.us`.
 - **The edge is watched from off the edge, and the report goes out by mail.**
   `scripts/check-edge-liveness.py` runs on `i1` under `systemd/edge-liveness.{service,timer}`
@@ -259,6 +265,33 @@ estate as it is, not as it was.
   or every run warns about it — is what puts it there. **If it is a throwaway, delete the
   container and its row together**: the table is enforced in both directions, so a row for
   a container someone removes fails the same way a missing row warns.
+- **The mail server came back up, and the estate's alert path with it.** `mail` arrived on
+  `i4` with Stalwart **stopped**: its log ends `2026-10-04T05:08:50Z … Shutting down
+  (SIGINT)`, and nothing restarted it, so nothing listened on
+  25/465/587/993/995/4190/8080 — `check-mail-relay.py` was exit 2 and
+  `check-alert-delivery.py` could not run at all. It runs again from the archived v0.16.20
+  binary against the store it already had, in the configuration shape the Oct-4 backup
+  recorded (recovery mode **off**, the `STALWART_RECOVERY_ADMIN` credential, the same
+  RocksDB data and DKIM keys), and every listener is up. Two failures underneath it were
+  each invisible *from the mail server*:
+  - **Alertmanager could not authenticate.** The `alertmanager@innotel.us` submission
+    credential on the server and the `SMTP_PASS` Signara's `.env` has carried since the
+    Oct-6 deploy were different values, so every notification died as
+    `535 5.7.8 Authentication credentials invalid` — with no symptom beyond mail that
+    never arrived. The account now carries the value Signara already holds: no secret was
+    minted and none was written onto another host, the server was pointed at its own
+    consumer's copy. `check-alert-delivery.py` is clean again, verified live.
+  - **The host the receiver runs on was permanently banned.** Stalwart's `portScanning`
+    filter banned `signara` `.44` on 2026-10-03 with `expiresAt: null`; the ban was
+    cleared and an `AllowedIp` for `192.168.1.0/24` added, because the estate's own LAN
+    should not be scan-banned by its own mail server.
+- **`check-mail-relay.py` is in this repo now.** It had been running on the edge every 30
+  minutes — with the recovery admin password as a **literal default in a mode-0755 file**
+  — and was in no repo, no rule and no dashboard, so its failures reached nobody and its
+  credential sat on a host. It now publishes the shared family (`mail_relay`), with an
+  `EstateCheckAbsent` branch, a unit line, a dashboard entry and unit tests, and reads its
+  credential only from `/etc/innotel/estate-checks.env` (0640) on the edge, which is where
+  that literal went.
 - **The liveness watcher is now co-located with what it watches, and that is a defect.**
   `systemd/edge-liveness.{service,timer}` was installed on `i1` *because the edge was not
   there*, and this change moved the edge back onto `i1` — so the watcher and its subject

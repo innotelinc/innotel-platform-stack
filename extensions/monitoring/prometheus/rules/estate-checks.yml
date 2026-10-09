@@ -7,8 +7,8 @@
 # `scripts/check-container-addresses.py` (`container_address`),
 # `check-container-limits.py` (`container_limits`), `check-estate-inventory.py`
 # (`estate_inventory`), `check-address-latency.py` (`address_latency`),
-# `check-host-disk.py` (`host_disk`), `check-alert-delivery.py` (`alert_delivery`) and
-# `check-mail-auth.py` (`mail_auth`), run by
+# `check-host-disk.py` (`host_disk`), `check-alert-delivery.py` (`alert_delivery`),
+# `check-mail-auth.py` (`mail_auth`) and `check-mail-relay.py` (`mail_relay`), run by
 # `systemd/estate-checks.{service,timer}` on the Cerulean edge, which writes each into
 # node-exporter's textfile directory.
 #
@@ -29,7 +29,12 @@
 # certificate under the mail: it reads the SPF, DKIM and DMARC records back from the zone
 # the public sees for every domain the estate signs as, because Stalwart generates the
 # keys but its automatic DNS publishing is refused by that zone, so a missing or rotated
-# record is otherwise only visible as mail that quietly fails verification.
+# record is otherwise only visible as mail that quietly fails verification. `mail_relay`
+# is the other half of the mail path — outbound rather than inbound authentication: the
+# smarthost route, its reachability, an active DKIM signature per sending domain and a
+# queue that drains, each of which has broken here without a symptom. (It arrived in this
+# repo on 2026-10-09; it had been running on the edge with a literal password in a
+# mode-0755 file and no rules, so a failure in it reached nobody.)
 #
 # Every rule but one keys on a series, so it can only speak about a check whose
 # textfile reached node-exporter. `EstateCheckAbsent` is the exception: it fires when a
@@ -67,6 +72,7 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="host_disk"}), "check", "host_disk", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="alert_delivery"}), "check", "alert_delivery", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="mail_auth"}), "check", "mail_auth", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="mail_relay"}), "check", "mail_relay", "check", ".*")
         for: 30m
         labels:
           severity: critical
