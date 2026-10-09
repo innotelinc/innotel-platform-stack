@@ -13,7 +13,8 @@
 #   1. Refuses to run on a dirty working tree (commit first).
 #   2. Pushes the current branch.
 #   3. Computes the next patch (or minor for X.Y schemes) from the last
-#      remote tag, or uses the explicit version argument.
+#      remote tag, or uses the explicit version argument. A repo with no tags
+#      starts at 0.1.0; a non-version marker tag needs an explicit version.
 #   4. Creates + pushes the tag (fires the repo's release workflow).
 #      Some repos publish on the release event instead of the tag push —
 #      e.g. OnTrak's publish.yml runs on `release: [published]` — and some
@@ -58,11 +59,20 @@ git push origin "$BRANCH"
 if [ -n "$EXPLICIT" ]; then
   VERSION="${EXPLICIT#v}"
 else
-  LAST="$(git ls-remote --tags origin 2>/dev/null | awk -F/ '{print $NF}' | grep -v '\^{}' | sort -V | tail -1)"
+  # `grep -v` exits 1 on empty input, and this pipeline runs under `set -e`
+  # with `pipefail`, so without the `|| true` a repo with no tags yet aborted
+  # the script before it could tag anything (OnTrak, olympus, verifier).
+  LAST="$(git ls-remote --tags origin 2>/dev/null | awk -F/ '{print $NF}' | grep -v '\^{}' | sort -V | tail -1 || true)"
   LAST="${LAST#v}"
   if [ -z "$LAST" ]; then
     VERSION="0.1.0"
   else
+    # A marker tag (`olympus-pre-rewrite-20260912`) is not a version; say so
+    # instead of dying on an unbound PARTS[1] under `set -u`.
+    if ! [[ "$LAST" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+      echo "error: last tag '$LAST' is not a version — pass an explicit version" >&2
+      exit 1
+    fi
     IFS='.' read -r -a PARTS <<<"$LAST"
     if [ "${#PARTS[@]}" -ge 3 ]; then
       VERSION="${PARTS[0]}.${PARTS[1]}.$((PARTS[2] + 1))"
