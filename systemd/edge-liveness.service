@@ -4,14 +4,15 @@ Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/doc
 
 # Runs on a host that is NOT the edge. Every other estate check — and the Prometheus that
 # evaluates their rules — lives on the edge (`proxy`), so none of them can report the edge
-# being gone. This one can, because it is somewhere else.
+# being gone. This one can, because it is somewhere else: `i4` since 2026-10-09.
 #
-# OPEN (2026-10-09): this unit is installed on `i1`, and the placement change of that day
-# moved the edge back onto `i1` too — so "somewhere else" does not hold here at the moment,
-# and a host failure now takes the watcher and the edge out together. Re-home this unit to a
-# non-edge host (`i4`, which gave the edge up on 2026-10-09, is the obvious one) or move the
-# edge off `i1`. Until then it still reports an edge *ingress* failure, which is most of
-# what it has ever caught. See docs/container-placement.md §Changes applied 2026-10-09.
+# The unit and the edge must never share a host — that is the whole point of it. It was
+# installed on `i1` *because* the edge was not there, and the 2026-10-09 placement change
+# moved the edge back onto `i1`, briefly co-locating them; the same change gave `i4` a wired
+# uplink and left it carrying `atheniq`, `mail`, `vault` and `vpn`, so the watcher moved
+# there the same day. Whoever changes placement next checks the pair: the host this unit is
+# installed on must not carry `proxy`. See docs/container-placement.md §Changes applied
+# 2026-10-09.
 After=network-online.target
 Wants=network-online.target
 
@@ -29,7 +30,7 @@ WorkingDirectory=/opt/innotel/edge-liveness
 # an Alertmanager's /api/v2/alerts), also empty by default.
 #
 # LIVENESS_TEXTFILE_DIR is where this host's node-exporter (if one is pointed at that
-# directory) can collect the result for a Prometheus off the edge; on `i1` today no
+# directory) can collect the result for a Prometheus off the edge; on `i4` today no
 # collector reads it, so it is written for whoever wires one up first.
 EnvironmentFile=-/etc/innotel/edge-liveness.env
 Environment=LIVENESS_TEXTFILE_DIR=/var/lib/node_exporter/textfile
