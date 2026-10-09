@@ -1,8 +1,10 @@
 [Unit]
 Description=Disable WiFi power save on the i4 host's uplink (wlp1s0)
 
-# i4's only uplink is WiFi and its containers are routed over it (see
-# docs/container-placement.md §The i4 host). With power save on, the radio holds frames
+# i4 was WiFi-only when this was written, its containers routed over the radio (see
+# docs/container-placement.md §The i4 host). It has since moved to a bridged USB uplink
+# with wlp1s0 down, so that hop is off the path today and this unit is inert — it is kept
+# because the radio remains the fallback uplink. With power save on, the radio holds frames
 # until the next DTIM beacon — measured 2026-10-02 at ~312 ms spacing — so an *idle*
 # container's replies arrive 100-900 ms late while a busy one (the edge) looks fine,
 # because its own traffic keeps the radio awake. That is a latency trap with no error
@@ -12,7 +14,7 @@ Description=Disable WiFi power save on the i4 host's uplink (wlp1s0)
 #   power save on : .22 avg 155 ms / max 895 ms, .73 avg 165 ms / max 912 ms
 #   power save off: .22 avg  12 ms / max  22 ms, .73 avg  11 ms / max  24 ms
 #
-# So the edge does not need a wired NIC for latency; it needs the radio not to sleep.
+# So the edge did not need a wired NIC for latency; it needed the radio not to sleep.
 After=network-online.target wpa_supplicant.service
 Wants=network-online.target
 # Re-apply when the supplicant restarts — a reconnect can reset the driver setting.
