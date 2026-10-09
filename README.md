@@ -740,7 +740,7 @@ Rules that hold in both:
 | Rizz Aura (CommunityOps) | [innotelinc/rizzaura](https://github.com/innotelinc/rizzaura) | [docs/stack.md](https://github.com/innotelinc/rizzaura/blob/main/docs/stack.md) |
 | zapit (TransferOps) | [innotelinc/zapit](https://github.com/innotelinc/zapit) | [docs/stack.md](https://github.com/innotelinc/zapit/blob/main/docs/stack.md) |
 | AthenIQ (LearningOps) | [innotelinc/atheniq](https://github.com/innotelinc/atheniq) | [docs/stack.md](https://github.com/innotelinc/atheniq/blob/main/docs/stack.md) |
-| OnTrak (TrainingOps) | [innotelinc/OnTrak](https://github.com/innotelinc/OnTrak) | [docs/stack.md](https://github.com/innotelinc/OnTrak/blob/family/docs/stack.md) |
+| OnTrak (TrainingOps) | [innotelinc/OnTrak](https://github.com/innotelinc/OnTrak) | [docs/stack.md](https://github.com/innotelinc/OnTrak/blob/main/docs/stack.md) |
 | Atlas (CodeOps) | [innotelinc/atlas](https://github.com/innotelinc/atlas) | [docs/stack.md](https://github.com/innotelinc/atlas/blob/main/docs/stack.md) |
 | Distro (BuilderOps) | [innotelinc/distro](https://github.com/innotelinc/distro) | [docs/stack.md](https://github.com/innotelinc/distro/blob/main/docs/stack.md) |
 | Olympus (FactoryOps) | [innotelinc/olympus](https://github.com/innotelinc/olympus) | [docs/stack.md](https://github.com/innotelinc/olympus/blob/main/docs/stack.md) |
