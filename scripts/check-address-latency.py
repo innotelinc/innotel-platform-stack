@@ -31,8 +31,10 @@ WHAT IT PROBES
 --------------
 Every dialled address: each estate host (`HOSTS`) **and** every container in the address
 table (`EXPECTED`, read from `check-container-addresses.py` so the two cannot drift). The
-probe is ICMP from wherever the check runs — on the edge, which is the place the estate is
-dialled from and the only place the `i4` WiFi hop is on the path.
+probe is ICMP from wherever the check runs — the Cerulean edge, which is the place the
+estate is dialled from. Until 2026-10-09 the edge was a container on `i4`, which is what
+put a WiFi hop on the path to everything; the edge is back on `i1` and `i4` is wired, so
+the path this measures today is a flat bridged LAN.
 
 One ping per sample after an idle gap, because that is the state power save shows up in:
 a ping every 200 ms keeps the radio awake and would measure the good case with power save
@@ -87,8 +89,9 @@ from estate_check import Audit, Finding, METRIC, write_prom  # noqa: E402
 
 CHECK = "address_latency"
 
-#: Where each estate host is reachable. The probe runs where the check runs — on the
-#: Cerulean edge, which is the only place the `i4` WiFi hop is on the path to all of them.
+#: Where each estate host is reachable. The probe runs where the check runs — the
+#: Cerulean edge, which is where every dialled address is measured from (`proxy`, on `i1`
+#: since 2026-10-09; on `i4` before that, which is where the WiFi-hop reading came from).
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
     "i2": "root@192.168.1.52",
