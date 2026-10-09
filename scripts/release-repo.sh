@@ -106,8 +106,17 @@ gh release create "$TAG" -R "$SLUG" --title "$TAG" --notes "$NOTES" 2>/dev/null 
 echo "==> watching the release workflow (can take several minutes)..."
 RUN_ID=""
 for _ in $(seq 1 60); do
-  RUN_ID="$(gh run list -R "$SLUG" --limit 20 --json databaseId,workflowName,event --jq \
-    "[.[] | select((.workflowName|test(\"(?i)release|publish\")) and (.event==\"push\" or .event==\"release\"))][0].databaseId" 2>/dev/null || true)"
+  # Match the run to THIS release. Taking the newest release-named run reported
+  # the *previous* tag's run as this one's: v0.1.4 was announced green off
+  # v0.1.3's run, because v0.1.4's own had not appeared yet when the first poll
+  # ran, so the loop's first hit was a stale run that had already succeeded.
+  # A tag push and a release event both carry the tag in headBranch, so require
+  # the run to be for this tag — or for the branch just pushed, for the rare
+  # pipeline that fires on branch pushes rather than on the tag.
+  RUN_ID="$(gh run list -R "$SLUG" --limit 30 --json databaseId,workflowName,event,headBranch --jq \
+    "[.[] | select((.workflowName|test(\"(?i)release|publish\"))
+                   and (.event==\"push\" or .event==\"release\")
+                   and (.headBranch==\"$TAG\" or .headBranch==\"$BRANCH\"))][0].databaseId" 2>/dev/null || true)"
   [ -n "$RUN_ID" ] && break
   sleep 5
 done
