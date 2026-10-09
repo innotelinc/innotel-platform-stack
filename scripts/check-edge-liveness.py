@@ -15,14 +15,15 @@ So this runs somewhere else — a normal estate host, not the edge — and does 
 possible thing: it connects to the edge **as the estate dials it**. If the edge's ingress
 stops answering, this is the process that still knows, and `--notify` is how it says so.
 
-**"Somewhere else" is currently not true.** The unit is installed on `i1`
-(`systemd/edge-liveness.service`), and the 2026-10-09 placement change moved the edge —
-`proxy` — back onto `i1` as well, so the watcher and the thing it watches share a host and
-a host-level failure takes both out. This still catches an edge **ingress** failure (a dead
-NPM, Authentik or Docker), which is most of what it has ever caught; it no longer catches
-the host going down, which is the case it was written for. Re-home it onto a non-edge host
-(`i4` gave the edge up on 2026-10-09 and is the obvious one) or move the edge off `i1`
-again; see `docs/container-placement.md` §Changes applied 2026-10-09.
+**Where it runs is the invariant.** "Somewhere else" is `i4` since 2026-10-09
+(`systemd/edge-liveness.{service,timer}`): the watcher and `proxy` must never share a host.
+That was briefly not true — the unit had been installed on `i1` *because* the edge was not
+there, and the 2026-10-09 placement change moved the edge back onto `i1`, so a host failure
+took out the watcher and the edge together. The same change gave `i4` a wired uplink and
+left it carrying `atheniq`, `mail`, `vault` and `vpn`, which makes it a normal estate host
+and the watcher's home. Placement changes have to check the pair: whichever host the
+watcher is installed on must not carry `proxy`. See `docs/container-placement.md`
+§Changes applied 2026-10-09.
 
 WHAT IT PROBES
 --------------
@@ -91,11 +92,10 @@ DEFAULT_ENDPOINTS = ["192.168.1.71:80", "192.168.1.71:443"]
 #: Where mail goes when `--mail-to` is set: the estate's own mail server (`mail` on `i4`
 #: since 2026-10-09; on `i1` when this was written). Deliberately the estate's, not an
 #: external relay: this must work when the edge is gone, so it cannot depend on anything
-#: hosted on the edge — which is why it matters that the edge and `mail` are on different
-#: hosts — or on a credential
-#: nobody has checked. The recipient has no default — an alert sent to an address nobody
-#: chose is the failure mode that left the edge's own Alertmanager delivering nowhere
-#: (see docs/container-placement.md §Open items).
+#: hosted on the edge — which is why the watcher's host and `mail`'s host both matter — or
+#: on a credential nobody has checked. The recipient has no default — an alert sent to an
+#: address nobody chose is the failure mode that left the edge's own Alertmanager delivering
+#: nowhere (see docs/container-placement.md §Open items).
 SMTP_HOST = "192.168.1.15"
 SMTP_PORT = 25
 MAIL_FROM = "edge-watch@innotel.us"

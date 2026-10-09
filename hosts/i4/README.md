@@ -91,6 +91,17 @@ interface-scoped keys were only ever needed because `systemd-sysctl` runs before
 the uplink exists — the unit that re-asserted them is retired alongside the
 routed NICs.
 
+## The off-edge liveness watcher runs here
+
+`/opt/innotel/edge-liveness/check-edge-liveness.py` with
+`/etc/systemd/system/edge-liveness.{service,timer}` and
+`/etc/innotel/edge-liveness.env` (the mail recipient), installed from
+`scripts/` + `systemd/` in this repo. It TCP-connects to the edge's doors every five
+minutes and mails on failure, and it is here because **this host must not carry
+`proxy`**: a watcher that shares a host with the edge cannot report that host being
+gone. It moved here on 2026-10-09 from `i1`, where the 2026-10-09 placement change had
+just put the edge back. A future placement change checks the pair.
+
 ## Retired
 
 - **`incus-routed-firewall` + `.service`** — the FORWARD ACCEPT rules that let

@@ -206,12 +206,12 @@ estate as it is, not as it was.
   exits 2 instead of noticing). Verified live 2026-10-02: the
   probe alert was seen delivered to `admin@innotel.us`.
 - **The edge is watched from off the edge, and the report goes out by mail.**
-  `scripts/check-edge-liveness.py` runs on `i1` under `systemd/edge-liveness.{service,timer}`
+  `scripts/check-edge-liveness.py` runs on `i4` under `systemd/edge-liveness.{service,timer}`
   every five minutes and TCP-connects to the edge's doors; two attempts per endpoint, so
-  one dropped packet on the WiFi link does not page. On failure it exits non-zero (the unit
+  one dropped packet does not page. On failure it exits non-zero (the unit
   shows failed) and mails `EDGE_LIVENESS_MAIL_TO` through the estate's own mail server —
   not through the estate's Alertmanager, which is loopback-only on `i3` and so not
-  something a watcher on `i1` can POST to. It is the only checker that can still report the edge being gone, because it does
+  something a watcher on another host can POST to. It is the only checker that can still report the edge being gone, because it does
   not run there.
 - **The scheduled checks now cover `i4`.** `check-estate-inventory.py` no longer lists
   it as an optional bench (every named host must answer), `check-container-addresses.py`
@@ -292,14 +292,15 @@ estate as it is, not as it was.
   `EstateCheckAbsent` branch, a unit line, a dashboard entry and unit tests, and reads its
   credential only from `/etc/innotel/estate-checks.env` (0640) on the edge, which is where
   that literal went.
-- **The liveness watcher is now co-located with what it watches, and that is a defect.**
-  `systemd/edge-liveness.{service,timer}` was installed on `i1` *because the edge was not
-  there*, and this change moved the edge back onto `i1` — so the watcher and its subject
-  share a host, and a host-level failure now takes out both. It still catches an edge
-  *ingress* failure (a dead NPM, Authentik or Docker), which is most of what it has ever
-  caught, but not the host going down, which is the case it was written for. Re-home the
-  watcher to a non-edge host (`i4`, which gave the edge up) or move the edge off `i1`
-  again; the unit and the script now say this at the top.
+- **The liveness watcher was briefly co-located with what it watches, and was re-homed the
+  same day.** `systemd/edge-liveness.{service,timer}` had been installed on `i1` *because
+  the edge was not there*, and this change moved the edge back onto `i1` — so for part of
+  the day the watcher and its subject shared a host, and a host-level failure would have
+  taken out both. It now runs on **`i4`**, the host that gave the edge up: installed there
+  from this repo, verified live, and stopped, disabled and removed from `i1`. `i4` is also
+  where `mail` lives now, so the watcher's outward channel is a local hop. The invariant is
+  written at the top of the unit and of the script — the host the watcher is installed on
+  must not carry `proxy` — which is the thing a future placement change has to check.
 - **Not changed: the comments inside the containers.** `vault` and `vpn` still say "this
   host has no LAN bridge", and `proxy` and `terminal` still name the `169.254.0.1` hop as
   their next step. Every *directive* is correct — each address and gateway matches what is
@@ -640,16 +641,15 @@ placement (finding 7).
   runs under `systemd/edge-liveness.{service,timer}` every five minutes and TCP-connects
   to the edge's own doors (`:80`/`:443`). It exits non-zero and can `--notify` when they
   stop answering, which is the one report a host cannot make about itself.
-- **The off-edge watcher is no longer off the edge.** It is installed on `i1`, and the
-  2026-10-09 pass moved the edge back onto `i1` as well — so the one checker whose whole
-  point is that it does not run where the edge runs does. It still catches an edge
-  *ingress* failure (a dead NPM, Authentik or Docker), which is most of what it has ever
-  caught, but a host failure now takes the watcher and the edge out together, which is the
-  case it exists for. **Fix:** install the script and
-  `systemd/edge-liveness.{service,timer}` on a non-edge host (`i4` gave the edge up on
-  2026-10-09 and is the obvious one) and remove them from `i1`, or move the edge off
-  `i1` again. `systemd/edge-liveness.service` and `scripts/check-edge-liveness.py` say
-  this at the top, so the next reader does not have to derive it.
+- ~~The off-edge watcher was no longer off the edge.~~ **Done 2026-10-09:** it had been
+  installed on `i1`, and that day's pass moved the edge back onto `i1` too — so the one
+  checker whose whole point is that it does not run where the edge runs did, and a host
+  failure would have taken the watcher and the edge out together. It now runs on **`i4`**
+  (the host that gave the edge up), installed from this repo under
+  `systemd/edge-liveness.{service,timer}` with `EDGE_LIVENESS_MAIL_TO` in
+  `/etc/innotel/edge-liveness.env`, and the `i1` copy is stopped, disabled and gone. The
+  rule the pair has to satisfy is written at the top of the unit and of the script: the
+  host the watcher runs on must not carry `proxy`.
 - **The in-container network comments describe the 2026-10-02 topology.** `vault` and
   `vpn` say "this host has no LAN bridge"; `proxy` and `terminal` still name the
   `169.254.0.1` hop as their next step. No *directive* is wrong — every address and
@@ -664,14 +664,16 @@ placement (finding 7).
   reported) by `scripts/trust-estate-hosts.py`, so restoring them is a command rather
   than a memory. The scripts and units live at `/opt/innotel/estate-checks/` and
   `/etc/systemd/system/estate-checks.*` there, and the watcher at
-  `/opt/innotel/edge-liveness/` with `/etc/systemd/system/edge-liveness.*` on `i1`; the
-  platform-stack copies are the source.
+  `/opt/innotel/edge-liveness/` with `/etc/systemd/system/edge-liveness.*` on `i4` (it
+  moved off `i1` on 2026-10-09 — see §Changes applied 2026-10-09); the platform-stack
+  copies are the source.
 - ~~The liveness watcher's outward channel is not wired.~~ **Done 2026-10-02:**
   `check-edge-liveness.py` now mails the failure through the estate's own mail server
-  (`--mail-to`, sent via `192.168.1.15:25`) as well as exiting non-zero; `i1` sets
-  `EDGE_LIVENESS_MAIL_TO=admin@innotel.us` in `/etc/innotel/edge-liveness.env`, and a
-  simulated dark edge delivered. `--notify` is still there for another channel. Its
-  textfile is written to `/var/lib/node_exporter/textfile/edge-liveness.prom` on `i1`,
+  (`--mail-to`, sent via `192.168.1.15:25`) as well as exiting non-zero; the watcher's host
+  sets `EDGE_LIVENESS_MAIL_TO=admin@innotel.us` in `/etc/innotel/edge-liveness.env` (`i1`
+  then, `i4` since 2026-10-09), and a simulated dark edge delivered. `--notify` is still
+  there for another channel. Its
+  textfile is written to `/var/lib/node_exporter/textfile/edge-liveness.prom` on that host,
   which no collector reads today; a node-exporter pointed at that directory would make it
   scrapable.
 - **The estate's one Alertmanager delivers — resolved 2026-10-02.** `signara`
