@@ -1,65 +1,98 @@
 # i4 host configuration
 
-`i4` (`192.168.1.54`) is the fourth Incus host. Unlike `i2`/`i3` it has **no
-Ethernet NIC** — its only uplink is Wi-Fi (`wlp1s0`, the `MSK-ORBI` AP) plus a
-cellular `wwan0`. A Wi-Fi station interface cannot be bridged, so i4's
-LAN-addressed containers use an incus **`routed` NIC** (`nictype: routed`,
-`parent: wlp1s0`) with host **proxy ARP** rather than a bridged `br0`. The
-first such container is `lantest` (profile `lanrouted`, LAN IP
-`192.168.1.214`).
+`i4` (`192.168.1.54`) is the fourth Incus host. It carries the estate edge,
+`terminal`, `vault` and `vpn`.
 
-That mode has two pieces of state that do **not** survive a reboot on their
-own, because incus does not manage them for routed NICs and Docker owns the
-`FORWARD` chain (policy `DROP`):
+## Uplink
 
-| State | Where it actually lives | Persisted by |
+A **USB Ethernet NIC** (Realtek RTL8153, `enx00051b940a40`) is i4's LAN uplink,
+bridged into **`br-lan`**. The host's address lives on the bridge, and the
+bridge is pinned to the NIC's MAC (`00:05:1b:94:0a:40`) so Cerulean's DHCP
+reservation still hands out `192.168.1.54`.
+
+**Wi-Fi is disabled.** `wlp1s0`'s netplan stanza (`MSK-ORBI`) was removed in the
+same change, which is what turns the radio off — the PSK lived only in that
+stanza. `wpa_supplicant.service` stays enabled (it runs in D-Bus mode with no
+interface and no credentials, so it never associates), and removing the config is
+the whole of the disable.
+
+> **There is no fallback link.** If the bridge or the cable fails, i4 has no
+> network. Recovery steps live on the host at `/root/RECOVERY-net-bridge.md`.
+
+## Containers are bridged, not routed
+
+Containers here used to be on `nictype: routed` over the Wi-Fi uplink: a
+Wi-Fi station interface cannot be bridged, so the host held a `/32` route to each
+container and answered ARP for it (proxy ARP). Wired uplink removes that
+constraint, so all four now use `nictype: bridged, parent: br-lan` and sit
+directly on the LAN, each still addressed statically from inside the container:
+
+| Instance | Address | In-container config |
 |---|---|---|
-| `net.ipv4.ip_forward`, `*.proxy_arp`, `*.rp_filter` | `/etc/sysctl.d/99-incus-routed.conf` | `systemd-sysctl` (base) **and** the unit below (re-asserts after the uplink is up) |
-| `FORWARD` ACCEPT `wlp1s0 ↔ veth+` | live iptables only | **`incus-routed-firewall.service`** |
+| `terminal` | 192.168.1.22 | `/etc/netplan/99-static.yaml` |
+| `vpn` | 192.168.1.43 | `/etc/network/interfaces` |
+| `proxy` | 192.168.1.71 | `/etc/netplan/10-lxc.yaml` |
+| `vault` | 192.168.1.73 | `/etc/systemd/network/eth0.network` |
 
-`systemd-sysctl` runs in early boot *before* `wlp1s0` exists, so the
-interface-scoped keys (`net.ipv4.conf.wlp1s0.proxy_arp`) are skipped at that
-point; the unit re-applies the whole set once the network is online, which is
-why it also covers the sysctls.
+Their default gateway is the **LAN router `192.168.1.1`**. Under the routed
+design it was the host's link-local routed gateway `169.254.0.1`, which no longer
+exists once the routed NICs are gone — every instance had to be repointed, not
+just the two whose committed templates suggested it.
+
+The old routed design also made container traffic asymmetric once a second
+uplink appeared: egress left on the USB NIC while replies arrived over Wi-Fi,
+because the router had the container addresses resolved to the Wi-Fi MAC. It
+worked only because `rp_filter` is 0. Bridging removes the asymmetry entirely.
 
 ## Files
 
 | File | Installed to |
 |---|---|
-| `incus-routed-firewall` | `/usr/local/sbin/incus-routed-firewall` (mode `0755`) |
-| `incus-routed-firewall.service` | `/etc/systemd/system/incus-routed-firewall.service` |
-| `/etc/sysctl.d/99-incus-routed.conf` | created on the host (see below) |
-
-The script is idempotent (`iptables -C` before `-I`), so it can be re-run at
-any time — e.g. after `systemctl restart docker`, which re-inserts its chains
-and re-sets the `FORWARD` policy to `DROP`.
+| `netplan/60-lan-bridge.yaml` | `/etc/netplan/60-lan-bridge.yaml` (mode `0600`) |
+| `sysctl.d/90-network-tuning.conf` | `/etc/sysctl.d/90-network-tuning.conf` |
+| `sysctl.d/99-incus-routed.conf` | `/etc/sysctl.d/99-incus-routed.conf` (base forwarding/`rp_filter`; see below) |
+| `/etc/systemd/network/10-netplan-br-lan.network.d/50-optional.conf` | created on the host (see below) |
 
 ## Install / re-apply
 
 ```sh
-install -m 0755 incus-routed-firewall              /usr/local/sbin/incus-routed-firewall
-install -m 0644 incus-routed-firewall.service      /etc/systemd/system/incus-routed-firewall.service
-install -d -m 0755 /etc/sysctl.d
-cat >/etc/sysctl.d/99-incus-routed.conf <<'EOF'
-net.ipv4.ip_forward=1
-net.ipv4.conf.all.proxy_arp=1
-net.ipv4.conf.wlp1s0.proxy_arp=1
-net.ipv4.conf.br0.proxy_arp=1
-net.ipv4.conf.all.rp_filter=0
-net.ipv4.conf.default.rp_filter=0
-EOF
-systemctl daemon-reload
-systemctl enable --now incus-routed-firewall.service
-incus-routed-firewall status
+install -m 0600 netplan/60-lan-bridge.yaml      /etc/netplan/60-lan-bridge.yaml
+install -m 0644 sysctl.d/90-network-tuning.conf /etc/sysctl.d/90-network-tuning.conf
+install -m 0644 sysctl.d/99-incus-routed.conf   /etc/sysctl.d/99-incus-routed.conf
+
+# netplan 1.2 accepts `optional: true` but does not emit RequiredForOnline=no
+# for the networkd renderer, so the bridge needs a drop-in to keep an unplugged
+# cable from stalling systemd-networkd-wait-online.
+install -d -m 0755 /etc/systemd/network/10-netplan-br-lan.network.d
+printf '[Link]\nRequiredForOnline=no\n' \
+  > /etc/systemd/network/10-netplan-br-lan.network.d/50-optional.conf
+
+chmod 600 /etc/netplan/*.yaml
+netplan generate && netplan apply
 ```
 
-Override `UPLINK` (default `wlp1s0`) in the unit via
-`/etc/default/incus-routed-firewall` if the uplink ever changes.
+`sysctl.d/99-incus-routed.conf` keeps `ip_forward`, `proxy_arp` (in case a
+routed NIC is used again) and `rp_filter=0`; it no longer names an uplink. The
+interface-scoped keys were only ever needed because `systemd-sysctl` runs before
+the uplink exists — the unit that re-asserted them is retired alongside the
+routed NICs.
 
-## Notes
+## Retired
 
-- `br0` remains a *managed NAT* bridge (`10.20.0.1/24`) for internal-only
-  containers; the routed NIC is additive. A wired NIC on i4 would be the
-  durable fix and would let `br0` become a normal LAN bridge.
-- The doc `docs/container-placement.md` § "i4" carries the architecture
-  context; this directory is the host-side implementation.
+- **`incus-routed-firewall` + `.service`** — the FORWARD ACCEPT rules that let
+  routed containers cross between an uplink and their veth. The Docker `FORWARD`
+  policy question they solved does not arise for bridged traffic, and
+  `br_netfilter` is not loaded, so bridged frames never reach the `FORWARD`
+  chain. The unit is disabled on the host.
+- **`wlp1s0`'s netplan stanza** — the Wi-Fi uplink itself.
+- **`systemd/wifi-powersave-off.service`** — disabled on i4 (it targets a radio
+  that is no longer configured). The unit is kept in the repo: the latency
+  checker, the Prometheus rules and a unit test all still reference it.
+
+## History
+
+i4 was Wi-Fi-only when it took the edge, which is why the routed-NIC design and
+its proxy-ARP plumbing exist at all. The estate audit of 2026-10-01
+(`docs/estate-audit-2026-10-01.md`) and the placement notes in
+`docs/container-placement.md` describe that era; the uplink changed on
+2026-10-09.

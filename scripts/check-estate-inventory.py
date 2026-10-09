@@ -85,7 +85,7 @@ ROLE: dict[str, str] = {
     "i1": "estate (edge — every address is dialled here)",
     "i2": "estate (apps)",
     "i3": "estate (light)",
-    "i4": "estate (edge, terminal, vault, vpn — routed over wlp1s0)",
+    "i4": "estate (edge, terminal, vault, vpn — bridged on br-lan)",
 }
 
 
