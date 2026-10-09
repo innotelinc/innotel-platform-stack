@@ -1,5 +1,5 @@
 {
-  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), whether the alert receiver actually delivers mail, and whether the mail domains' SPF/DKIM/DMARC records resolve in the public zone. The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
+  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), whether the alert receiver actually delivers mail, and whether the mail domains' SPF/DKIM/DMARC records resolve in the public zone plus, for the outbound half, whether the SMTP chain sends at all (check-mail-relay.py shows up in the per-check panels beside them). The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
   "annotations": { "list": [] },
   "editable": false,
   "graphTooltip": 1,
@@ -38,12 +38,12 @@
       "id": 2,
       "type": "stat",
       "title": "Checks reporting",
-      "description": "How many checks have a series at all. Fewer than expected means a textfile is missing — the silence `EstateCheckAbsent` exists to catch.",
+      "description": "How many checks have a series at all — one per ExecStart line in systemd/estate-checks.service, held in step by scripts/tests/test_estate_dashboard.py. Fewer than expected means a textfile is missing, which is the silence `EstateCheckAbsent` exists to catch.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 6, "w": 4, "x": 5, "y": 0 },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 7 }] },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 8 }] },
           "color": { "mode": "thresholds" }
         },
         "overrides": []

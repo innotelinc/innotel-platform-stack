@@ -15,12 +15,14 @@ nothing.
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DASHBOARDS = ROOT / "extensions/monitoring/grafana/dashboards"
 DASHBOARD = DASHBOARDS / "estate-checks.json"
+UNIT = ROOT / "systemd" / "estate-checks.service"
 DATASOURCE_UID = "prometheus"
 
 
@@ -70,6 +72,19 @@ class DashboardCase(unittest.TestCase):
         # The panel that makes a dropped SPF/DKIM/DMARC record visible; if the check's
         # metric is renamed the panel must go with it, or the dashboard shows a stale green.
         self.assertIn("innotel_estate_check_mail_auth_records_ok", self.raw)
+
+    def test_the_reporting_threshold_matches_the_checks_the_unit_runs(self):
+        # "Checks reporting" goes green at a number, and that number is how many checks
+        # should be publishing — which is what the unit decides, one ExecStart line each.
+        # Let to drift by hand, the panel reads either a permanent red or a green that
+        # tolerates a check going silent, which is the silence this dashboard exists to
+        # break. `check-mail-relay` arrived on 2026-10-09 and moved this from 7 to 8.
+        unit = UNIT.read_text(encoding="utf-8")
+        checks = set(re.findall(r"/opt/innotel/estate-checks/(check-[a-z0-9-]+)\.py", unit))
+        self.assertTrue(checks, "the unit must run the checks")
+        panel = next(p for p in self.doc["panels"] if p["title"] == "Checks reporting")
+        green = panel["fieldConfig"]["defaults"]["thresholds"]["steps"][-1]["value"]
+        self.assertEqual(green, len(checks), f"the unit runs {sorted(checks)}")
 
     def test_the_rationale_is_written_where_the_next_reader_looks(self):
         # Grafana ignores unknown top-level keys, which is what lets `__comment` carry the

@@ -23,7 +23,11 @@ THE RULES
 1. **No delivery within the window is a failure**, naming Alertmanager's own last notify
    error when it has one — that is the line that says *why* it is silent.
 2. **A host that cannot be read is exit 2**, never silence, the same rule every check here
-   follows. `i3` holds Alertmanager; `i1` holds Stalwart.
+   follows. `i3` holds Alertmanager; the host holding Stalwart (the mail server) is read
+   from the container address table rather than pinned here, because it moves — `mail` was
+   on `i1` when this check was written and on `i4` after the 2026-10-09 pass, and a check
+   that reads the mail log on the host the server has left exits 2 instead of reporting
+   the silence it exists to catch.
 3. The probe alert is short-lived (`--end` a few minutes out) so it resolves itself and
    does not accumulate in the estate's one Alertmanager.
 
@@ -37,6 +41,7 @@ Exit codes: 0 = a probe alert was delivered, 1 = it was not, 2 = a host could no
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import re
 import shlex
@@ -52,14 +57,39 @@ from estate_check import Audit, Finding, METRIC, read_host, ssh, write_prom  # n
 
 CHECK = "alert_delivery"
 
+#: The Alertmanager host: it is the estate's one receiver and it does not move.
+AM_HOST = "i3"
+AM_TARGET = "root@192.168.1.53"  # signara — Alertmanager
+
 #: This check needs exactly two hosts — the one running Alertmanager and the one running
-#: the mail server — so it carries its own two-entry table rather than the four-host one
-#: the per-host checks share. It is deliberately not part of `test_check_host_coverage`
-#: (that guard is about the checks that read *every* host).
-HOSTS: dict[str, str] = {
-    "i3": "root@192.168.1.53",  # signara — Alertmanager
-    "i1": "root@192.168.1.51",  # mail — Stalwart
-}
+#: the mail server — so it carries its own table rather than the four-host one the per-host
+#: checks share. Only the Alertmanager is in it: the mail server's host is derived by
+#: `mail_host()` below, because that is the one that moves. It is deliberately not part of
+#: `test_check_host_coverage` (that guard is about the checks that read *every* host).
+HOSTS: dict[str, str] = {AM_HOST: AM_TARGET}
+
+
+def mail_host() -> tuple[str, str]:
+    """Which estate host carries `mail`, and how to reach it, from the address table.
+
+    Read from `check-container-addresses.py` rather than pinned here, for the same reason
+    `check-address-latency.py` reads its targets from it: the address check already knows
+    where every container runs, so "the mail server's host" means the same thing in both
+    places and a move cannot leave this check reading a log on the host `mail` has left.
+    The module is loaded by path (its filename has a hyphen) and has no side effects.
+
+    `--hosts` still overrides the target for either host.
+    """
+    path = Path(__file__).resolve().parent / "check-container-addresses.py"
+    spec = importlib.util.spec_from_file_location("check_container_addresses_for_delivery", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    for host, containers in module.EXPECTED.items():
+        if "mail" in containers:
+            return host, module.HOSTS[host]
+    raise SystemExit("check-alert-delivery: no host in the address table carries `mail`")
 
 #: The container and the addresses the receiver is configured with. Kept here rather than
 #: read from the container: what this check proves is that the *configured* path works, and
@@ -231,7 +261,10 @@ def run_probe(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--hosts", help="name=target pairs, comma separated (default: i3, i1)")
+    parser.add_argument(
+        "--hosts",
+        help="name=target pairs, comma separated (default: i3, and whichever host carries `mail`)",
+    )
     parser.add_argument("--wait", type=float, default=DEFAULT_WAIT_SECONDS, help="seconds to wait for a delivery (0 = one pass)")
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here for the alerts")
     args = parser.parse_args(argv)
@@ -243,8 +276,9 @@ def main(argv: list[str] | None = None) -> int:
             name, _, target = pair.partition("=")
             hosts[name.strip()] = target.strip()
 
-    am_target = hosts.get("i3", HOSTS["i3"])
-    mail_target = hosts.get("i1", HOSTS["i1"])
+    mail_name, mail_default = mail_host()
+    am_target = hosts.get(AM_HOST, AM_TARGET)
+    mail_target = hosts.get(mail_name, mail_default)
 
     def emit(result: Audit | None, ran: bool, delivered: bool = False, waited: float | None = None) -> None:
         if args.prom:
@@ -260,9 +294,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         delivered, evidence, waited = run_probe(
-            am_host="i3",
+            am_host=AM_HOST,
             am_target=am_target,
-            mail_host="i1",
+            mail_host=mail_name,
             mail_target=mail_target,
             wait=args.wait,
         )
