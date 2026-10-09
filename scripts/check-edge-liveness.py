@@ -15,6 +15,15 @@ So this runs somewhere else — a normal estate host, not the edge — and does 
 possible thing: it connects to the edge **as the estate dials it**. If the edge's ingress
 stops answering, this is the process that still knows, and `--notify` is how it says so.
 
+**"Somewhere else" is currently not true.** The unit is installed on `i1`
+(`systemd/edge-liveness.service`), and the 2026-10-09 placement change moved the edge —
+`proxy` — back onto `i1` as well, so the watcher and the thing it watches share a host and
+a host-level failure takes both out. This still catches an edge **ingress** failure (a dead
+NPM, Authentik or Docker), which is most of what it has ever caught; it no longer catches
+the host going down, which is the case it was written for. Re-home it onto a non-edge host
+(`i4` gave the edge up on 2026-10-09 and is the obvious one) or move the edge off `i1`
+again; see `docs/container-placement.md` §Changes applied 2026-10-09.
+
 WHAT IT PROBES
 --------------
 TCP connect, not ICMP. A ping proves the host's network stack answered; a connect to
@@ -79,9 +88,11 @@ METRIC = "innotel_edge_liveness"
 #: what "the estate is reachable" means.
 DEFAULT_ENDPOINTS = ["192.168.1.71:80", "192.168.1.71:443"]
 
-#: Where mail goes when `--mail-to` is set: the estate's own mail server (`mail` on `i1`,
-#: Stalwart). Deliberately the estate's, not an external relay: this must work when the
-#: edge is gone, so it cannot depend on anything hosted on the edge or on a credential
+#: Where mail goes when `--mail-to` is set: the estate's own mail server (`mail` on `i4`
+#: since 2026-10-09; on `i1` when this was written). Deliberately the estate's, not an
+#: external relay: this must work when the edge is gone, so it cannot depend on anything
+#: hosted on the edge — which is why it matters that the edge and `mail` are on different
+#: hosts — or on a credential
 #: nobody has checked. The recipient has no default — an alert sent to an address nobody
 #: chose is the failure mode that left the edge's own Alertmanager delivering nowhere
 #: (see docs/container-placement.md §Open items).

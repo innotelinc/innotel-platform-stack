@@ -83,15 +83,20 @@ CHECK = "container_address"
 # --------------------------------------------------------------------------------------
 
 #: host → {container: IPv4}. The addresses every A record and every published port names.
-#: The edge services (`proxy`, `terminal`, `vault`, `vpn`) moved i1 → i4 on 2026-10-02,
-#: each keeping its address because it is pinned in its own manager inside the container,
-#: which is what `incus copy` carries — the same reason the 2026-10-01 moves kept theirs.
+#: The table is the estate as it is, not as any one change left it: `i4` received the edge
+#: (`proxy`, `terminal`, `vault`, `vpn`) from `i1` on 2026-10-02, and on 2026-10-09
+#: `terminal` and `proxy` went back to `i1` while `atheniq` and `mail` came onto `i4` —
+#: every one of them keeping its address, because the address is pinned in its own manager
+#: inside the container and `incus copy` carries the rootfs. Read the entry that matches
+#: the host the container is on *now*; a stale row here is a false alarm on every run.
 #: `acme` (`.49`) was retired off i1 on 2026-10-02 and is no longer an address to watch.
 EXPECTED: dict[str, dict[str, str]] = {
     "i1": {
-        "mail": "192.168.1.15",
+        "genie-preview": "192.168.1.24",
         "monarch": "192.168.1.56",
         "ontrak": "192.168.1.21",
+        "proxy": "192.168.1.71",
+        "terminal": "192.168.1.22",
     },
     "i2": {
         "atlas": "192.168.1.90",
@@ -110,8 +115,8 @@ EXPECTED: dict[str, dict[str, str]] = {
         "subscribe": "192.168.1.58",
     },
     "i4": {
-        "proxy": "192.168.1.71",
-        "terminal": "192.168.1.22",
+        "atheniq": "192.168.1.59",
+        "mail": "192.168.1.15",
         "vault": "192.168.1.73",
         "vpn": "192.168.1.43",
     },
@@ -143,7 +148,9 @@ BINDS: dict[str, dict[str, dict[str, str]]] = {
 #: What each address is for. Reported, so a failure names the thing that broke.
 ROLES: dict[str, str] = {
     "192.168.1.21": "ontrak family + Ontrak Sync",
+    "192.168.1.24": "the Genie preview (`innotel/ontrak-genie:main`)",
     "192.168.1.56": "monarch — media",
+    "192.168.1.59": "AthenIQ LMS (Tutor / Open edX)",
     "192.168.1.71": "the Cerulean edge (NPM, Authentik, Vault, DNS)",
     "192.168.1.15": "mail (SMTP/IMAP)",
     "192.168.1.22": "the web terminal",

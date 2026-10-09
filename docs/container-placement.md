@@ -1,10 +1,11 @@
 # Incus container placement — i1 / i2 / i3 / i4
 
 Surveyed 2026-09-27; refreshed 2026-10-01 (a morning survey and an evening
-rebalance) and 2026-10-02 (the edge moved onto `i4`). Four Incus hosts run every
-estate container: `i4` was the test bench, and on 2026-10-02 it took four containers
-off `i1` and became a host (see §*The i4 host*). This page records what each host is,
-what currently sits on it, and where it should sit.
+rebalance), 2026-10-02 (the edge moved onto `i4`) and 2026-10-09 (the edge came back
+to `i1` and `i4`'s uplink changed — §*Changes applied 2026-10-09*). Four Incus hosts
+run every estate container: `i4` was the test bench, and on 2026-10-02 it took four
+containers off `i1` and became a host (see §*The i4 host*). This page records what each
+host is, what currently sits on it, and where it should sit.
 
 The 2026-10-01 refresh matters because the estate's *shape* changed, not just its
 numbers: the pre-migration containers on `.46` (`atheniq`, `cloud`, `voice`,
@@ -126,15 +127,6 @@ estate as it is, not as it was.
   container and travels with its rootfs — the same property the 2026-10-01 moves
   relied on. (The `i1move` remote is a TLS certificate trusted on i1; the older OIDC
   `i1` remote's device token had expired, which is why the copy used a fresh one.)
-- **`i4` is a host now, and its containers are bridged.** Until 2026-10-09 its uplink
-  was Wi-Fi, which cannot be bridged, so containers reached `192.168.1.x` through a
-  `nictype: routed` NIC on `wlp1s0`: the host proxy-ARPed for the address and the
-  container's gateway was the host's link-local `169.254.0.1` — *not* the `.1` router.
-  A USB Ethernet NIC now gives it a bridgeable uplink, so the host address lives on
-  `br-lan` and all four containers are `nictype: bridged` on it with the `.1` router as
-  their gateway. Each container's own manager carries the static address — netplan for
-  `proxy`/`terminal`, systemd-networkd for `vault`, ifupdown for `vpn` — which is why
-  the address survives a relocation while the next hop does not.
 - **The cost of that, stated plainly — and mostly a setting, not the hop.** `i4` is a
   2-vCPU box whose uplink is WiFi, so the edge — every address the estate dials, plus
   DNS on `:53` — sits behind a wireless hop. The first measurement looked bad: an
@@ -225,6 +217,63 @@ estate as it is, not as it was.
   With both fixed, the inventory check reads `i4` cleanly (0 findings). Neither file is
   in this repo, so this note is the record of what the hosts need.
 
+### Changes applied 2026-10-09
+
+- **`i4`'s uplink became a USB Ethernet NIC, and its containers changed with it.** Until
+  this change `i4`'s only uplink was Wi-Fi, which cannot be bridged, so containers reached
+  `192.168.1.x` through a `nictype: routed` NIC on `wlp1s0`: the host proxy-ARPed for the
+  address and the container's gateway was the host's link-local `169.254.0.1` — *not* the
+  `.1` router. A USB NIC (`enx00051b940a40`) now gives a bridgeable uplink, so the host
+  address lives on **`br-lan`** (`.54`, the bridge pinned to the NIC's MAC so Cerulean's
+  DHCP reservation still matches) and the containers are `nictype: bridged, parent:
+  br-lan` with the **`.1` router** as their next hop. Wi-Fi is disabled outright —
+  `wlp1s0`'s netplan stanza held the only copy of the PSK, so removing the stanza is the
+  disable — which also means **there is no fallback link**: a broken bridge or cable is a
+  console job (`/root/RECOVERY-net-bridge.md` on `i4` is the host-side record, including
+  the rollback and the per-container moves).
+- **`proxy` (the edge) and `terminal` moved back to `i1`; `atheniq` and `mail` moved onto
+  `i4`.** Both directions in one pass, so `i4` still carries four containers — `atheniq`
+  `.59`, `mail` `.15`, `vault` `.73`, `vpn` `.43` — and `i1` carries five: `proxy` `.71`,
+  `terminal` `.22`, `monarch` `.56`, `ontrak` `.21`, `genie-preview` `.24`. Every one kept
+  its address, for the same reason the 2026-10-01 and 2026-10-02 moves did: the address is
+  declared *inside* the container and `incus copy` carries its rootfs, so a relocation
+  changes the next hop and nothing else. The edge is back where the 2026-10-01 pass put it
+  — `i1`, the host every consumer dials — and `i4` stays a real host rather than returning
+  to the bench.
+- **`atheniq` is the one container here whose address is not pinned in its own manager.**
+  It takes `.59` over **DHCP** and keeps it because its MAC is pinned (an explicit Incus
+  `hwaddr` plus `dhcp-identifier: mac` in its netplan, which is why the copy had to carry
+  the old MAC). That survives a move; it does not survive a lease change, which is the
+  state the 2026-10-01 incident came from. `check-container-addresses.py` reports it under
+  rule 3 on every run, and §*Open items* carries the conversion to the pinned-static style
+  the other containers use.
+- **The address table moved with the containers, and it has to.**
+  `scripts/check-container-addresses.py` is the contract the scheduled check enforces, and
+  a row naming the host a container *left* is not a stale note: it is a `FAIL` ("not
+  present") on every run plus an `unexpected` warning for the host it moved to. That is
+  exactly what the installed copy reported for the five containers this change touched —
+  three failures and five warnings, all false — which is how the drift was found. The
+  table now names the hosts above.
+- **`genie-preview` (`.24`) entered the table.** It runs `innotel/ontrak-genie:main` on
+  `i1` and holds a LAN address, so rule 4 — every running container must be in the table,
+  or every run warns about it — is what puts it there. **If it is a throwaway, delete the
+  container and its row together**: the table is enforced in both directions, so a row for
+  a container someone removes fails the same way a missing row warns.
+- **The liveness watcher is now co-located with what it watches, and that is a defect.**
+  `systemd/edge-liveness.{service,timer}` was installed on `i1` *because the edge was not
+  there*, and this change moved the edge back onto `i1` — so the watcher and its subject
+  share a host, and a host-level failure now takes out both. It still catches an edge
+  *ingress* failure (a dead NPM, Authentik or Docker), which is most of what it has ever
+  caught, but not the host going down, which is the case it was written for. Re-home the
+  watcher to a non-edge host (`i4`, which gave the edge up) or move the edge off `i1`
+  again; the unit and the script now say this at the top.
+- **Not changed: the comments inside the containers.** `vault` and `vpn` still say "this
+  host has no LAN bridge", and `proxy` and `terminal` still name the `169.254.0.1` hop as
+  their next step. Every *directive* is correct — each address and gateway matches what is
+  deployed — but the comments describe the 2026-10-02 topology. They live inside
+  containers, not in this repo, so this is the record of what they need; see
+  `hosts/i4/README.md` for the same note next to the file table.
+
 ## Changes applied 2026-09-27
 
 - **Limits set** on the unbounded heavies: i2 `atheniq`/`capstone` = 6 GiB,
@@ -270,7 +319,9 @@ estate as it is, not as it was.
 
 Values are the 2026-10-01 evening (21:00 EDT) survey, after that move and before the
 2026-10-02 one; `i4` joined as a host on 2026-10-02 and is described in §*The i4 host*
-below. The current i1 figures, after the four containers left, are in finding 1.
+below, though its container set changed again on 2026-10-09 (§*Changes applied
+2026-10-09*); the current container sets, and the figures for the hosts that changed,
+are in finding 1.
 
 | Host | Address | vCPU | RAM | Load at survey | RAM available | Root disk | Pool |
 |---|---|---|---|---|---|---|---|
@@ -300,7 +351,9 @@ is the way i1's CPU would be grown, a decision the evening pass made and decline
 
 `i4` (`.54`) was a test bench that ran no estate container. On 2026-10-02 it became a
 host: `proxy`, `terminal`, `vault` and `vpn` moved onto it from `i1`, keeping their
-addresses, so four of the addresses the estate dials now live here.
+addresses. On 2026-10-09 two of those four left again — `proxy` and `terminal` went back
+to `i1`, and `atheniq` `.59` and `mail` `.15` came the other way — so the four addresses
+the estate dials here are `atheniq`, `mail`, `vault` and `vpn`.
 
 The hardware did not change, and it is the weakest of the four hosts: **2 vCPU,
 ~7.7 GiB, `dir`-backed storage (`default`, `tank`), a 153 G root disk**, and — the
@@ -315,8 +368,9 @@ figures they came from — the ZFS number is compressed, the `dir` one is not.
 `i4` is in `HOSTS`/`EXPECTED` in `scripts/check-container-addresses.py`, in `HOSTS`
 in `check-container-limits.py` and `check-address-latency.py`, and it is a **required** host
 in `check-estate-inventory.py` (the `OPTIONAL` set is empty now). Its one bench
-container, `lantest`, was retired on 2026-10-02 — the routed pattern is carried bythe four production containers, and a container the address table does not name would warn
-on every scheduled run. The WiFi hop was **not** the latency problem it first looked
+container, `lantest`, was retired on 2026-10-02 — the routed pattern is carried by the
+production containers, and a container the address table does not name warns on every
+scheduled run. That is what put `genie-preview` into the table on 2026-10-09. The WiFi hop was **not** the latency problem it first looked
 like: with power save off it answered in ~7 ms (see the 2026-10-02 change log), so the
 2026-10-09 wired uplink was for throughput and reliability rather than latency. The move
 added a place to put the edge, not CPU or RAM to run it on.
@@ -344,12 +398,16 @@ its own gitignored `.env` instead (`ONTRAK_INCUS_PASSWORD` in Ontrak Sync's
 Memory is live usage; disk is the container rootfs.
 
 Memory is the container's live usage and the cap set on it (`limits.memory` / `limits.cpu`).
+The rows for the hosts the 2026-10-09 pass changed were read that day; the rest are the
+2026-10-02 reading.
 
 | Host | Container | IP | Role | Mem (cap) | CPU cap |
 |---|---|---|---|---|---|
-| i1 | `mail` | `.15` | mail (SMTP/IMAP) | 316 MiB (1 GiB) | 1 |
-| i1 | `monarch` | `.56` | media (Jellyfin etc.) | 3.76 GiB (6 GiB) | 2 |
-| i1 | `ontrak` | `.21` | Ontrak family stack + Ontrak Sync | 671 MiB (2 GiB) | 1 |
+| i1 | `genie-preview` | `.24` | the Genie preview (`innotel/ontrak-genie:main`) | 183 MiB (4 GiB) | 2 |
+| i1 | `monarch` | `.56` | media (Jellyfin etc.) | 3.83 GiB (6 GiB) | 2 |
+| i1 | `ontrak` | `.21` | Ontrak family stack + Ontrak Sync | 707 MiB (6 GiB) | 4 |
+| i1 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 3.02 GiB (5 GiB) | 2 |
+| i1 | `terminal` | `.22` | web terminal (termix, guacd, zapit) | 539 MiB (1024 MiB) | 1 |
 | i2 | `atlas` | `.90` | Gitea + convex + postgres + dashboard | 415 MiB (1 GiB) | — |
 | i2 | `capstone` | `.30` | Zeus / capstone telephony | **5.84 GiB** (6 GiB) | — |
 | i2 | `dev` | `.74` | **the `dev` container** — every project's docker stack | 1.85 GiB (4 GiB) | 4 |
@@ -363,14 +421,15 @@ Memory is the container's live usage and the cap set on it (`limits.memory` / `l
 | i3 | `pi` | `.70` | pi | 176 MiB (1536 MiB) | 4 |
 | i3 | `signara` | `.44` | Signara | 562 MiB (1 GiB) | — |
 | i3 | `subscribe` | `.58` | Subscribe | 88 MiB (1 GiB) | — |
-| i4 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 3.04 GiB (5 GiB) | 2 |
-| i4 | `terminal` | `.22` | web terminal (termix, guacd, zapit) | 445 MiB (1024 MiB) | 1 |
-| i4 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 916 MiB (2048 MiB) | 1 |
-| i4 | `vpn` | `.43` | WireGuard (`10.7.0.2` wg0) | 319 MiB (1024 MiB) | 1 |
+| i4 | `atheniq` | `.59` | AthenIQ LMS (Tutor / Open edX) | 3.09 GiB (8 GiB) | 3 |
+| i4 | `mail` | `.15` | mail (SMTP/IMAP) | 102 MiB (4 GiB) | 2 |
+| i4 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 960 MiB (2048 MiB) | 1 |
+| i4 | `vpn` | `.43` | WireGuard (`10.7.0.2` wg0) | 268 MiB (1024 MiB) | 1 |
 
-`atheniq`, `cloud`, `voice`, `docs`, `ansible`, `slack` and `olympus`/`olympus-gw`,
-which the 2026-09-27 survey listed, are **no longer present on any host** — those
-repositories were retired with the `.46` migration. The container names are kept
+`cloud`, `voice`, `docs`, `ansible`, `slack` and `olympus`/`olympus-gw`, which the
+2026-09-27 survey listed beside `atheniq`, are **no longer present on any host** — those
+repositories were retired with the `.46` migration. `atheniq` is the exception: it stayed,
+moved `i2` → `i1` → `i4`, and is a running container above. The retired names are kept
 here only so the two surveys can be read against each other.
 
 ## Findings
@@ -381,37 +440,48 @@ here only so the two surveys can be read against each other.
    GiB**, i3 **3.0 GiB**, and the new host `i4` **3.2 GiB**. The `.46` migration
    (which retired `atheniq`, `cloud`, `voice`, `docs`, `ansible`, `slack`) is what
    freed i2; the 2026-10-01 rebalance redrew i1, and the 2026-10-02 move redrew it
-   again. No host is tight; `i4` is the least roomy, which is what a 2-vCPU box
-   carrying the edge and its satellites looks like.
-2. **i1 no longer carries the edge, and it was never CPU-bound.** Three containers
-   now (`monarch`, `ontrak`, `mail`), of which the busy one is `monarch`. The survey-day 1.67 load on 4 vCPU was not saturation, and the evening
+   again, and the 2026-10-09 pass swapped two containers each way without changing either
+   host's container count. **`i4` is the one to watch now:** the swap landed `atheniq`
+   (3.09 GiB live, an 8 GiB cap) on the smallest host, which reads **1.0 GiB available
+   of 7.2 GiB** with a 32 % root — tighter than the 2026-10-02 readings for any host
+   (i1 8.1 GiB, i2 4.5 GiB, i3 3.0 GiB, all from that date), and the reason §*Open
+   items* carries `atheniq`'s address and its `limits.cpu`.
+2. **i1 carries the edge again, and it was never CPU-bound.** Five containers now
+   (`proxy`, `monarch`, `ontrak`, `terminal`, `genie-preview`), of which the busy one is
+   `monarch`. The survey-day 1.67 load on 4 vCPU was not saturation, and the evening
    spike is `monarch`'s media stack (qbittorrent and the *arr apps) — exactly the
    container `limits.cpu=2` exists to fence, and it **is** fenced: `monarch` is
-   pinned to CPUs 0-1, so the load runs on cores the other three do not need. **pm3
+   pinned to CPUs 0-1, so the load runs on cores the other four do not need. **pm3
    therefore does not need more vCPUs:** its guest i1 has never been provisioned to
    its 4, and i2's load is 0.89 across 8. The 2026-10-02 move put the edge on `i4`,
    the estate's weakest box — a deliberate placement, and the thing to watch if the
    WiFi hop costs more in throughput or reliability than it buys in placement
-   (§*The i4 host*) — latency alone is measured and fine.
+   (§*The i4 host*) — latency alone is measured and fine. The 2026-10-09 pass settled
+   that question the other way: the edge is back on `i1` and `i4` has a wired uplink.
 3. **i2 is the app host and the busiest by container size.** Six containers and
    8.9 GiB used, but 4.5 GiB free and load 0.89 on 8 vCPU. `capstone` alone is
    5.84 GiB of the 8.9 — 66 % of the host's usage in one container.
 4. **i3 is CPU-idle and the smallest.** Load 0.18 on 8 vCPU, and after giving the
    edge back it carries six running containers on 5.3 GiB (3.0 GiB available). It
    has the CPU the others lack and the RAM the others have to spare.
-5. **i1's CPU caps were the real defect, and they are fixed; the memory caps still
-   oversubscribe on purpose.** Before the 2026-10-01 pass i1's CPU caps summed to
-   **24 vCPU on a 4-vCPU host** (`proxy` alone was capped at the whole host), so a
-   runaway there could starve everything else. They were set so no container can
-   claim the whole host (the largest cap is **2**); after the 2026-10-02 retirements
-   i1's three containers are capped `monarch` 2, `ontrak` 1 and `mail` 1. Incus
-   implements `limits.cpu` as a **cpuset pin**, not a quota, and applies it live:
-   each container gets exactly N host CPUs in `cpuset.cpus.effective`, which a
-   container cannot exceed even when idle cores exist. Verified 2026-10-02: i1
-   `monarch` 0-1, `ontrak` 2, `mail` 3. Memory caps still oversubscribe every host —
-   i1 9 GiB of caps on 14.9 GiB, i2 14 GiB on 13.1 GiB,
-   i3 6.5 GiB of running caps on 5.3 GiB — which is deliberate: a memory cap is a
-   per-container runaway guard, not a reservation.
+5. **i1's CPU caps were the real defect and were fixed; the 2026-10-09 moves put the
+   same pattern back on `i4`; the memory caps still oversubscribe on purpose.** Before
+   the 2026-10-01 pass i1's CPU caps summed to **24 vCPU on a 4-vCPU host** (`proxy`
+   alone was capped at the whole host), so a runaway there could starve everything else.
+   They were set so no container can claim the whole host (the largest cap was **2**).
+   Incus implements `limits.cpu` as a **cpuset pin**, not a quota, and applies it live:
+   each container gets exactly N host CPUs in `cpuset.cpus.effective`, which a container
+   cannot exceed even when idle cores exist. Verified 2026-10-02 on the then-current
+   three: i1 `monarch` 0-1, `ontrak` 2, `mail` 3. **The caps are over the hosts again,
+   and it is the containers that moved that carry it:** i1's five caps sum to **11 vCPU
+   on 4**, of which `ontrak`'s **4** is the whole host — the exact pattern the 2026-10-01
+   pass removed — and i4's four sum to **7 vCPU on 2**, where `atheniq`'s cap of **3 is
+   above the host** and the estate's own check warns by name ("incus clamps it, so the
+   written cap is not the fenced one"). A cap is set for the host a container *was* on
+   and travels with the rootfs, which is why a placement change is also a limits change.
+   Memory caps still oversubscribe every host — i1 22 GiB of caps on 14.9 GiB, i4 15 GiB
+   on 7.2 GiB, i2 14 GiB on 13.1 GiB, i3 6.5 GiB of running caps on 5.3 GiB — which is
+   deliberate: a memory cap is a per-container runaway guard, not a reservation.
 6. **The invariants this page describes are checked, not asserted.** Every
    container's address is static in its own manager, so a recreation cannot renumber
    it; every declared `limits.cpu` is the cpuset actually pinned (finding 5); and the
@@ -421,7 +491,12 @@ here only so the two surveys can be read against each other.
    on a run that could not reach a host, on a run that has stopped succeeding, and on a
    check that has never reported at all (`EstateCheckAbsent` — a check whose textfile
    never reached node-exporter is otherwise the exact shape of the 2026-10-01 silence).
-   All three report nothing wrong on all four hosts as of 2026-10-02.
+   As of 2026-10-09 the address table is back in line with the deployed estate — the
+   moves of that day had left it naming hosts the containers had left, which the
+   installed copy reported as three `FAIL`s and five warnings across two of the four
+   hosts, all false. Re-run against the live estate from the edge, where it actually
+   runs, it reports **0 failures and one warning**: `atheniq`'s DHCP address, which
+   §*Open items* carries.
 7. **No host can absorb the two heavies.** `monarch` (3.76 GiB) fits neither i2
    (4.5 GiB free, but it is the app host) nor i3 (5.3 GiB total); `capstone`
    (5.84 GiB) fits nowhere but i2. So the heavies stay where they are, and any real
@@ -429,18 +504,19 @@ here only so the two surveys can be read against each other.
 
 ## Recommended target map
 
-Keep each container where its *dependencies* are. The map has changed twice since the
-2026-09-27 survey: the 2026-10-01 evening pass moved the edge back onto i1, and the
-2026-10-02 pass moved the edge — and `terminal`, `vault`, `vpn` with it — onto `i4`.
-The deployed estate and this map agree again; what remains is sizing, not placement
-(finding 7).
+Keep each container where its *dependencies* are. The map has changed three times since
+the 2026-09-27 survey: the 2026-10-01 evening pass moved the edge back onto `i1`, the
+2026-10-02 pass sent the edge — and `terminal`, `vault`, `vpn` with it — to `i4`, and the
+2026-10-09 pass sent the edge and `terminal` back while `atheniq` and `mail` went the
+other way. The deployed estate and this map agree again; what remains is sizing, not
+placement (finding 7).
 
 | Host | Belongs there | Reasoning |
 |---|---|---|
-| **i1** (4 vCPU / 14.9 GiB) | `monarch` `.56`, `ontrak` `.21`, `mail` `.15` | `ontrak` is here because the family stack and Ontrak Sync share the box. `monarch` is here for its disk (161 G) and is pinned on purpose. `mail` is the remaining light edge service. Note the page previously called `proxy` **topology-bound** to i1 — it owns `:80/:443/:53` and every service dials it by LAN address. The 2026-10-02 move overrode that reasoning by operator choice; the address still travels, the topology argument does not. |
+| **i1** (4 vCPU / 14.9 GiB) | `proxy` `.71`, `terminal` `.22`, `monarch` `.56`, `ontrak` `.21`, `genie-preview` `.24` | `ontrak` is here because the family stack and Ontrak Sync share the box. `monarch` is here for its disk (161 G) and is pinned on purpose. `proxy` is here because this page's own argument — it owns `:80/:443/:53` and every service dials it by LAN address — was right the first time: the 2026-10-02 move overrode it by operator choice, and the 2026-10-09 pass restored it. `terminal` is the door the edge is worked through, so it follows the edge. `genie-preview` is a light preview of `innotel/ontrak-genie`. |
 | **i2** (apps, 8 vCPU / 13.1 GiB) | `capstone`, `dev`, `www`, `atlas`, `genesis`, `rizzaura` | The heavy, RAM-hungry set. `dev` (`.74`) is where the projects run — every project's docker stack — and is the target of the standalone-project migration. `genesis` is small and could sit on i3 by this table's logic; it is on i2 by operator choice (2026-10-01). |
 | **i3** (light, 8 vCPU / 5.3 GiB) | `distro`, `magnate`, `onyx`, `subscribe`, `signara`, `pi`, stopped `olympus-archive` | Small, self-contained services. Has CPU to spare; only RAM limits it. |
-| **i4** (edge, 2 vCPU / ~7.7 GiB) | `proxy` `.71`, `terminal` `.22`, `vault` `.73`, `vpn` `.43` | The edge and its satellites, moved here on 2026-10-02 at the operator's request. `proxy` is network ingress and identity and the other three are the services it fronts; all four are dialled by LAN address. This is the smallest and least-connected host (2 vCPU, WiFi uplink), so the placement is a deliberate choice rather than a fit — if the WiFi hop costs more than it buys, the answer is a wired NIC on `i4` or moving the edge back to `i1` (§The i4 host). |
+| **i4** (2 vCPU / 7.2 GiB) | `atheniq` `.59`, `mail` `.15`, `vault` `.73`, `vpn` `.43` | `vault` and `vpn` are left from the 2026-10-02 set; `mail` and `atheniq` came from `i1` on 2026-10-09. Every one is dialled by its LAN address, so the host is a placement choice and not a routing one — the A record does not move. This is the smallest host and now the tightest (1.0 GiB available, finding 1), so `atheniq` at 3.09 GiB is a fit by *function*, not by headroom: it is here because the box that gave up the edge was the one with room to take it, and its address had to survive the move. |
 
 ### Actions (applied 2026-09-27)
 
@@ -476,27 +552,47 @@ The deployed estate and this map agree again; what remains is sizing, not placem
 2. **Router reservation follows the address.** The manual router reservation is
    now for `.66`, not `.65` (see `1-primary/genesis/docs/Deployment.md`).
 
-## Open items (as of 2026-10-02)
+## Open items (as of 2026-10-09)
 
 - ~~Ten running containers still take their address from DHCP.~~ **Done
   2026-10-01:** all ten are pinned in their own network manager, and the check
   reads netplan, systemd-networkd and ifupdown so a container pinned outside
   netplan is still counted as pinned. Keep it that way — a new container arrives
   on DHCP and must be pinned before it is dialled by address.
+- **`atheniq` `.59` takes its address over DHCP, and it is dialled by address.** The
+  item above says a container must be pinned before it is dialled; this one is not. What
+  keeps `.59` is its **MAC** — an explicit Incus `hwaddr` plus `dhcp-identifier: mac` in
+  its netplan — which is what survived the move onto `i4`, and which will not survive a
+  lease change. This is the state the 2026-10-01 incident came from, which is why
+  `check-container-addresses.py` reports it as `not_pinned` (a warning, not a failure)
+  on every run. **Fix:** give it the `99-static.yaml` the other containers use
+  (`dhcp4: false`, `addresses: [192.168.1.59/24]`, a default route and a nameserver on
+  `192.168.1.1`), leave the MAC alone, and re-run the check until the warning is gone.
+  `hosts/i4/README.md` has the same note next to its file table.
+- **`atheniq`'s `limits.cpu` is 3 on a 2-CPU host, and `ontrak`'s is 4 on a 4-CPU host.**
+  Both were set for the host the container used to be on and travelled with the rootfs
+  (`ontrak` moved `i4` → `i1` on 2026-10-02, `atheniq` `i1` → `i4` on 2026-10-09). Incus
+  clamps the pin, so nothing is broken — but the written cap is not the fenced one, the
+  estate's own `check-container-limits.py` says so, and i1's CPU caps summing to 11 vCPU
+  on 4 is the defect the 2026-10-01 pass removed (finding 5). Right-size both against
+  the host each is on now.
 - **pm4 (host of i3) has only ~1.4 GiB RAM free**, so i3 cannot be grown in place;
   any move of a heavy onto i3 needs RAM added to pm4, or a fourth host.
 - **i2's root filesystem is 48 % (12 G free)** at the 2026-10-02 refresh — down from
   72 % before the `.46` migration, so the earlier concern is resolved; watch it as the
   standalone-project migration fills `dev` (`.74`).
-- ~~The edge services are spread across hosts.~~ **Done 2026-10-01 (evening), then
-  redrawn 2026-10-02:** the edge and its satellites (`proxy`, `terminal`, `vault`,
-  `vpn`) are on `i4`, each keeping its address because the address is pinned inside
-  the container; `mail` stayed on i1 (`acme` has since been retired). The target map
-  and the estate agree.
-- ~~i1's CPU caps sum to twice the host.~~ **Done 2026-10-01 (evening):** the caps
-  were 24 vCPU on a 4-vCPU host and were set so no container can claim the whole
-  host (largest cap 2). After the 2026-10-02 move i1's four containers are capped
-  2/1/1/1. **pm3 does not need more vCPUs** — i1 was never saturated (finding 2);
+- ~~The edge services are spread across hosts.~~ **Done 2026-10-01 (evening), redrawn
+  2026-10-02, and redrawn back 2026-10-09:** the edge (`proxy`) and `terminal` are on
+  `i1`; `vault` and `vpn` stayed on `i4` and were joined there by `atheniq` and `mail`.
+  Every container kept its address, because the address is declared inside the
+  container — except `atheniq`, which keeps it by MAC (see the DHCP item above). The
+  target map and the estate agree.
+- ~~i1's CPU caps sum to twice the host.~~ **Done 2026-10-01 (evening), over the host
+  again since 2026-10-09:** the caps were 24 vCPU on a 4-vCPU host and were set so no
+  container can claim the whole host (largest cap 2). They are now **11 vCPU on 4**,
+  because the containers that moved brought their caps with them — `ontrak` 4 is the
+  whole host — and `i4` landed the same way at 7 vCPU on 2. See the caps item above and
+  finding 5. **pm3 does not need more vCPUs** — i1 was never saturated (finding 2);
   revisit only if a real CPU constraint appears.
 - ~~i1's new CPU caps are pending a restart.~~ **Done 2026-10-01:** Incus applies
   `limits.cpu` live and implements it as a cpuset, not a quota, so no restart was
@@ -504,14 +600,30 @@ The deployed estate and this map agree again; what remains is sizing, not placem
   `cat /sys/fs/cgroup/lxc.payload.<c>/cpuset.cpus.effective` (count the CPUs it
   names) — **not** `cpu.max`, which stays `max` because there is no quota.
 - **The scheduled checks have a single runner.** They run on the Cerulean edge
-  (`proxy`), which is itself an `i4` container now: if the edge cannot read a host the
+  (`proxy`, an `i1` container again since 2026-10-09): if the edge cannot read a host the
   `EstateCheckCouldNotRun` rule fires, and if a check stops running entirely
   `EstateCheckStale` does. If the whole edge is down, nothing on the edge reports at
   all — so that one case is watched from **off** the edge: `scripts/check-edge-liveness.py`
-  runs under `systemd/edge-liveness.{service,timer}` on a non-edge host (installed on
-  `i1`, every five minutes) and TCP-connects to the edge's own doors (`:80`/`:443`). It
-  exits non-zero and can `--notify` when they stop answering, which is the one report a
-  host cannot make about itself. The ssh key the checks use (`/root/.ssh/container-address`) is authorized
+  runs under `systemd/edge-liveness.{service,timer}` every five minutes and TCP-connects
+  to the edge's own doors (`:80`/`:443`). It exits non-zero and can `--notify` when they
+  stop answering, which is the one report a host cannot make about itself.
+- **The off-edge watcher is no longer off the edge.** It is installed on `i1`, and the
+  2026-10-09 pass moved the edge back onto `i1` as well — so the one checker whose whole
+  point is that it does not run where the edge runs does. It still catches an edge
+  *ingress* failure (a dead NPM, Authentik or Docker), which is most of what it has ever
+  caught, but a host failure now takes the watcher and the edge out together, which is the
+  case it exists for. **Fix:** install the script and
+  `systemd/edge-liveness.{service,timer}` on a non-edge host (`i4` gave the edge up on
+  2026-10-09 and is the obvious one) and remove them from `i1`, or move the edge off
+  `i1` again. `systemd/edge-liveness.service` and `scripts/check-edge-liveness.py` say
+  this at the top, so the next reader does not have to derive it.
+- **The in-container network comments describe the 2026-10-02 topology.** `vault` and
+  `vpn` say "this host has no LAN bridge"; `proxy` and `terminal` still name the
+  `169.254.0.1` hop as their next step. No *directive* is wrong — every address and
+  gateway matches what is deployed — but a comment that describes a topology the host no
+  longer has is how the next reader gets it backwards. It is a comment-only edit inside
+  four containers, and it is written down here rather than done in the same pass as the
+  move because nothing else was being restarted. The ssh key the checks use (`/root/.ssh/container-address`) is authorized
   `from="192.168.1.71"` only and lives on the edge, and a host is only readable when
   the key is in its `authorized_keys` **and** the host is named in the edge's
   `/root/.ssh/config`. `i4` was missing both, which is why the inventory check reported
