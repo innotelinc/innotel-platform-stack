@@ -15,12 +15,15 @@
 #   3. Computes the next patch (or minor for X.Y schemes) from the last
 #      remote tag, or uses the explicit version argument.
 #   4. Creates + pushes the tag (fires the repo's release workflow).
+#      Some repos publish on the release event instead of the tag push —
+#      e.g. OnTrak's publish.yml runs on `release: [published]` — and some
+#      name that workflow "publish" rather than "release". Both are watched.
 #   5. Ensures a GitHub Release exists for the tag (create or update).
 #   6. Watches the release workflow and reports the outcome.
 #
 # Works with every product repo (image pipelines, bundle-only pipelines,
-# draft-style pipelines). It never commits, so a release always reflects the
-# committed state of the branch.
+# draft-style pipelines, release-event publish pipelines). It never commits, so
+# a release always reflects the committed state of the branch.
 # ═══════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -94,11 +97,11 @@ echo "==> watching the release workflow (can take several minutes)..."
 RUN_ID=""
 for _ in $(seq 1 60); do
   RUN_ID="$(gh run list -R "$SLUG" --limit 20 --json databaseId,workflowName,event --jq \
-    "[.[] | select(.workflowName|test(\"(?i)release\") and .event==\"push\")][0].databaseId" 2>/dev/null || true)"
+    "[.[] | select((.workflowName|test(\"(?i)release|publish\")) and (.event==\"push\" or .event==\"release\"))][0].databaseId" 2>/dev/null || true)"
   [ -n "$RUN_ID" ] && break
   sleep 5
 done
-[ -n "$RUN_ID" ] || { echo "error: no release workflow run found after the tag push" >&2; exit 1; }
+[ -n "$RUN_ID" ] || { echo "error: no release/publish workflow run found after the tag push" >&2; exit 1; }
 
 if gh run watch "$RUN_ID" -R "$SLUG" --exit-status --interval 20 2>/dev/null; then
   echo "release $TAG: workflow succeeded"
