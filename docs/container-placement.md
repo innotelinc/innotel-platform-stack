@@ -126,14 +126,15 @@ estate as it is, not as it was.
   container and travels with its rootfs — the same property the 2026-10-01 moves
   relied on. (The `i1move` remote is a TLS certificate trusted on i1; the older OIDC
   `i1` remote's device token had expired, which is why the copy used a fresh one.)
-- **`i4` is a host now, and its containers are routed.** It has **no LAN bridge**: its
-  containers reach `192.168.1.x` through a `nictype: routed` NIC on the WiFi interface
-  `wlp1s0`, where the host proxy-ARPs for the container's address and the container's
-  default gateway is the host's link-local `169.254.0.1` — *not* the `.1` router. Each
-  moved container's own manager was rewritten for that gateway: netplan for
-  `proxy`/`terminal`, systemd-networkd for `vault`, ifupdown for `vpn`. The address is
-  the container's; the next hop is the host's. That is why the address survives the
-  move but the route does not.
+- **`i4` is a host now, and its containers are bridged.** Until 2026-10-09 its uplink
+  was Wi-Fi, which cannot be bridged, so containers reached `192.168.1.x` through a
+  `nictype: routed` NIC on `wlp1s0`: the host proxy-ARPed for the address and the
+  container's gateway was the host's link-local `169.254.0.1` — *not* the `.1` router.
+  A USB Ethernet NIC now gives it a bridgeable uplink, so the host address lives on
+  `br-lan` and all four containers are `nictype: bridged` on it with the `.1` router as
+  their gateway. Each container's own manager carries the static address — netplan for
+  `proxy`/`terminal`, systemd-networkd for `vault`, ifupdown for `vpn` — which is why
+  the address survives a relocation while the next hop does not.
 - **The cost of that, stated plainly — and mostly a setting, not the hop.** `i4` is a
   2-vCPU box whose uplink is WiFi, so the edge — every address the estate dials, plus
   DNS on `:53` — sits behind a wireless hop. The first measurement looked bad: an
@@ -303,22 +304,22 @@ addresses, so four of the addresses the estate dials now live here.
 
 The hardware did not change, and it is the weakest of the four hosts: **2 vCPU,
 ~7.7 GiB, `dir`-backed storage (`default`, `tank`), a 153 G root disk**, and — the
-part that matters — a **WiFi uplink (`wlp1s0`), not a bridge**. There is no `br0`
-here, so a `bridged` NIC has nothing to attach to. Its containers are therefore
-`nictype: routed` on `wlp1s0`: the host proxy-ARPs for each container's address and
-the container's default gateway is the host's link-local `169.254.0.1`. `dir`
+part that matters — an uplink. That uplink is now a **USB Ethernet NIC bridged into
+`br-lan`**, so `bridged` NICs have something to attach to and the containers use them;
+Wi-Fi is disabled. Before 2026-10-09 the uplink was Wi-Fi (`wlp1s0`), which cannot be
+bridged, so containers were `nictype: routed` on it with host proxy ARP and a link-local
+`169.254.0.1` gateway. `dir`
 storage is also why the copied rootfs images are larger here than the ZFS `USED`
 figures they came from — the ZFS number is compressed, the `dir` one is not.
 
 `i4` is in `HOSTS`/`EXPECTED` in `scripts/check-container-addresses.py`, in `HOSTS`
 in `check-container-limits.py` and `check-address-latency.py`, and it is a **required** host
 in `check-estate-inventory.py` (the `OPTIONAL` set is empty now). Its one bench
-container, `lantest`, was retired on 2026-10-02 — the routed pattern is carried by the
-four production containers, and a container the address table does not name would warn
-on every scheduled run. The WiFi hop is **not** the latency problem it first looked
-like: with power save off it answers in ~7 ms (see the 2026-10-02 change log), so a
-wired NIC would be for throughput and reliability, not for latency. The move added a
-place to put the edge, not CPU or RAM to run it on.
+container, `lantest`, was retired on 2026-10-02 — the routed pattern is carried bythe four production containers, and a container the address table does not name would warn
+on every scheduled run. The WiFi hop was **not** the latency problem it first looked
+like: with power save off it answered in ~7 ms (see the 2026-10-02 change log), so the
+2026-10-09 wired uplink was for throughput and reliability rather than latency. The move
+added a place to put the edge, not CPU or RAM to run it on.
 
 The trust the checks depend on is now written down rather than done by hand.
 `scripts/trust-estate-hosts.py`, run on the edge, puts the check key into every host's

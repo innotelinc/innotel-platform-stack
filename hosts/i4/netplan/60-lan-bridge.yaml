@@ -1,0 +1,24 @@
+network:
+  version: 2
+  ethernets:
+    enx00051b940a40:
+      # Member of br-lan below: the host's address lives on the bridge, not here,
+      # so this port gets no address of its own.
+      dhcp4: false
+  bridges:
+    br-lan:
+      interfaces: [enx00051b940a40]
+      # Pin the bridge to the USB NIC's MAC so Cerulean's DHCP reservation for
+      # that MAC still hands out 192.168.1.54 -- now to the bridge rather than
+      # the raw port.
+      macaddress: "00:05:1b:94:0a:40"
+      dhcp4: true
+      # Single-port bridge: no spanning tree, no forwarding delay to wait out.
+      parameters:
+        stp: false
+        forward-delay: 0
+      # Intent: don't block network-online on the bridge. netplan 1.2 accepts
+      # `optional` but emits nothing for the networkd renderer, so the drop-in at
+      # /etc/systemd/network/10-netplan-br-lan.network.d/50-optional.conf does the
+      # real work (RequiredForOnline=no).
+      optional: true
