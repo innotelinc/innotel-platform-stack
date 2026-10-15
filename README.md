@@ -65,6 +65,7 @@ The remaining platforms are **business functions** built on top:
 | Capstone | AgentOps | Zeus · Authentik · Cerulean Vault · Magnate · NPM Edge |
 | Rizz Aura | CommunityOps | Authentik · Magnate · NPM Edge |
 | zapit | TransferOps | Authentik (optional) |
+| OnTrak | TrainingOps | Authentik · Cerulean Vault · Cerulean · ONYX · Magnate · NPM Edge |
 | AthenIQ | LearningOps | Authentik · Cerulean Vault · Cerulean · ONYX · Magnate · Signara · NPM Edge |
 | Atlas | CodeOps | Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge |
 | Distro | BuilderOps | OmniRoute · NPM Edge · Cerulean Vault · Authentik · Magnate · Cerulean |
@@ -644,6 +645,7 @@ Rules that hold in both:
 | Voice AI agents / telephony automation | AgentOps | Capstone |
 | Leaderboards / reputation / community | CommunityOps | Rizz Aura |
 | Ephemeral P2P transfer / relay | TransferOps | zapit |
+| Training / labs / service desk / incident evidence | TrainingOps | OnTrak |
 | Learning / courses / AI classrooms | LearningOps | AthenIQ |
 | Source control / CI / AI app building | CodeOps | Atlas |
 | Issue → PR automation | FactoryOps | Olympus |
