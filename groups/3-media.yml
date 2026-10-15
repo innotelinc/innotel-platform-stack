@@ -296,6 +296,8 @@ services:
       AUTH_OIDC_CLIENT_SECRET: "${AUTH_OIDC_CLIENT_SECRET:-}"
       AUTH_OIDC_ISSUER: "${AUTH_OIDC_ISSUER:-}"
       AUTH_OIDC_CLIENT_NAME: "${AUTH_OIDC_CLIENT_NAME:-Cerulean}"
+      # Canonical public origin (origin checks, secure cookies, MCP OAuth metadata).
+      BASE_URL: "${HOMARR_BASE_URL:-https://home.innotel.us}"
     healthcheck:
       # nginx (v1) listens on 7575 and proxies to the app.
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://$$(hostname):7575 || exit 1"]
@@ -306,6 +308,31 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /docker/appdata/homarr/appdata:/appdata
+
+  ###############################################
+  # LANDING - Monarch product landing page (the platform's front door)
+  #
+  # The apex (monarch.innotel.us) is the product page a visitor sees, not the
+  # dashboard; the Homarr board is home.innotel.us now. This is a static
+  # server for web/landing/ - the same page the release publishes to GitHub
+  # Pages - so the apex and the published site cannot drift apart.
+  ###############################################
+
+  landing:   # from monarch
+    <<: *common-keys
+    container_name: monarch-landing
+    image: nginx:alpine
+    ports:
+      - 14014:80
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ../../3-media/monarch/web/landing:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   ###############################################
   # TRANSMISSION - Main Downloader (WebUI on :9091)
@@ -612,7 +639,7 @@ services:
   # Serves the Cerulean LDAP directory (provider 'jellyfin-ldap') so the
   # Jellyfin LDAP-Auth plugin resolves logins against Authentik users;
   # disabling a user in Cerulean blocks their Jellyfin login.
-  # The image tag MUST track the Authentik server version (2026.8.3) -
+  # The image tag MUST track the Authentik server version (2026.8.4) -
   # bump both together, and `drift-check` now fails the run when it does not
   # (the Authentik API reports `outpost_outdated`, see docs/operations.md).
   # AUTHENTIK_TOKEN is the outpost API token monarch-init
@@ -622,7 +649,7 @@ services:
   authentik-ldap:   # from monarch
     <<: *common-keys
     container_name: authentik-ldap
-    image: ghcr.io/goauthentik/ldap:2026.8.3
+    image: ghcr.io/goauthentik/ldap:2026.8.4
     environment:
       AUTHENTIK_HOST: ${AUTHENTIK_BASE_URL}
       AUTHENTIK_INSECURE: "true"          # AUTHENTIK_BASE_URL is plain http on the LAN
@@ -968,6 +995,9 @@ services:
     container_name: jellyseerr-sso
     environment:
       <<: *sso-env
+      # The request portal publishes its own sign-in page (the Jellyfin/Cerulean
+      # identity); the subscription gate lives at the Jellyfin identity layer,
+      # not here, so this name is deliberately not OIDC-gated.
       OAUTH2_PROXY_SKIP_AUTH_ROUTES: "^/.*$"
       OAUTH2_PROXY_UPSTREAMS: http://jellyseerr:5055
     ports:
