@@ -67,9 +67,8 @@ The remaining platforms are **business functions** built on top:
 | zapit | TransferOps | Authentik (optional) |
 | OnTrak | TrainingOps | Authentik · Cerulean Vault · Cerulean · ONYX · Magnate · NPM Edge |
 | AthenIQ | LearningOps | Authentik · Cerulean Vault · Cerulean · ONYX · Magnate · Signara · NPM Edge |
-| Atlas | CodeOps | Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge |
+| Atlas | CodeOps | OmniRoute · Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge |
 | Distro | BuilderOps | OmniRoute · NPM Edge · Cerulean Vault · Authentik · Magnate · Cerulean |
-| Olympus | FactoryOps | OmniRoute · Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge |
 | PLUTUS | VideoOps | OmniRoute · NPM Edge · Cerulean Vault · Authentik · Cerulean |
 
 ## Documents
@@ -78,9 +77,9 @@ The remaining platforms are **business functions** built on top:
   deep look at AgentOps/VoiceOps: Capstone standalone, Zeus as the VoIP
   platform, Capstone as a Zeus add-on.
 - [**ONYX · Olympus · Distro · Atlas — build-plane convergence**](docs/convergence-onyx-olympus-distro-atlas.md)
-  — the four platforms around building software (StorageOps/CodeOps/BuilderOps/
-  FactoryOps), and the target: one web UI, one terminal UI, one full-stack app
-  builder, one OmniRoute.
+  — the platforms around building software (StorageOps/CodeOps/BuilderOps), from
+  before Olympus (FactoryOps) was removed from the stack, and the target: one web
+  UI, one terminal UI, one full-stack app builder, one OmniRoute.
 - [**Service & package audit**](docs/service-audit.md) — the duplication
   audit across every stack: which services/packages appear in more than one
   repo, which duplicates are required by that stack's shape, and the memory
@@ -234,12 +233,10 @@ into a false clean.
               ONYX · Magnate and sends completion evidence to Signara for
               signed course certificates
               Atlas (CodeOps) holds every repo + the AI app builder; it rides
-              Authentik · Cerulean Vault · Cerulean · Magnate and never stores
-              application data for other platforms
-              Olympus (FactoryOps) turns GitHub issues into validated PRs inside the
-              repo it lives in; it rides OmniRoute · Authentik · Cerulean Vault ·
-              Cerulean · Magnate · NPM Edge and never touches governance or
-              secrets as ordinary work
+              OmniRoute · Authentik · Cerulean Vault · Cerulean · Magnate and never
+              stores application data for other platforms. It also carries the
+              issue → PR automation Olympus used to own — that work happens against
+              the repos Atlas already hosts
 ```
 
 ## Multi-Server Deployment
@@ -254,12 +251,12 @@ Each group runs on its own server and discovers others via Consul.
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐
 │  │  Server 1  │  │  Server 2  │  │  Server 3  │  │  Server 4  │  │  Server 5  │
 │  │  10.10.1.1 │  │  10.10.2.1 │  │  10.10.3.1 │  │  10.10.4.1 │  │  10.10.5.1 │
-│  │            │  │            │  │  PLUTUS    │  │            │  │  Olympus   │
+│  │            │  │            │  │  PLUTUS    │  │            │  │            │
 │  │  Cerulean  │  │  Capstone  │  │  Monarch   │  │  Rizzaura  │  │   Atlas    │
 │  │  AthenIQ   │  │   Zeus     │  │  Jellyfin  │  │   ONYX     │  │   Oasis    │
 │  │  Magnate   │  │ OmniRoute  │  │    *arr    │  │            │  │   Gitea    │
-│  │  Signara   │  │            │  │    NPM     │  │            │  │   Chef     │
-│  │            │  │            │  │            │  │            │  │  Distro    │
+│  │  Signara   │  │            │  │    NPM     │  │            │  │  Distro    │
+│  │            │  │            │  │            │  │            │  │            │
 │  │  ~10 GiB   │  │  ~6 GiB    │  │  ~10 GiB   │  │  ~6 GiB    │  │  ~8 GiB    │
 │  └────────────┘  └────────────┘  └────────────┘  └────────────┘  └────────────┘
 │                                                                          │
@@ -292,7 +289,7 @@ LAN/mesh by address, never by a second copy):
 | `192.168.1.31` (build) | — | Build server — 24 GB RAM, no long-running services |
 | `192.168.1.21` | — | OnTrak sync |
 | `192.168.1.30` | 2 (voice) | Capstone (26 services) and Zeus (`docker-compose.full.yml`: FreePBX, portal, coturn) |
-| `192.168.1.50` | 5 (factory half) | Olympus + Studio + its gateway and sites; tenancy stays on Distro at `.61:20140` |
+| `192.168.1.50` | — | Decommissioned factory host (was Olympus + Studio + its gateway and sites); builder tenancy stays on Distro at `.61:20140` |
 | `192.168.1.56` | 3 (media) | Monarch (Jellyfin, *arr, downloaders, media SSO gateways) |
 
 A single-box deployment (`./stack.sh up all`) needs every component:
@@ -487,17 +484,20 @@ this pattern so re-running them never re-issues or detaches certs.
 
 #### Atlas — CodeOps
 - **Owns:** repositories, forks, pull requests, code review, issues/boards, wikis,
-  releases, package registry, Actions CI/CD, and AI-assisted application generation
-  (Chef on a self-hosted Convex backend, models via one OmniRoute gateway).
-- **Provides:** the canonical git remote and CI for the other platforms' code, and
-  the AI app builder that scaffolds new platform applications.
+  releases, package registry, Actions CI/CD, and the build plane's app-builder role
+  — models via one OmniRoute gateway (the Chef profile that used to fill it is
+  retired; see the note under Olympus below).
+- **Provides:** the canonical git remote and CI for the other platforms' code, the
+  AI app builder that scaffolds new platform applications, and the issue → PR
+  automation that came with Olympus's retirement.
 - **Consumes:** Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge.
 - **Does not own:** identity, secrets, certificates/DNS, storage, or the
   production runtime of the platforms it helps build — Atlas holds the source.
-- **Integrates with:** Atlas (CodeOps) — the build plane (Studio + Distro's
-  tenancy) builds apps; Atlas ships them via Gitea + Convex. Studio exports to
-  Atlas git remotes; packaging can target Atlas's self-hosted Convex. Both share
-  OmniRoute, Magnate, Authentik, Cerulean Vault, Cerulean, and NPM Edge.
+- **Integrates with:** Distro (BuilderOps) — the build plane (Atlas's builder +
+  Distro's tenancy) builds apps; Atlas ships them via Gitea + Convex. A packaged
+  project is pushed to an Atlas git remote and can target Atlas's self-hosted
+  Convex. Both share OmniRoute, Magnate, Authentik, Cerulean Vault, Cerulean, and
+  NPM Edge.
 
 #### Distro — BuilderOps
 - **Owns:** multi-tenant builder tenancy (Distro control plane): accounts with
@@ -506,7 +506,7 @@ this pattern so re-running them never re-issues or detaches certs.
 - **Provides:** tenancy for the ecosystem's builder surface — identity →
   account + per-user gateway key, quota gating before each model turn,
   usage/audit after it. (The bolt.diy web front door retired in the build-plane
-  convergence §5.2; Studio is the one web UI.)
+  convergence §5.2; the front ends that called it retired with Olympus.)
 - **Consumes:** OmniRoute (AI plane) · NPM Edge · Authentik · Cerulean Vault · Magnate (billing) · Cerulean (DNS + certs).
 - **Does not own:** identity, secrets, certificates/DNS, storage, or the
   LLM gateway itself (OmniRoute is a shared platform service / extension).
@@ -514,23 +514,27 @@ this pattern so re-running them never re-issues or detaches certs.
   Atlas/Gitea remote and Atlas hosts its Convex backend. Both share OmniRoute,
   Magnate, Authentik, Cerulean Vault, Cerulean, and NPM Edge.
 
-#### Olympus — FactoryOps
-- **Owns:** repository automation (issue → watched Archon workflow → open PR), validation
-  and safety (protected paths, required markers, non-zero evidence counts, ratchet floors,
-  stop controls, bounded changes), and operational visibility (doctor, trigger status,
-  held work); the five factory workflows (prime, implement, validate, regress, triage)
-  and the harness as the contract for "working"; the Telegram surface (Hermes 3) and the
-  coding brain (Qwen) behind the OmniRoute gateway.
-- **Provides:** a one-command agent-ready clone (`bash scripts/bootstrap.sh` — installs
-  OmniRoute/Codex/Claude/Archon CLIs, mints a gateway key, wires both agents) and a
-  deterministic issue → validated PR fast lane (~35 min) with independent validation and
-  holdout/mutation gates for auto-merge quality.
-- **Consumes:** OmniRoute (AI plane) · Authentik · Cerulean Vault · Cerulean · NPM Edge ·
-  Magnate (optional billing where the factory runs as a service).
-- **Does not own:** application business logic, identity, secrets, trust/DNS/PKI, storage,
-  or revenue — and never governance of itself as ordinary issue work (`MISSION.md`,
-  `FACTORY_RULES.md`, `factory/**`, `harness/**`, `.factory/locks/**`,
-  `.factory/holdout/**`, CI config, or secret-shaped files are protected).
+#### Olympus — FactoryOps (removed 2026-10-15)
+
+- **Removed from the stack.** Olympus was not deployed anywhere (no container on
+  `.44`, `.60`, `.71` or `.90`, no checkout; its factory host `.50` is
+  unreachable). Its public names — `olympus`, `www.olympus`, `studio.olympus`,
+  `*.studio.olympus`, `gateway.olympus`, `auth.olympus`, `subscribe.olympus` —
+  are deleted, its three live edge hosts and its `olympus-publishing` Cerulean
+  service key are retired, and its roster entry (here and in `scripts/mesh.sh`)
+  is gone.
+- **Where its work went.** Issue → PR automation moved to **Atlas** (CodeOps) —
+  that work happens against the repos Atlas already hosts. The app-builder role is
+  Atlas's too: `docs/convergence-onyx-olympus-distro-atlas.md` chose Olympus's
+  engine as *the one builder*, and with Olympus gone that decision has no subject,
+  so the role sits with the CodeOps platform while **Distro** (BuilderOps) keeps
+  supplying the tenancy it runs under.
+- **The builder engine itself is not shipped by any platform.** Atlas's Chef
+  profile was retired in the convergence plan (§8 Phase 3) because a build that
+  ends bound to Convex is not the running, *named* application this stack counts
+  as output. So the stack claims the role without yet having an engine that fills
+  it; the criterion for closing that — a plan that ends as a running container,
+  published under a name — is the one in the convergence document.
 
 #### PLUTUS — VideoOps
 - **Owns:** video ingestion, transcoding, catalog, streaming, live, and VideoOps delivery.
@@ -577,8 +581,7 @@ Identity (Authentik) ────────► Secrets (Cerulean Vault)
               Capstone
         (Rizz Aura ──► Authentik, Magnate)
         (AthenIQ ──► Authentik · Cerulean Vault · Cerulean · ONYX · Magnate · Signara)
-        (Atlas ──► Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge)
-        (Olympus ──► OmniRoute · Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge)
+        (Atlas ──► OmniRoute · Authentik · Cerulean Vault · Cerulean · Magnate · NPM Edge)
         (PLUTUS ──► OmniRoute · NPM Edge · Cerulean Vault · Authentik · Cerulean)
 ```
 
@@ -594,8 +597,8 @@ Deployment order:
    Authentik + Cerulean Vault + Magnate — it also consumes Signara for signed course
    certificates, and Atlas after Authentik + Cerulean Vault + Magnate to host this
    ecosystem's code and CI). PLUTUS lands in Group 3 with Monarch (it needs
-   Cerulean · NPM Edge · OmniRoute); Olympus lands in Group 5 with Atlas and
-   Distro, since the factory and Studio build the repos that live there.
+   Cerulean · NPM Edge · OmniRoute); Atlas lands in Group 5 with Distro and Oasis,
+   since the repos the build plane works on live there.
 
 ### One stack vs split deployment
 
@@ -647,8 +650,7 @@ Rules that hold in both:
 | Ephemeral P2P transfer / relay | TransferOps | zapit |
 | Training / labs / service desk / incident evidence | TrainingOps | OnTrak |
 | Learning / courses / AI classrooms | LearningOps | AthenIQ |
-| Source control / CI / AI app building | CodeOps | Atlas |
-| Issue → PR automation | FactoryOps | Olympus |
+| Source control / CI / AI app building / issue → PR automation | CodeOps | Atlas |
 | Video delivery / streaming | VideoOps | PLUTUS |
 
 ## Integration flows
@@ -745,7 +747,6 @@ Rules that hold in both:
 | OnTrak (TrainingOps) | [innotelinc/OnTrak](https://github.com/innotelinc/OnTrak) | [docs/stack.md](https://github.com/innotelinc/OnTrak/blob/main/docs/stack.md) |
 | Atlas (CodeOps) | [innotelinc/atlas](https://github.com/innotelinc/atlas) | [docs/stack.md](https://github.com/innotelinc/atlas/blob/main/docs/stack.md) |
 | Distro (BuilderOps) | [innotelinc/distro](https://github.com/innotelinc/distro) | [docs/stack.md](https://github.com/innotelinc/distro/blob/main/docs/stack.md) |
-| Olympus (FactoryOps) | [innotelinc/olympus](https://github.com/innotelinc/olympus) | [docs/stack.md](https://github.com/innotelinc/olympus/blob/main/docs/stack.md) |
 | PLUTUS (VideoOps) | [innotelinc/plutus](https://github.com/innotelinc/plutus) | [docs/stack.md](https://github.com/innotelinc/plutus/blob/main/docs/stack.md) |
 
 ## Mesh layout

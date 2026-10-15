@@ -32,7 +32,7 @@
 #     2-voice/     capstone zeus
 #     3-media/     monarch plutus
 #     4-social/    rizzaura onyx zapit
-#     5-dev/       atlas distro oasis olympus
+#     5-dev/       atlas distro oasis
 #     ips/         the platform stack (stack.sh, mesh/, docs/)
 #
 # A repo may live anywhere — mesh.sh figures out its server from its own path
@@ -118,7 +118,7 @@ read -r -d '' MESH_ROSTER <<'EOF' || true
 2|voice|capstone zeus
 3|media|monarch plutus
 4|social|rizzaura onyx zapit
-5|dev|atlas distro oasis olympus
+5|dev|atlas distro oasis
 EOF
 
 # Repos whose git remote name differs from the dir name it is checked out as.
@@ -216,7 +216,7 @@ detect_server() {
   local host; host="$(hostname 2>/dev/null | tr '[:upper:]' '[:lower:]')"
   case "$host" in
     *onyx*|*rizz*|*zapit*)                                echo 4; return ;;
-    *distro*|*atlas*|*oasis*|*olympus*)                   echo 5; return ;;
+    *distro*|*atlas*|*oasis*)                             echo 5; return ;;
     *cerulean*|*magnate*|*atheniq*|*sign*|*npm*)          echo 1; return ;;
     *capstone*|*zeus*)                                    echo 2; return ;;
     *monarch*|*jellyfin*|*plutus*)                        echo 3; return ;;
