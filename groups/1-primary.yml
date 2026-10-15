@@ -198,7 +198,7 @@ services:
   cerulean-authentik-server:   # from cerulean (profiles: "authentik")
     mem_limit: 1500m
     memswap_limit: 1500m
-    image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2026.8.3}
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2026.8.4}
     container_name: cerulean-authentik-server
     profiles: ["authentik"]
     restart: unless-stopped
@@ -229,7 +229,7 @@ services:
 
 
   cerulean-authentik-worker:   # from cerulean (profiles: "authentik")
-    image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2026.8.3}
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_IMAGE_TAG:-2026.8.4}
     container_name: cerulean-authentik-worker
     profiles: ["authentik"]
     restart: unless-stopped
@@ -1031,7 +1031,7 @@ services:
   # Observability + backup are opt-in (they are otherwise in the default set
   # and cost ~2 GB on modest hosts). Start with:
   #   docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
-  #     --profile monitoring up -d prometheus grafana loki alertmanager backup backup-metrics
+  #     --profile monitoring up -d prometheus alertmanager backup backup-metrics
 
   meilisearch:   # from signara
     image: getmeili/meilisearch:v1.10
@@ -1159,37 +1159,6 @@ services:
 
     profiles: ['monitoring']
 
-  grafana:   # from signara (profiles: 'monitoring')
-    image: grafana/grafana:11.2.0
-    restart: unless-stopped
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
-      GF_USERS_ALLOW_SIGN_UP: 'false'
-      GF_AUTH_ANONYMOUS_ENABLED: 'false'
-      GF_SERVER_ROOT_URL: https://monitoring.signara.innotel.us
-    volumes:
-      - ../../1-primary/signara/infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ../../1-primary/signara/infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafanadata:/var/lib/grafana
-    depends_on:
-      - prometheus
-      - loki
-    logging: *logging-default
-
-    profiles: ['monitoring']
-
-  loki:   # from signara (profiles: 'monitoring')
-    image: grafana/loki:3.1.0
-    restart: unless-stopped
-    command: -config.file=/etc/loki/loki.yaml
-    volumes:
-      - ../../1-primary/signara/infra/monitoring/loki/loki.yaml:/etc/loki/loki.yaml:ro
-      - lokidata:/loki
-    logging: *logging-default
-
-    profiles: ['monitoring']
-
   alertmanager:   # from signara (profiles: 'monitoring')
     image: prom/alertmanager:v0.27.0
     restart: unless-stopped
@@ -1197,6 +1166,14 @@ services:
     # itself, so the entrypoint renders it before exec'ing the binary — without
     # that step the receiver silently sends nowhere. See the script's header.
     entrypoint: ['/bin/sh', '/etc/alertmanager/entrypoint.sh']
+    # The address Alertmanager advertises in every notification link. Left
+    # unset it uses the container's own hostname on :9093
+    # (http://<container-id>:9093), which resolves for nobody — that was the
+    # link in the estate's delivery-probe mail. Set it in .env; the LAN
+    # address is the default because the monitoring UIs are not published
+    # through the Cerulean edge.
+    command:
+      - '--web.external-url=${ALERTMANAGER_EXTERNAL_URL:-http://192.168.1.44:9093}'
     environment:
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -1215,6 +1192,7 @@ services:
     volumes:
       - ../../1-primary/signara/infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ../../1-primary/signara/infra/monitoring/alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+      - ../../1-primary/signara/infra/monitoring/alertmanager/email.tmpl:/etc/alertmanager/email.tmpl:ro
       - alertdata:/alertmanager
     ports:
       - '${ALERTMANAGER_BIND_ADDRESS:-127.0.0.1}:${ALERTMANAGER_BIND_PORT:-9093}:9093'
@@ -1515,8 +1493,6 @@ volumes:
   authentikdb:
   authentikredis:
   promdata:
-  grafanadata:
-  lokidata:
   alertdata:
   backupcache:
   genesis-data:
