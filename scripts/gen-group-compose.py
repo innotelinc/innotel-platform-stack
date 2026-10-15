@@ -154,7 +154,6 @@ SOURCES: dict[str, dict[str, list[str]]] = {
         "atlas": ["docker-compose.yml"],
         "distro": ["docker-compose.yml", "compose.vault.yml"],
         "oasis": ["docker-compose.yml"],
-        "olympus": ["docker-compose.yml", "compose.gateway-sso.yml", "compose.vault.yml"],
     },
 }
 

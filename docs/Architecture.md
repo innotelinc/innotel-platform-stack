@@ -12,7 +12,7 @@ container) and connects via a WireGuard mesh overlay network.
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │
 │  │ Server 1 │ │ Server 2 │ │ Server 3 │ │ Server 4 │ │ Server 5 │        │
 │  │ .10.1.1  │ │ .10.2.1  │ │ .10.3.1  │ │ .10.4.1  │ │ .10.5.1  │        │
-│  │          │ │          │ │ PLUTUS   │ │          │ │ Olympus  │        │
+│  │          │ │          │ │ PLUTUS   │ │          │ │ Distro   │        │
 │  │ Cerulean │ │ Capstone │ │ Monarch  │ │ Rizzaura │ │  Atlas   │        │
 │  │ AthenIQ  │ │   Zeus   │ │ Jellyfin │ │  ONYX    │ │  Oasis   │        │
 │  │ Magnate  │ │OmniRoute │ │   *arr   │ │          │ │  Gitea   │        │
@@ -32,7 +32,7 @@ container) and connects via a WireGuard mesh overlay network.
 | 2 | Voice     | PBX + VoIP + LLM gateway  | Capstone, Zeus, OmniRoute, coturn | ~6 GiB |
 | 3 | Media     | Streaming + automation + video | Jellyfin, *arr (SSO-gated), PLUTUS | ~8 GiB |
 | 4 | Social    | Leaderboard + storage     | Rizzaura, ONYX                    | ~6 GiB |
-| 5 | Dev       | Code + mail + factory     | Atlas (Gitea+Convex), Oasis, Distro, Olympus + Studio | ~8 GiB |
+| 5 | Dev       | Code + mail + builder     | Atlas (Gitea+Convex), Oasis, Distro | ~8 GiB |
 
 ## Components (`./stack.sh download`)
 
@@ -46,7 +46,7 @@ compose actually builds from:
 ```bash
 ./stack.sh download --list              # components, repos, groups
 ./stack.sh download all                 # clone/update every component
-./stack.sh download plutus olympus      # just some of them
+./stack.sh download plutus distro       # just some of them
 ./stack.sh download all --start         # download, then start the groups
 ./stack.sh download all --dir /srv/platform      # or STACK_COMPONENT_BASE in .env
 ./stack.sh download cerulean --ref v0.3.0        # pin a branch, tag, or commit
@@ -58,7 +58,7 @@ fetched and fast-forwarded; a checkout with local changes is left untouched, and
 a directory that is not a git checkout is skipped rather than clobbered.
 
 Group arguments everywhere also accept a component or a group alias, so
-`./stack.sh up plutus` starts Group 3 and `./stack.sh logs olympus` tails Group 5.
+`./stack.sh up plutus` starts Group 3 and `./stack.sh logs distro` tails Group 5.
 
 `./stack.sh verify [component…|all]` reports each checkout as healthy, on a
 different branch, or missing/mismatched, and exits non-zero on the latter. `up`
@@ -148,8 +148,8 @@ extensions/my-extension/
 ### Standalone Per-Host Variant
 
 An extension fragment is written for a host that has joined the mesh: it attaches
-to `innotel-mesh-net` and registers with Consul. The hosts that run a product
-stack but no mesh — `.50` (Olympus) and `.56` (Monarch) — cannot start
+to `innotel-mesh-net` and registers with Consul. A host that runs a product
+stack but no mesh — `.56` (Monarch) — cannot start
 `monitoring` that way, so the extension ships a second compose file:
 
 | File                     | For                                        | Contains                                                       |
@@ -197,7 +197,7 @@ gets its own Docker network to avoid collisions.
 
 1. Clone the repo on each server
 2. `./stack.sh download <components…>` — fetch the components that server hosts
-   (e.g. `./stack.sh download plutus` on Server 3, `./stack.sh download olympus`
+   (e.g. `./stack.sh download plutus` on Server 3, `./stack.sh download distro`
    on Server 5), as siblings of the checkout
 3. Fill in `.env` with that server's IP and keys
 4. On Server 1: `./stack.sh up 1` (starts Consul server + mesh)
@@ -260,7 +260,6 @@ mesh's Consul agent lives. Services on the same host reach Consul directly as
 | 5     | Convex           | 3210      | 10.10.5.1:3210          |
 | 5     | Oasis Mail       | 587       | 10.10.5.1:587           |
 | 5     | Distro web       | 5173      | 10.10.5.1:5173          |
-| 5     | Olympus Studio   | 3001      | 10.10.5.1:3001          |
 | 5     | Convex dashboard | 6790      | 127.0.0.1:6790          |
 | 3     | Media SSO gateways | 14001-14009 | 10.10.3.1:14001 |
 

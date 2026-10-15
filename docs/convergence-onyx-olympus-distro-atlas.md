@@ -2,6 +2,24 @@
 
 **Status: proposed** · updated September 15, 2026
 
+> **Superseded in part — Olympus was removed from the stack (2026-10-15).**
+> Olympus is gone: no container on `.44`, `.60`, `.71` or `.90`, no checkout, its
+> factory host `.50` unreachable, its public names and edge hosts deleted, its
+> Cerulean service key revoked and its roster entry dropped. That takes the
+> subject out of this document's central decision — option A, which made
+> *Olympus's engine* the stack's one builder (§1.1, §1.3, §8 Phase 1) — because
+> there is no longer an engine, a Studio or a TUI to converge on.
+>
+> **Where the build plane stands now.** The builder role belongs to **Atlas**
+> (CodeOps), whose own README already credits it with "the AI app builder that
+> scaffolds new platform applications", with **Distro** (BuilderOps) supplying the
+> builder tenancy it runs under and Atlas's self-hosted **Convex** as the deploy
+> target. Atlas ships no builder engine today — its Chef profile was retired in
+> §8 Phase 3 — so the test this document set for a builder ("ends with a running,
+> named application", §1.1) is met by nothing at present. Everything else here
+> stays readable as the record of the state it described and of the parts still in
+> force (§4 secrets, §5 front doors, §6 tenancy, §8's applied items).
+
 > **What this is.** The deep look at the four platforms that surround *building
 > software* in this ecosystem — **ONYX** (StorageOps), **Atlas** (CodeOps),
 > **Distro** (BuilderOps), **Olympus** (FactoryOps) — and the target architecture

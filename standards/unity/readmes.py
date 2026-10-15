@@ -32,7 +32,6 @@ REPOS = [
     "5-dev/atlas",
     "5-dev/distro",
     "5-dev/oasis",
-    "5-dev/olympus",
     "ips",
 ]
 
