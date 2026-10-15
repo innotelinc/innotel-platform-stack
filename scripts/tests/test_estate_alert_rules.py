@@ -37,6 +37,7 @@ CHECK_SCRIPTS = [
     "check-alert-delivery",
     "check-mail-auth",
     "check-mail-relay",
+    "check-group-compose-freshness",
 ]
 
 

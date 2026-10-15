@@ -1,5 +1,5 @@
 [Unit]
-Description=Estate host checks — addresses, CPU caps, the host and pool inventory, latency, disk headroom, that the alert receiver delivers, that the mail server's outbound chain is wired, and that the mail domains' SPF/DKIM/DMARC resolve
+Description=Estate host checks — addresses, CPU caps, the host and pool inventory, latency, disk headroom, that the alert receiver delivers, that the mail server's outbound chain is wired, and that the mail domains' SPF/DKIM/DMARC resolve, and that every generated group compose still matches the member repos it is built from
 Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/container-placement.md
 
 # Each check reads the estate hosts over ssh, so the LAN has to be up first. None of
@@ -38,3 +38,13 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-auth.py --prom
 # 2026-10-09. STALWART_USER/STALWART_PASSWORD come from the EnvironmentFile above; the
 # check has no default credential and must never carry one.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-relay.py --base http://192.168.1.15:8080 --prom ${TEXTFILE_DIR}/estate-check-mail-relay.prom
+
+# The one check that is about this repo rather than about a host. The files in `groups/`
+# are generated *and tracked*, so a member repo that moves on leaves the file a rebuild
+# starts from behind — and this repo's CI only compares them when *this* repo changes,
+# while the inputs live in the member repos. Both sides are taken from the remote: a
+# shallow clone of the stack repo for the checked-in files, and `fetch-group-members.py`
+# — the CI job's own step — for the member repos, so nothing here depends on a checkout
+# on this host and a version of the scripts deployed years ago still compares that
+# year's `main` against that year's repos. ~15 s a run (17 shallow clones, all small).
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-group-compose-freshness.py --prom ${TEXTFILE_DIR}/estate-check-group-compose-freshness.prom
