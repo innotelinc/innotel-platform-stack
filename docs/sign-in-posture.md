@@ -1,5 +1,10 @@
 # Sign-in posture — Authentik is the only identity
 
+> **Olympus was removed from the stack on 2026-10-15** (its host was
+> decommissioned 2026-09-30 and the `olympus` repo archived). Olympus/Studio rows
+> and notes below are kept as the record of the pre-retirement posture; there is
+> no deployed Olympus surface left to grade.
+
 **Rule.** Identity lives in Cerulean's **Authentik** (IdentityOps). A platform
 may *consume* identity; it may not keep a second user store or a second password
 path. Every deployed surface is either **Authentik-only** or explicitly listed
@@ -94,7 +99,7 @@ providers to the same contract.
 
 ### The shared session store
 
-Every gateway except Olympus shares **one** Redis (`cerulean-sso-sessions`,
+Every gateway shares **one** Redis (`cerulean-sso-sessions`,
 published by `1-primary/npm/compose.cerulean.yml`), so one Authentik sign-in
 covers the edge, the media apps and the app gateways. The one value a moved stack
 gets wrong:
@@ -166,16 +171,13 @@ password that is the whole control on that listener (an empty one refuses to
 start). Sessions are the only thing in it, there is no volume, and losing it
 costs a re-login.
 
-The LAN bind is not decoration. Capstone, Monarch and Olympus were split onto
+The LAN bind is not decoration. Capstone and Monarch were split onto
 servers of their own, and **neither the edge's loopback nor its docker0 gateway
 is reachable across a host boundary** — so each zone that moved away must set
 `SSO_SESSION_REDIS_HOST` to `192.168.1.71`. `172.17.0.1` is correct only on the
 edge host itself, where it names the store directly; anywhere else it names that
 host's *own* empty docker0 and every gateway exits on
-`dial tcp 172.17.0.1:16380: connect: connection refused`. Olympus is the one
-zone that does not share this store at all: it runs its own
-(`gateway-sso-sessions`) with its own cookie secret, so a sign-in there
-is a second sign-in.
+`dial tcp 172.17.0.1:16380: connect: connection refused`.
 
 ### The gateway inventory
 
@@ -251,7 +253,6 @@ handler that mints the session is the control.
 | **Magnate** | `/admin`, `/admin/login` | Authentik OIDC only | `lib/auth.ts` `breakglassLoginEnabled()` gates `app/api/admin/login/route.ts`; `components/AdminLogin.tsx` renders the form only when on | `BREAKGLASS_LOGIN=1` |
 | **Cerulean** | portal (all `/api/*` behind a session) | Authentik OIDC only | `server/src/config.ts` `auth.localEnabled` (default **false**), `server/src/routes.ts` `POST /auth/login` → 403 | `BREAKGLASS_LOGIN=1` (legacy alias `AUTH_LOCAL_ENABLED=1`) |
 | **Distro** | control plane `/admin`, `/login` | Authentik OIDC only | `src/oidc.js` `localLoginEnabled()`, `src/http.js` gates `/api/auth/signup` + `/api/auth/login` → 403 | `BREAKGLASS_LOGIN=1` |
-| **Olympus (Studio)** | Studio UI | Authentik OIDC (PKCE) — **no local path exists** | `web/studio/lib/auth.ts` | none needed |
 | **Zeus** | portal | Authentik when the `AUTHENTIK_*` vars are set (`AUTH_MODE` auto) | `src/lib/oidc.ts` `passwordLoginEnabled()`, `app/api/auth/login/route.ts` → 403 | `AUTH_MODE=both` (button + form) |
 | **Rizz Aura** | app / rankings / community / admin | Authentik OIDC only — **no password store at all** | `api/auth.mjs` | none |
 | **Capstone dashboard** | Control Center | Authentik OIDC only | `dashboard-backend/app/main.py` `/auth/login` is an OIDC redirect | none |
@@ -305,7 +306,7 @@ configuration change.
 | **n8n · Grist · Grafana · Workflow Studio · FreePBX/AvantFax · Technitium** | own local login | **Fronted by an `oauth2-proxy` gateway** (`innotel-app-gateway`) — see §1. Authentik is the only door on the public name |
 | **The media stack** (Radarr, Sonarr, Lidarr, Whisparr, Bazarr, Prowlarr, qBittorrent, SABnzbd) | own local login | **Fronted by an `oauth2-proxy` gateway** (`monarch-media`); the apps run `AuthenticationMethod=External`, i.e. they trust the proxy and have no login of their own. **(Seerr is the exception** — its gateway publishes the app's own sign-in page, because Seerr cannot hold an OIDC session and has no TV-less client to protect; see below.) |
 | **Jellyfin · Clipbucket · the IPTV guide · Requestrr** | own login (Jellyfin through the LDAP outpost, the other three their own forms) | **Fronted by a gateway since 2026-09-16** — the three names that answered with no gate at all (`media.*`, `tube.*`, `tv.monarch.*`) plus the Discord bot's console. Each app is bound to `127.0.0.1` on the media host, so its gateway is the only door, not one of two |
-| **OmniRoute gateway** | local dashboard password | Fronted by `gateway-sso` at `gateway.olympus.innotel.us` (see `5-dev/olympus/docs/gateway-sso.md`); OmniRoute's own OIDC cannot be enabled — it strips the trailing slash from the issuer and Authentik's `iss` always ends with one |
+| **OmniRoute gateway** | local dashboard password | Fronted by `gateway-sso` at `gateway.innotel.us` (see the `ips/extensions/llm/` host extension); OmniRoute's own OIDC cannot be enabled — it strips the trailing slash from the issuer and Authentik's `iss` always ends with one |
 | **MinIO** | access keys | Native OIDC exists (`MINIO_IDENTITY_OPENID_*`); object-store API keys are not a user login |
 | **searxng · iptv · subscribe-portal · workflow-studio** | no login | n/a — nothing to convert (workflow-studio now has a gateway because the *app* it hangs off does) |
 
@@ -637,12 +638,6 @@ posture choice, not a config typo:
 - bind the console on `.46`'s LAN address and point the `.30` gateway at it —
   simpler, but a bind is per-interface: it re-exposes the DNS/DHCP admin console to
   the whole office network, where its gateway can be bypassed.
-
-**Olympus is unaffected by any of this.** It runs its own gateway and its own
-session store (`gateway-sso-sessions`, its own cookie secret), so a sign-in
-there is a second sign-in rather than a shared one — the one zone that deliberately
-does not ride this store, and the reason its gateway still works with the edge on
-another host.
 
 ## 6. The issuer-mode outage, and what it closed (2026-09-18)
 

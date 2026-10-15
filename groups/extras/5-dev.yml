@@ -45,7 +45,6 @@ services:
         sleep 15
         for svc in \
           "gitea|${MESH_SERVER_IP:-10.10.5.1}|3000|dev,git,code" \
-          "olympus-studio|${MESH_SERVER_IP:-10.10.5.1}|3001|dev,build,studio" \
           "convex|${MESH_SERVER_IP:-10.10.5.1}|3210|dev,build,convex" \
           "oasis-mail|${MESH_SERVER_IP:-10.10.5.1}|587|mail,smtp" \
           "distro-control-plane|${MESH_SERVER_IP:-10.10.5.1}|20140|dev,accounts,quota"; do
