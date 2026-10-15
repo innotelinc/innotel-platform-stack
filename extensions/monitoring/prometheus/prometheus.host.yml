@@ -8,6 +8,26 @@ global:
   external_labels:
     stack: innotel-host
 
+# Where the alerts go. The estate has exactly one receiver — `signara-alertmanager-1`
+# in Signara's stack on i3 — and it is dialled at its **container** address rather
+# than a host's, for the reason every other estate address is: `192.168.1.44` is
+# pinned inside that container and published on `0.0.0.0`
+# (`ALERTMANAGER_BIND_ADDRESS` in Signara's `.env`), so a container that moves
+# between hosts does not change what this line says.
+#
+# This section is what lets the rules below reach anybody at all. Without it a
+# per-host Prometheus evaluates `rules/*.yml`, shows the alerts in its own UI, and
+# sends nothing: `EstateCheckFailing` and `AuthentikBackupFailed` both spent their
+# lives firing into a console nobody has open, which is the same failure as an
+# Alertmanager with an unrendered config one hop further up the chain — and it has
+# no symptom on the host itself, because a Prometheus that cannot reach a receiver
+# still evaluates, displays and looks healthy. Measured 2026-10-15: the edge's
+# receiver was empty while every rule it loads was firing-ready.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["192.168.1.44:9093"]
+
 # Alert rules for the dumps a host publishes through node-exporter's textfile
 # collector (TEXTFILE_DIR). The rules are keyed on the series being present, so a
 # host that does not take a given backup loads them and stays quiet.

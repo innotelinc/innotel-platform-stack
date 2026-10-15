@@ -173,7 +173,14 @@ Three things differ from the mesh variant, all three deliberately:
 
 - **The Prometheus config is a separate file.** `prometheus/prometheus.host.yml`
   scrapes node-exporter and Prometheus itself; `prometheus/prometheus.yml` is the
-  mesh config, and discovers services through Consul instead.
+  mesh config, and discovers services through Consul instead. Both load the estate's
+  alert rules *and* carry the `alerting:` section that delivers them: the estate runs
+  one Alertmanager, so both name it at its own address (`192.168.1.44:9093`, published
+  on `0.0.0.0` by Signara's stack on `i3`) rather than at a host. A config that loads
+  rules and names no receiver passes `promtool check config`, looks healthy in every
+  screen it has, and tells nobody anything — the whole estate's alerting switched off,
+  which is what both files did until 2026-10-15
+  (`docs/container-placement.md` §*Changes applied 2026-10-15*).
 - **There is no OTLP collector**, because neither stack emits OTel yet.
 - **The dashboard belongs to this variant.**
   `grafana/dashboards/host-overview.json` reads node-exporter metrics, so only
