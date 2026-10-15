@@ -363,8 +363,14 @@ services:
     # See docs/zeus-integration.md §4 and .env TURN_EXTERNAL_IP.
 
   # ── Local TTS: Kokoro-82M via kokoro-fastapi (OpenAI-compatible) ──────────
+  # RETIRED as of v3.21 — behind the `kokoro` profile, so a plain `up` does not
+  # start it. Piper is the local voice now (in-process ONNX in `tts-shim`,
+  # ~2.5× faster here and no ~4 GiB torch boot). Start this only to A/B against
+  # Piper: `docker compose --profile kokoro up -d kokoro` (and list `kokoro` in
+  # TTS_SHIM_ENGINES).
 
-  kokoro:   # from capstone
+  kokoro:   # from capstone (profiles: "kokoro")
+    profiles: ["kokoro"]
     image: ${KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-cpu:latest}
     container_name: kokoro-fastapi
     restart: unless-stopped
@@ -372,6 +378,29 @@ services:
     # the full boot (torch + model + voice packs + inno tuner) transiently
     # overshoots even 4 GiB and gets OOM-killed (exit 137) — give the boot
     # plenty of headroom; steady-state after load is ~2-3 GiB.
+    #
+    # MEASURED 2026-10-12 — this host can no longer provide that headroom, so
+    # this container crash-loops (54+ restarts, ~40-90 s apart) and the reboot
+    # churn starves Asterisk: dograh's ARI websocket handshake began timing out,
+    # it parked its telephony configuration (`ari-timeout`, "Deactivated config
+    # 2 after 20 consecutive failures") and inbound calls stopped reaching the
+    # agent entirely. The numbers: the cgroup ceiling here is memory.max = 5.5
+    # GiB and memory.current sits at 5.18 GiB — ~0.3 GiB free — while
+    # /etc/systemd/system/capstone.service still documents this box as 2 cores /
+    # 7.3 GiB, i.e. ~1.8 GiB of the sizing decision is gone. The kill is at the
+    # host cgroup, not this one: the container's own memory.events stays
+    # oom_kill 0 (sampled peak ~1 GiB) while dockerd reports `oom` + exit 137.
+    # mem_limit cannot be the fix, because 8g is already inert under a 5.5 GiB
+    # ceiling. Fix the ceiling (or move TTS off this box, or point tts-shim at
+    # its bundled Piper engine) — not this value.
+    #
+    # NOT AVAILABLE HERE: this image is PyTorch-only. v0.9.0 (the pinned
+    # `latest`) ships no `onnxruntime` and no ONNX inference path at all — the
+    # model on disk is `kokoro-v1_0.pth` and the loader is `kokoro.KModel` — so
+    # installing onnxruntime into this image would be inert. The ONNX Kokoro on
+    # this box is `speaches` (`speaches-ai/Kokoro-82M-v1.0-ONNX`, onnxruntime
+    # 1.22), and tts-shim can dial it instead: see TTS_SHIM_KOKORO_MODEL above
+    # and scripts/install-onnx-kokoro.sh.
     mem_limit: 8g
     memswap_limit: 8g
     # Torch/OpenMP size their thread pools (and thread-local arenas) from the
@@ -417,14 +446,24 @@ services:
     image: ${TTS_SHIM_IMAGE:-capstone-tts-shim:local}
     container_name: tts-shim
     restart: unless-stopped
-    # Memory posture: the cache is on a volume and the engines are remote
-    # (Kokoro) or a subprocess (Piper), so the process itself stays small.
+    # Memory posture: the cache is on a volume and the engines are in-process
+    # (Piper) or remote (Kokoro), so the process itself stays small.
     mem_limit: 2g
     memswap_limit: 2g
     environment:
-      TTS_SHIM_ENGINES: "${TTS_SHIM_ENGINES:-kokoro}"
-      TTS_SHIM_DEFAULT_ENGINE: "${TTS_SHIM_DEFAULT_ENGINE:-kokoro}"
+      # Piper is the voice. Kokoro is retired (behind the `kokoro` profile) and
+      # is only registered when listed here — with `piper` alone the shim does
+      # not advertise or serve a Kokoro engine at all. To A/B, start the profile
+      # and set this to `kokoro,piper`.
+      TTS_SHIM_ENGINES: "${TTS_SHIM_ENGINES:-piper}"
+      TTS_SHIM_DEFAULT_ENGINE: "${TTS_SHIM_DEFAULT_ENGINE:-piper}"
+      # Only read when `kokoro` is in TTS_SHIM_ENGINES (see scripts/install-onnx-kokoro.sh).
       TTS_SHIM_KOKORO_URL: "${TTS_SHIM_KOKORO_URL:-http://kokoro-fastapi:8880}"
+      # The model id the kokoro upstream is asked for. kokoro-fastapi ignores it;
+      # an upstream that hosts more than one model does not — the ONNX Kokoro
+      # lives in `speaches` and answers to `speaches-ai/Kokoro-82M-v1.0-ONNX`, so
+      # pair it with TTS_SHIM_KOKORO_URL=http://speaches:8000.
+      TTS_SHIM_KOKORO_MODEL: "${TTS_SHIM_KOKORO_MODEL:-kokoro}"
       TTS_SHIM_PIPER_VOICE: "${TTS_SHIM_PIPER_VOICE:-}"
       TTS_SHIM_CACHE_ENABLED: "${TTS_SHIM_CACHE_ENABLED:-true}"
       TTS_SHIM_CACHE_MAX_BYTES: "${TTS_SHIM_CACHE_MAX_BYTES:-536870912}"
@@ -438,8 +477,6 @@ services:
       # image so a voice is a data decision, not a rebuild: fetch one with
       # `docker exec tts-shim python -m piper.download_voices <voice>`.
       - tts_piper_voices:/opt/piper-voices
-    depends_on:
-      - kokoro
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8880/health', timeout=5)\""]
       interval: 15s
