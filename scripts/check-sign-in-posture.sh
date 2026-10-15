@@ -40,10 +40,9 @@ ZONES=(
   "signara|1-primary/signara"
   "capstone|2-voice/capstone"
   "monarch|3-media/monarch"
-  # Olympus is decommissioned (its i3 `.50` and the `.64` factory/studio
-  # container were removed 2026-09-30, replaced by Genie), so it is no longer a
-  # zone this runner can grade. The `5-dev/olympus` repo still exists — only the
-  # deployment is gone.
+  # Olympus is retired (its i3 `.50` and the `.64` factory/studio container were
+  # removed 2026-09-30, replaced by Genie; the `5-dev/olympus` repo was archived
+  # 2026-10-15), so it is no longer a zone this runner can grade.
   # Distro joined when its console was made Authentik-only; it is OIDC-native
   # (no oauth2-proxy gateway), so its test asserts the issuer handshake and a
   # real code flow rather than the gateway hop the six above do.

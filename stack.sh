@@ -25,7 +25,7 @@
 #   discover <service>    Find a service across all groups
 #   register <service> <addr> <port> [tags]  Register a service manually
 #
-# Group arguments accept a number (1-5), a component name (plutus, olympus, …),
+# Group arguments accept a number (1-5), a component name (plutus, distro, …),
 # or a group alias (primary, voice, media, social, dev).
 # ══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -62,7 +62,7 @@ declare -A STACK_GROUPS=(
   [2]="voice|Capstone + Zeus + OmniRoute|~6 GiB"
   [3]="media|Monarch (Jellyfin + *arr) + PLUTUS|~10 GiB"
   [4]="social|Rizzaura + ONYX|~6 GiB"
-  [5]="dev|Atlas + Oasis + Distro + Olympus|~8 GiB"
+  [5]="dev|Atlas + Oasis + Distro|~8 GiB"
 )
 
 # ── Component registry ─────────────────────────────────────────────────────────
@@ -97,11 +97,10 @@ declare -A STACK_COMPONENTS=(
   [atlas]="innotelinc/atlas|5-dev/atlas|5|main|CodeOps — Gitea, Convex, CI"
   [oasis]="innotelinc/oasis|5-dev/oasis|5|master|MailOps — mail, calendar, contacts"
   [distro]="innotelinc/distro|5-dev/distro|5|main|BuilderOps — in-browser AI app builder"
-  [olympus]="innotelinc/olympus|5-dev/olympus|5|main|FactoryOps — issue → validated PR factory"
 )
 
 # `download all` order — bash associative arrays are unordered, so keep a list.
-STACK_COMPONENT_ORDER="cerulean atheniq magnate signara sign verifier npm capstone zeus monarch plutus rizzaura onyx zapit ontrak atlas oasis distro olympus"
+STACK_COMPONENT_ORDER="cerulean atheniq magnate signara sign verifier npm capstone zeus monarch plutus rizzaura onyx zapit ontrak atlas oasis distro"
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 info()  { echo -e "${BLUE}[info]${NC}  $*"; }
@@ -984,7 +983,7 @@ cmd_download_help() {
   echo ""
   echo "Examples:"
   echo "  ./stack.sh download all                # every component"
-  echo "  ./stack.sh download plutus olympus     # only the new additions"
+  echo "  ./stack.sh download plutus distro      # only the new additions"
   echo "  ./stack.sh download all --start        # download, then bring the stack up"
   echo "  ./stack.sh download cerulean --ref v0.3.0"
 }
@@ -1179,7 +1178,7 @@ case "$cmd" in
     echo "  download <component...|all> [--start] [--ref <ref>] [--dir <path>]"
     echo "                        Clone/update component repos next to this checkout"
     echo "          e.g. ./stack.sh download all --start"
-    echo "               ./stack.sh download plutus olympus"
+    echo "               ./stack.sh download plutus distro"
     echo "  verify  [component...|all]  Check component checkouts before starting"
     echo "                        e.g. ./stack.sh verify all"
     echo "  audit   [component...|all] [--org]  Audit attribution in git history"

@@ -276,7 +276,7 @@ clones them as siblings of the checkout — see
 | 2 | voice | `./stack.sh download capstone zeus` |
 | 3 | media | `./stack.sh download monarch plutus npm` |
 | 4 | social | `./stack.sh download rizzaura onyx` |
-| 5 | dev | `./stack.sh download atlas oasis distro olympus` |
+| 5 | dev | `./stack.sh download atlas oasis distro` |
 
 Where each group actually runs today, and what it needs from the others (a
 group dir holds only the repos that run there — the rest are reached over the
@@ -312,8 +312,8 @@ cp .env.example .env   # fill in server IPs, WG keys, etc.
 # Fetch the platform components as siblings of this checkout — the locations
 # the group compose files build from. Pick all of them or just some:
 ./stack.sh download all                  # every component
-./stack.sh download plutus olympus       # only the new additions
-./stack.sh download olympus --start      # download, then start its group
+./stack.sh download plutus distro        # only the new additions
+./stack.sh download distro --start       # download, then start its group
 ./stack.sh download --list               # what's available
 
 # Server 1 — starts mesh + Consul + Group 1
@@ -760,7 +760,7 @@ the group dir for the server that runs it, and this repo sits beside them.
   2-voice/     capstone zeus            (OmniRoute gateway)
   3-media/     monarch plutus
   4-social/    rizzaura onyx zapit
-  5-dev/       atlas distro oasis olympus
+  5-dev/       atlas distro oasis
   ips/         this repo — stack.sh, mesh/, extensions/, docs/
 ```
 
@@ -788,7 +788,7 @@ dirs cannot orphan a volume.
 |---|---|
 | `./stack.sh up all` | Start everything (single-server mode) |
 | `./stack.sh up <1-5>` | Start a specific group |
-| `./stack.sh up <component\|alias>` | Start the group hosting a component (`plutus`, `olympus`, …) or a group alias (`media`, `dev`, …) |
+| `./stack.sh up <component\|alias>` | Start the group hosting a component (`plutus`, `distro`, …) or a group alias (`media`, `dev`, …) |
 | `./stack.sh download <component...\|all> [--start]` | Clone/update the component repos next to this checkout (and optionally start their groups) |
 | `./stack.sh download --list` | List the components, their repos, and their groups |
 | `./stack.sh verify [component\|all]` | Check that component checkouts exist, match their repos, and are on the right branch (`up` runs this first; `STACK_SKIP_VERIFY=1` skips it) |
