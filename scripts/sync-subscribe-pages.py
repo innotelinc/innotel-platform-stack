@@ -41,7 +41,7 @@ TEMPLATE = STACK / "web" / "subscribe" / "template.html"
 # ?service= value on Magnate's price API — they must stay identical.
 SERVICES = [
     "magnate", "monarch", "jellyfin", "zeus", "capstone", "oasis", "onyx",
-    "signara", "atlas", "atheniq", "olympus", "plutus", "distro", "genesis",
+    "signara", "atlas", "atheniq", "plutus", "distro", "genesis",
     "ontrak", "verifier", "genie", "rizzaura", "zapit", "cerulean",
 ]
 
@@ -57,7 +57,7 @@ GROUP_OF = {
     # the certificates it terminates, not with the media stacks it routes.
     "npm": "1-primary",
     "onyx": "4-social", "rizzaura": "4-social", "zapit": "4-social",
-    "atlas": "5-dev", "distro": "5-dev", "oasis": "5-dev", "olympus": "5-dev",
+    "atlas": "5-dev", "distro": "5-dev", "oasis": "5-dev",
 }
 
 
@@ -86,7 +86,6 @@ DEFAULTS = {
     "signara": {"name": "Signara", "tagline": "Trust and signing infrastructure", "accent": "#38bdf8"},
     "atlas": {"name": "Atlas", "tagline": "The DevOps platform", "accent": "#22d3ee"},
     "atheniq": {"name": "AthenIQ", "tagline": "Learning, on your terms", "accent": "#a78bfa"},
-    "olympus": {"name": "Olympus", "tagline": "The AI studio", "accent": "#f472b6"},
     "plutus": {"name": "PLUTUS", "tagline": "The AI shopping channel", "accent": "#f5b544"},
     "distro": {"name": "Distro", "tagline": "Build and ship, your way", "accent": "#22d3ee"},
     "rizzaura": {"name": "Rizz Aura", "tagline": "Your community, your rules", "accent": "#f472b6"},
