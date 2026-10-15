@@ -215,8 +215,12 @@ estate as it is, not as it was.
   every five minutes and TCP-connects to the edge's doors; two attempts per endpoint, so
   one dropped packet does not page. On failure it exits non-zero (the unit
   shows failed) and mails `EDGE_LIVENESS_MAIL_TO` through the estate's own mail server —
-  not through the estate's Alertmanager, which is loopback-only on `i3` and so not
-  something a watcher on another host can POST to. It is the only checker that can still report the edge being gone, because it does
+  not through the estate's Alertmanager, which it deliberately does not depend on: the
+  watcher exists to report the edge being gone, so it keeps a channel that does not run
+  on the edge. (This entry first gave the reason as the receiver being loopback-only on
+  `i3`; it is not — it is published on `192.168.1.44:9093`, `ALERTMANAGER_BIND_ADDRESS=0.0.0.0`
+  in Signara's `.env` — corrected 2026-10-15, when the per-host Prometheus was pointed at
+  it.) It is the only checker that can still report the edge being gone, because it does
   not run there.
 - **The scheduled checks now cover `i4`.** `check-estate-inventory.py` no longer lists
   it as an optional bench (every named host must answer), `check-container-addresses.py`
@@ -312,6 +316,46 @@ estate as it is, not as it was.
   deployed — but the comments describe the 2026-10-02 topology. They live inside
   containers, not in this repo, so this is the record of what they need; see
   `hosts/i4/README.md` for the same note next to the file table.
+
+### Changes applied 2026-10-15
+
+- **The per-host Prometheus delivers now — the receiver was configured and nothing
+  was sending.** Every host that runs the standalone metrics stack
+  (`extensions/monitoring/docker-compose.host.yml`: the edge and Monarch) mounted
+  `prometheus/rules/` and had **no `alerting:` section at all**, so
+  `EstateCheckFailing` and `AuthentikBackupFailed` were evaluated on every
+  evaluation interval, drawn in that host's own UI, and sent nowhere. It is the same
+  failure as an Alertmanager with an unrendered config, one hop further up the chain,
+  and it is invisible in the same way: a Prometheus with no receiver passes
+  `promtool check config`, reports `alertmanagers` as an empty list, and looks healthy
+  in every screen it has. The edge had been in that state since the rules were added;
+  the estate's whole alerting path was configured-but-dark, and the only thing that had
+  ever delivered was the receiver's own probe, injected through the v2 API by
+  `check-alert-delivery.py` and never through Prometheus.
+
+  Both configs now name the estate's one receiver at its **container** address
+  (`192.168.1.44:9093` — pinned inside `signara` and published on `0.0.0.0`, so the
+  address survives the container moving between hosts), and the mesh variant carries
+  the same section because it mounts the same rules. Verified live 2026-10-15 by
+  reading the mailbox rather than the UI: the edge reported five `EstateCheckFailing`
+  alerts, Alertmanager grouped them, and `admin@innotel.us` received
+  `[CRITICAL] EstateCheckFailing — 5 alerts` with one block per check
+  (`FIRING · critical — EstateCheckFailing`, `The address_latency check is failing`, …).
+  Delivery was confirmed on both hosts as well, each on its own Prometheus:
+  `activeAlertmanagers` = `http://192.168.1.44:9093/api/v2/alerts`.
+
+  **What wiring the receiver surfaced is the point of doing it.** Those five
+  `EstateCheckFailing` alerts are real findings that had been computed and never
+  reported: `container_address`, `estate_inventory`, `address_latency` (`dev` is dark at
+  `.74`), `mail_auth` and `mail_relay`. They are the estate's to fix, not the check's —
+  `check-mail-auth.py` cannot run at all on a host without `dig`, which is one of them.
+  Anything evaluated on the edge now reaches the mailbox by itself, which is what makes
+  the rest of this document's alerts meaningful rather than decorative.
+
+  `scripts/tests/test_prometheus_delivery.py` holds the configs to this: a config that
+  loads rules must name the estate's receiver, at the address the container address
+  table gives `signara`. The trap that guard cannot see is in
+  §*Open items* (a host that mounts the estate-check rules without running the checks).
 
 ## Changes applied 2026-09-27
 
@@ -693,10 +737,12 @@ placement (finding 7).
   relay refused Alertmanager's default `EHLO localhost` (`550 Invalid EHLO
   domain`) and then its self-signed certificate that names no address (`x509:
   cannot validate certificate for 192.168.1.15`). Signara's receiver now takes an
-  `SMTP_HELLO` (a dotted EHLO name) and an `SMTP_TLS_INSECURE` (keep `STARTTLS`,
-  skip verification, off by default) — commit `d6d8ad1`. Its port stays
-  loopback-only (`127.0.0.1:9093` on `i3`), so the edge-dark watcher on `i1`
-  still mails through the mail server directly rather than POSTing to it.
+  `SMTP_HELLO` (a dotted EHLO name) and an  `SMTP_TLS_INSECURE` (keep `STARTTLS`, skip verification, off by default) — commit `d6d8ad1`. Its port is published on its
+  container's own address — `192.168.1.44:9093`, `ALERTMANAGER_BIND_ADDRESS=0.0.0.0`
+  in Signara's `.env` (this bullet first recorded it as loopback-only; corrected
+  2026-10-15, §*Changes applied 2026-10-15*) — so every host in the estate can send
+  alerts to it. The edge-dark watcher on `i1` still mails through the mail server
+  directly, by its own design rather than for reach.
   A receiver that delivers today can go silent tomorrow (a changed relay, an expired
   path), so delivery is not left as a one-off proof: `check-alert-delivery.py` re-proves
   it every run — see §*Receiving alerts is now checked, not assumed*.
@@ -764,3 +810,22 @@ placement (finding 7).
   (6.8 GB) and then the tagged-but-unreferenced images (5.5 GB more). `i1` fell
   back to 13 % once its four sources were deleted. `dev` (`.74`) growth on i2 remains
   the one to watch.
+- **The estate-check rules are mounted on hosts that do not run the checks.**
+  `docker-compose.host.yml` mounts all of `prometheus/rules/` on every host that runs
+  the standalone stack, and one file there is not host-agnostic: `EstateCheckAbsent`
+  fires on a series that is *missing*, which is exactly the state of a host that runs
+  no checks, so a host that mounts it without `systemd/estate-checks.timer` and its
+  `TEXTFILE_DIR` fires all nine checks as critical. `backup.yml` is the opposite and
+  that is why one directory serves every host — it keys on the dump's series being
+  present. Nothing is armed today: Monarch's running Prometheus has no rules mount at
+  all (its container predates the mount in the file), and the edge is the host that
+  runs the checks. It is armed the moment the stack is recreated on Monarch, and
+  §*Changes applied 2026-10-15* is what makes the resulting mail actually arrive. The
+  fix is to give the estate-check half its own mount (or move those rules into the
+  edge's config) rather than deciding by hand which host may run `up -d`.
+- **`check-mail-auth.py` cannot run on the edge.** It needs `dig`, which is not
+  installed there, so it exits 2 (a host it needs could not be read) and the estate has
+  no `dig`-based proof of its SPF/DKIM/DMARC records — the finding that
+  §*Changes applied 2026-10-15* surfaced by wiring the receiver. Install `dig` on the
+  edge, or take the served records from a resolver the check can reach, so this is a
+  pass or a real failure rather than an unreadable check.

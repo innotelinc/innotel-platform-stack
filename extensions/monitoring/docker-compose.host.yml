@@ -34,6 +34,13 @@
 # TEXTFILE_DIR=/root/cerulean-backup/authentik so node-exporter's textfile
 # collector picks up the dump's `status.prom`, and `./prometheus/rules/`
 # (mounted by the service below) is what turns it into alerts.
+#
+# Alerts do not stop at the host they were evaluated on: `prometheus.host.yml`
+# carries the `alerting:` section that sends them to the estate's one Alertmanager
+# (`192.168.1.44:9093`), which is what lets the rules reach anybody at all. Before
+# 2026-10-15 they did not — this stack evaluated its rules, showed them in its own
+# UI and delivered nothing — so a host that runs it with an empty or wrong receiver
+# is that same silence, and nothing on the host looks wrong.
 
 services:
   node-exporter:
@@ -79,6 +86,18 @@ services:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"   # loopback only
     volumes:
       - ./prometheus/prometheus.host.yml:/etc/prometheus/prometheus.yml:ro
+      # Every file here is loaded by every host that runs this stack, and one of
+      # them does not tolerate a host that takes no measurements: `EstateCheckAbsent`
+      # in `estate-checks.yml` fires on a series that is *missing*, which is exactly
+      # what a host that does not run the checks looks like — they need
+      # `systemd/estate-checks.timer` and the `TEXTFILE_DIR` it writes to. Mounting
+      # this directory there means nine criticals about invariants that host was
+      # never asked to keep, and now that the `alerting:` section above works they
+      # are mailed. `backup.yml` is safe anywhere: it keys on the dump's series being
+      # *present* (it is why one rules directory serves every host). Monarch's
+      # running Prometheus has no such mount today; settle this before recreating
+      # this stack on a host that runs no checks — see docs/container-placement.md
+      # §Open items.
       - ./prometheus/rules:/etc/prometheus/rules:ro
       - metrics_prometheus_data:/prometheus
     depends_on:
