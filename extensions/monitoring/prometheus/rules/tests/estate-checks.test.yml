@@ -34,6 +34,8 @@ tests:
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="mail_relay"}'
         values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="group_compose_freshness"}'
+        values: '0x60'
     alert_rule_test:
       - eval_time: 35m
         alertname: EstateCheckAbsent
@@ -58,6 +60,8 @@ tests:
       - series: 'innotel_estate_check_last_run_timestamp{check="mail_auth"}'
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="mail_relay"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="group_compose_freshness"}'
         values: '0x60'
     alert_rule_test:
       - eval_time: 35m
@@ -157,6 +161,15 @@ tests:
               description: >-
                 No `innotel_estate_check_last_run_timestamp` series exists for the
                 `mail_relay` check — it has not run, or its textfile is not in the
+                directory node-exporter reads. Every other rule here keys on a series
+                that exists, so this is the one that catches the check itself being
+                absent. Check the timer and `TEXTFILE_DIR` on the edge.
+          - exp_labels: {severity: critical, team: platform, check: group_compose_freshness}
+            exp_annotations:
+              summary: 'The group_compose_freshness check has never reported'
+              description: >-
+                No `innotel_estate_check_last_run_timestamp` series exists for the
+                `group_compose_freshness` check — it has not run, or its textfile is not in the
                 directory node-exporter reads. Every other rule here keys on a series
                 that exists, so this is the one that catches the check itself being
                 absent. Check the timer and `TEXTFILE_DIR` on the edge.

@@ -87,7 +87,7 @@ estate as it is, not as it was.
   (The 2026-09-27 note below that `limits.cpu` waits for a restart is wrong, and is
   corrected here.)
 - **The estate's host invariants are scheduled and alerting.**
-  `systemd/estate-checks.{service,timer}` runs eight checks every 30 minutes *on the
+  `systemd/estate-checks.{service,timer}` runs nine checks every 30 minutes *on the
   Cerulean edge* and writes each one's textfile into node-exporter's directory:
   `check-container-addresses.py` (every address an A record names),
   `check-container-limits.py` (a declared `limits.cpu` is the cpuset actually pinned),
@@ -106,9 +106,14 @@ estate as it is, not as it was.
   see §*Open items*), and
   `check-mail-relay.py` (the **outbound** half: non-local recipients route at a
   smarthost, that route exists and answers, every sending domain has an *active* DKIM
-  signature, and the queue drains — each of which has broken here with no symptom).
+  signature, and the queue drains — each of which has broken here with no symptom), and
+  `check-group-compose-freshness.py` (the one that is not about a host: the files in
+  `groups/` are generated *and tracked*, so a member repo that adds or retires a service
+  leaves the file a rebuilt host starts from behind — and CI only compares them when
+  *this* repo changes, while the inputs live in the member repos. It clones both sides
+  from the remote, so a working copy — dirty or years old — cannot make it pass).
   They share one metric family — `innotel_estate_check`, one series per check via a
-  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all eight
+  `check` label — so `prometheus/rules/estate-checks.yml` alerts on all nine
   (`EstateCheckFailing`, `...CouldNotRun`, `...Stale`, `...NotPinned`), and the
   provisioned `grafana/dashboards/estate-checks.json` shows them (a green stat, a
   per-check table, whether the receiver delivered, and the per-address latency chart). The edge reaches
