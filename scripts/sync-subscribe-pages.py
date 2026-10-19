@@ -298,6 +298,14 @@ TEMPLATE = """<!doctype html>
         }}
         return {{ head: "$" + money(p.priceMonthlyCents), unit: "/month" }};
       }}
+      // "Buy credits", "Buy runs", "Buy classes": the unit is whatever the plan
+      // named in Magnate, so the button cannot assume it takes a bare "s".
+      function unitPlural(unit) {{
+        var u = unit || "credits";
+        if (/(s|x|z|ch|sh)$/.test(u)) return u + "es";
+        if (/[^aeiou]y$/.test(u)) return u.slice(0, -1) + "ies";
+        return u + "s";
+      }}
       function card(p) {{
         var el = document.createElement("div");
         el.className = "plan" + (p.highlighted ? " popular" : "");
@@ -313,7 +321,7 @@ TEMPLATE = """<!doctype html>
           (p.description ? '<div style="font-size:13px;color:var(--muted)">' + p.description.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</div>" : "") +
           "<ul>" + feats + "</ul>" +
           '<a class="cta" href="' + SIGNUP + "?plan=" + encodeURIComponent(p.slug) + '">' +
-          (p.perUnit ? "Buy " + (p.billingUnit || "credits") + "s" : "Subscribe") +
+          (p.perUnit ? "Buy " + unitPlural(p.billingUnit) : "Subscribe") +
           "</a>";
         return el;
       }}
