@@ -141,7 +141,12 @@
     // Prices are never baked in: read them live from Magnate, the billing
     // platform, so the master dashboard is the only place a price is set.
     (function () {
+      // The service's own plans, plus any add-ons that spend against the same
+      // account. A family page asks once per product because the person arriving
+      // from one of the add-ons is short on *that* balance, and this is the page
+      // that sells it: one question per product is what keeps the rows apart.
       var SERVICE = "zapit";
+      var ADDONS = [];
       // SIGNUP IS MAGNATE'S, and it is not on this portal.
       //
       // This used to be `https://subscribe.innotel.us/signup` — a `/signup` path on this
@@ -162,32 +167,54 @@
         var v = cents / 100;
         return v % 1 === 0 ? String(v) : v.toFixed(2);
       }
+      // What a plan costs, in the unit it is sold in. A per-unit plan has a monthly
+      // figure of zero, which is not a price: quoting it would advertise a free
+      // product that then charges $5 a credit at checkout.
+      function planPrice(p) {
+        if (p.perUnit && p.pricePerUnitCents) {
+          return { head: "$" + money(p.pricePerUnitCents), unit: " per " + (p.billingUnit || "unit") };
+        }
+        return { head: "$" + money(p.priceMonthlyCents), unit: "/month" };
+      }
       function card(p) {
         var el = document.createElement("div");
         el.className = "plan" + (p.highlighted ? " popular" : "");
         var feats = (p.features || []).map(function (f) {
           return "<li>" + f.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</li>";
         }).join("");
+        var priced = planPrice(p);
         el.innerHTML =
-          (p.highlighted ? '<span class="tag">Most popular</span>' : "") +
+          (p.addon ? '<span class="tag">Add-on</span>' : p.highlighted ? '<span class="tag">Most popular</span>' : "") +
           "<h2>" + p.name.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</h2>" +
-          '<div class="price">$' + money(p.priceMonthlyCents) + "<small>/month</small></div>" +
+          '<div class="price">' + priced.head + "<small>" + priced.unit + "</small></div>" +
           (p.priceYearlyCents ? '<div style="font-size:12px;color:var(--muted)">or $' + money(p.priceYearlyCents) + "/year</div>" : "") +
+          (p.description ? '<div style="font-size:13px;color:var(--muted)">' + p.description.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</div>" : "") +
           "<ul>" + feats + "</ul>" +
-          '<a class="cta" href="' + SIGNUP + "?plan=" + encodeURIComponent(p.slug) + '">Subscribe</a>';
+          '<a class="cta" href="' + SIGNUP + "?plan=" + encodeURIComponent(p.slug) + '">' +
+          (p.perUnit ? "Buy " + (p.billingUnit || "credits") + "s" : "Subscribe") +
+          "</a>";
         return el;
       }
-      fetch("https://app.magnate.innotel.us/api/plans?service=" + encodeURIComponent(SERVICE))
-        .then(function (r) { return r.ok ? r.json() : { plans: [] }; })
-        .then(function (d) {
-          var plans = (d && d.plans) || [];
+      var MAGNATE = "https://app.magnate.innotel.us";
+      // No service filter asks for the platform-level list, which is what the
+      // billing platform's own page wants: it sells the add-ons, and a plan that
+      // is not any one service's belongs to all of them.
+      function plansFor(service) {
+        var url = MAGNATE + "/api/plans" + (service ? "?service=" + encodeURIComponent(service) : "");
+        return fetch(url)
+          .then(function (r) { return r.ok ? r.json() : { plans: [] }; })
+          .then(function (d) { return (d && d.plans) || []; });
+      }
+      Promise.all([plansFor(SERVICE)].concat(ADDONS.map(plansFor)))
+        .then(function (lists) {
+          var plans = [].concat.apply([], lists);
           if (!plans.length) { emptyEl.hidden = false; return; }
           plans.forEach(function (p) { plansEl.appendChild(card(p)); });
           plansEl.hidden = false;
         })
         .catch(function () {
           emptyEl.hidden = false;
-          emptyEl.innerHTML = 'Prices are temporarily unavailable — <a href="https://app.magnate.innotel.us">open the billing platform</a>.';
+          emptyEl.innerHTML = 'Prices are temporarily unavailable — <a href="' + MAGNATE + '">open the billing platform</a>.';
         });
     })();
   </script>
