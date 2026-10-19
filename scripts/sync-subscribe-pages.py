@@ -23,6 +23,8 @@ Usage:
 
 Reads:   <repo>/web/landing/subscribe.json     (one spec per service repo)
 Writes:  web/subscribe/pages/<service>.html    (and pages/index.html)
+Ought:   nothing else in web/subscribe/pages — a page that is not one of the above is
+         removed (a retired service's page was being served long after it was gone)
 """
 from __future__ import annotations
 
@@ -525,6 +527,24 @@ def render_index() -> str:
     return INDEX_NOTE + page[:start] + script + page[end + len("  </script>"):]
 
 
+def expected_pages(services: list[str]) -> set[str]:
+    """The files this script owns: one per service, plus the apex directory."""
+    return {f"{service}.html" for service in services} | {"index.html"}
+
+
+def stale_pages(out_dir: Path, expected: set[str]) -> list[str]:
+    """Generated-looking pages that this script would no longer write.
+
+    Only `*.html` in the pages directory is considered: the portal is a directory of
+    pages, and the loose backups people leave beside them (`magnate.html.bak-…`) are
+    not pages it serves by name. A retired service is exactly this case — Olympus's
+    page stayed on the portal for weeks after its repo was archived.
+    """
+    if not out_dir.is_dir():
+        return []
+    return sorted(p.name for p in out_dir.glob("*.html") if p.name not in expected)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="verify pages are current; exit 1 if not")
@@ -532,6 +552,7 @@ def main() -> int:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     drift: list[str] = []
+    expected = expected_pages(SERVICES)
 
     for service in SERVICES:
         content = render(service)
@@ -554,12 +575,21 @@ def main() -> int:
         index_out.write_text(index_content)
         print(f"  wrote {index_out.relative_to(STACK)}")
 
+    # A page nobody generates any more is drift in the other direction: the portal is
+    # still serving a retired service's offer.
+    retired = stale_pages(OUT_DIR, expected)
     if args.check:
+        if retired:
+            drift.extend(retired)
         if drift:
             print(f"FAIL {len(drift)} page(s) stale or missing: {', '.join(drift)}", file=sys.stderr)
             return 1
         print(f"PASS all {len(SERVICES) + 1} subscribe pages are current")
         return 0
+
+    for name in retired:
+        (OUT_DIR / name).unlink()
+        print(f"  removed {name} (no service generates it any more)")
     return 1 if drift else 0
 
 

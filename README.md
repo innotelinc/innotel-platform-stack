@@ -522,7 +522,12 @@ this pattern so re-running them never re-issues or detaches certs.
   `*.studio.olympus`, `gateway.olympus`, `auth.olympus`, `subscribe.olympus` —
   are deleted, its three live edge hosts and its `olympus-publishing` Cerulean
   service key are retired, and its roster entry (here and in `scripts/mesh.sh`)
-  is gone.
+  is gone. Fourteen of those NPM host rows outlived the claim — including
+  `subscribe.olympus` pointing at the shared portal — and were deleted on
+  2026-10-19 (rows dumped to `npm-olympus-hosts.sql` on the edge host before the
+  delete), along with the portal-side `pages/olympus.html` that was still being
+  served. `scripts/sync-subscribe-pages.py` now removes a page no service
+  generates, which is the half of the retirement that would have finished it.
 - **Where its work went.** Issue → PR automation moved to **Atlas** (CodeOps) —
   that work happens against the repos Atlas already hosts. The app-builder role is
   Atlas's too: `docs/convergence-onyx-olympus-distro-atlas.md` chose Olympus's
