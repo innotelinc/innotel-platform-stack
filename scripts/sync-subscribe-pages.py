@@ -77,7 +77,17 @@ def repo_dir(slug: str) -> Path:
 # Fallback brand specs for services whose repo has no subscribe.json yet.
 # Anything the spec provides wins over these.
 DEFAULTS = {
-    "magnate": {"name": "Magnate", "tagline": "The billing platform for the whole stack", "accent": "#10b981"},
+    # The billing platform's own page lists what the platform bills: the
+    # platform-level plans (there are none today) and the metered add-ons. It used
+    # to ask for a `magnate` plan, of which there is none, and stand empty on the
+    # one page whose visitor is already looking at the price list.
+    "magnate": {
+        "name": "Magnate",
+        "tagline": "The billing platform for the whole stack",
+        "accent": "#10b981",
+        "plansAll": True,
+        "addons": ["engineer", "g0dm0d3"],
+    },
     "monarch": {"name": "Monarch", "tagline": "Your personal streaming empire", "accent": "#e50914"},
     "zeus": {"name": "Zeus", "tagline": "VoIP made simple", "accent": "#fbbf24"},
     "capstone": {"name": "Capstone", "tagline": "Voice AI that answers for you", "accent": "#a78bfa"},
@@ -94,7 +104,18 @@ DEFAULTS = {
     "genesis": {"name": "Genesis", "tagline": "One workflow from idea to a registered business", "accent": "#4ade80"},
     "ontrak": {"name": "OnTrak", "tagline": "Self-hosted IT support training, ticketing and evidence", "accent": "#fb923c"},
     "verifier": {"name": "Verifier", "tagline": "Conformity and attribution guard for the whole stack", "accent": "#94a3b8"},
-    "genie": {"name": "Genie", "tagline": "Your own preview subdomain under genie.innotel.us", "accent": "#a78bfa"},
+    # Genie is a family under one host: the subdomain, plus the two credit add-ons
+    # that spend against the same account. `addons` is what makes its page sell all
+    # three rather than the subdomain alone.
+    "genie": {
+        "name": "Genie",
+        "tagline": "Your own preview subdomain under genie.innotel.us",
+        "accent": "#a78bfa",
+        "addons": ["engineer", "g0dm0d3"],
+        "lede": "Your own preview subdomain under genie.innotel.us — and the two agent "
+                "add-ons that run on the same account: OnTrak Engineer and Uncensored "
+                "Godmode, bought a credit at a time. One account, one bill.",
+    },
     "jellyfin": {"name": "Jellyfin", "tagline": "Your own private streaming server", "accent": "#00a4dc"},
 }
 
@@ -210,7 +231,7 @@ TEMPLATE = """<!doctype html>
     <section class="hero">
       <span class="kicker">Powered by Innotel</span>
       <h1>Subscribe to {NAME}<span class="accent">.</span></h1>
-      <p class="lede">{TAGLINE}. One account, one bill — every Innotel service is billed through Magnate.</p>
+      <p class="lede">{LEDE}</p>
     </section>
 
     <section>
@@ -242,7 +263,12 @@ TEMPLATE = """<!doctype html>
     // Prices are never baked in: read them live from Magnate, the billing
     // platform, so the master dashboard is the only place a price is set.
     (function () {{
+      // The service's own plans, plus any add-ons that spend against the same
+      // account. A family page asks once per product because the person arriving
+      // from one of the add-ons is short on *that* balance, and this is the page
+      // that sells it: one question per product is what keeps the rows apart.
       var SERVICE = "{SERVICE}";
+      var ADDONS = {ADDONS};
       // SIGNUP IS MAGNATE'S, and it is not on this portal.
       //
       // This used to be `{PORTAL_URL}/signup` — a `/signup` path on this
@@ -263,32 +289,54 @@ TEMPLATE = """<!doctype html>
         var v = cents / 100;
         return v % 1 === 0 ? String(v) : v.toFixed(2);
       }}
+      // What a plan costs, in the unit it is sold in. A per-unit plan has a monthly
+      // figure of zero, which is not a price: quoting it would advertise a free
+      // product that then charges $5 a credit at checkout.
+      function planPrice(p) {{
+        if (p.perUnit && p.pricePerUnitCents) {{
+          return {{ head: "$" + money(p.pricePerUnitCents), unit: " per " + (p.billingUnit || "unit") }};
+        }}
+        return {{ head: "$" + money(p.priceMonthlyCents), unit: "/month" }};
+      }}
       function card(p) {{
         var el = document.createElement("div");
         el.className = "plan" + (p.highlighted ? " popular" : "");
         var feats = (p.features || []).map(function (f) {{
           return "<li>" + f.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</li>";
         }}).join("");
+        var priced = planPrice(p);
         el.innerHTML =
-          (p.highlighted ? '<span class="tag">Most popular</span>' : "") +
+          (p.addon ? '<span class="tag">Add-on</span>' : p.highlighted ? '<span class="tag">Most popular</span>' : "") +
           "<h2>" + p.name.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</h2>" +
-          '<div class="price">$' + money(p.priceMonthlyCents) + "<small>/month</small></div>" +
+          '<div class="price">' + priced.head + "<small>" + priced.unit + "</small></div>" +
           (p.priceYearlyCents ? '<div style="font-size:12px;color:var(--muted)">or $' + money(p.priceYearlyCents) + "/year</div>" : "") +
+          (p.description ? '<div style="font-size:13px;color:var(--muted)">' + p.description.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</div>" : "") +
           "<ul>" + feats + "</ul>" +
-          '<a class="cta" href="' + SIGNUP + "?plan=" + encodeURIComponent(p.slug) + '">Subscribe</a>';
+          '<a class="cta" href="' + SIGNUP + "?plan=" + encodeURIComponent(p.slug) + '">' +
+          (p.perUnit ? "Buy " + (p.billingUnit || "credits") + "s" : "Subscribe") +
+          "</a>";
         return el;
       }}
-      fetch("{MAGNATE_URL}/api/plans?service=" + encodeURIComponent(SERVICE))
-        .then(function (r) {{ return r.ok ? r.json() : {{ plans: [] }}; }})
-        .then(function (d) {{
-          var plans = (d && d.plans) || [];
+      var MAGNATE = "{MAGNATE_URL}";
+      // No service filter asks for the platform-level list, which is what the
+      // billing platform's own page wants: it sells the add-ons, and a plan that
+      // is not any one service's belongs to all of them.
+      function plansFor(service) {{
+        var url = MAGNATE + "/api/plans" + (service ? "?service=" + encodeURIComponent(service) : "");
+        return fetch(url)
+          .then(function (r) {{ return r.ok ? r.json() : {{ plans: [] }}; }})
+          .then(function (d) {{ return (d && d.plans) || []; }});
+      }}
+      Promise.all([plansFor(SERVICE)].concat(ADDONS.map(plansFor)))
+        .then(function (lists) {{
+          var plans = [].concat.apply([], lists);
           if (!plans.length) {{ emptyEl.hidden = false; return; }}
           plans.forEach(function (p) {{ plansEl.appendChild(card(p)); }});
           plansEl.hidden = false;
         }})
         .catch(function () {{
           emptyEl.hidden = false;
-          emptyEl.innerHTML = 'Prices are temporarily unavailable — <a href="{MAGNATE_URL}">open the billing platform</a>.';
+          emptyEl.innerHTML = 'Prices are temporarily unavailable — <a href="' + MAGNATE + '">open the billing platform</a>.';
         }});
     }})();
   </script>
@@ -345,12 +393,23 @@ def load_spec(service: str) -> dict:
     repo = repo_dir(service)
     spec_file = repo / "web" / "landing" / "subscribe.json"
     spec = dict(DEFAULTS.get(service, {"name": service.title(), "tagline": "", "accent": "#38bdf8"}))
+    spec.setdefault("addons", [])
+    spec.setdefault("plansAll", False)
     if spec_file.is_file():
         try:
             data = json.loads(spec_file.read_text())
             for key in ("name", "tagline", "accent"):
                 if data.get(key):
                     spec[key] = data[key]
+            # What the page sells beside its own plans: the add-ons of the family it
+            # belongs to. A list, because a page that prices one add-on and hides the
+            # other is a page that answers half of "what does this cost me".
+            if isinstance(data.get("addons"), list):
+                spec["addons"] = [str(a) for a in data["addons"]]
+            if isinstance(data.get("lede"), str) and data["lede"].strip():
+                spec["lede"] = data["lede"].strip()
+            if data.get("plansAll") is True:
+                spec["plansAll"] = True
         except (json.JSONDecodeError, OSError) as exc:
             print(f"WARN {spec_file}: {exc} — using defaults", file=sys.stderr)
     return spec
@@ -358,14 +417,45 @@ def load_spec(service: str) -> dict:
 
 def render(service: str) -> str:
     spec = load_spec(service)
+    lede = spec.get("lede") or (
+        f'{spec["tagline"]}. One account, one bill — every Innotel service is billed through Magnate.'
+        if spec["tagline"]
+        else "One account, one bill — every Innotel service is billed through Magnate."
+    )
     return TEMPLATE.format(
         NAME=spec["name"],
         TAGLINE=spec["tagline"],
+        LEDE=lede,
         ACCENT=spec["accent"],
-        SERVICE=service,
+        # An empty slug is the platform-level list, which is what Magnate's own page
+        # sells; every other page asks for its own service.
+        SERVICE="" if spec["plansAll"] else service,
+        ADDONS=json.dumps(spec["addons"]),
         MAGNATE_URL="https://app.magnate.innotel.us",
         PORTAL_URL="https://subscribe.innotel.us",
     )
+
+
+# Products sold beside a service's plans, as the apex directory lists them:
+# (slug, name, tagline, accent, the page that sells them). Kept here rather than in
+# a service's own spec because an add-on has no repo of its own — its price lives in
+# Magnate and its door is the family's page.
+ADDON_TILES = [
+    (
+        "engineer",
+        "OnTrak Engineer",
+        "Reverse engineer a shipped build with an agent — $5 a credit",
+        "#0f766e",
+        "https://subscribe.genie.innotel.us",
+    ),
+    (
+        "g0dm0d3",
+        "Uncensored Godmode",
+        "The agent with the guardrails off — $5 a run",
+        "#b91c1c",
+        "https://subscribe.genie.innotel.us",
+    ),
+]
 
 
 def render_index() -> str:
@@ -379,11 +469,27 @@ def render_index() -> str:
         f'<small>{load_spec(s)["tagline"]}</small></a>'
         for s in SERVICES if s != "magnate"
     )
+    # The add-ons are products, not services: they have no subscribe host of their
+    # own, and they are bought against the account that owns the family they belong
+    # to. So they get a tile each — a person who arrives from OnTrak Engineer or
+    # Uncensored Godmode is looking for *that* on the directory — and every one of
+    # them points at the family's page, which is where their price is.
+    addon_tiles = "\n".join(
+        f'    <a class="tile" data-service="{slug}" style="--accent: {accent}" '
+        f'href="{family}">'
+        f'<span class="mark"></span><b>{name}</b>'
+        f'<small>{tagline}</small></a>'
+        for slug, name, tagline, accent, family in ADDON_TILES
+    )
+    if addon_tiles:
+        tiles = f"{tiles}\n{addon_tiles}" if tiles else addon_tiles
     page = TEMPLATE.format(
         NAME="Innotel",
         TAGLINE="Every service, one account",
+        LEDE="Every service, one account — billed through Magnate, one bill for all of them.",
         ACCENT="#38bdf8",
         SERVICE="generic",
+        ADDONS="[]",
         MAGNATE_URL="https://app.magnate.innotel.us",
         PORTAL_URL="https://subscribe.innotel.us",
     )
