@@ -94,7 +94,10 @@ CHECK = "container_address"
 #: when `auvik` (`.72`), `atheniq` (`.59`), `blueprint` (`.76`) and `regcache` (`.79`)
 #: were converted from netplan `dhcp4: true` to static — the addresses had not moved,
 #: but DHCP is how they would (rule 3), and those four were the warnings left in this
-#: check.
+#: check. `clearpath` (`.83`, `app.denovocredit.com`) joined the same day: it went onto
+#: `i2` statically in its own netplan, and a second, device-less `clearpath` left on `i4`
+#: by the first attempt was deleted rather than listed — a name on two hosts is a warning
+#: about the estate, not a row for the table.
 #: `mail` moved on again: it runs on `i3` since 2026-10-15, and
 #: `check-alert-delivery.py` derives the host it reads the mail log on from this table —
 #: so a stale row here does not merely warn, it leaves the estate unable to prove that
@@ -118,6 +121,7 @@ EXPECTED: dict[str, dict[str, str]] = {
         "atheniq": "192.168.1.59",
         "blueprint": "192.168.1.76",
         "capstone": "192.168.1.30",
+        "clearpath": "192.168.1.83",
     },
     "i3": {
         "distro": "192.168.1.61",
@@ -173,6 +177,7 @@ ROLES: dict[str, str] = {
     "192.168.1.30": "capstone / Zeus telephony",
     "192.168.1.76": "blueprint",
     "192.168.1.79": "regcache",
+    "192.168.1.83": "Clearpath (`app.denovocredit.com`)",
     "192.168.1.89": "the NAS desktop (`nas.innotel.us`)",
 }
 

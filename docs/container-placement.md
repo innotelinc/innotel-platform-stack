@@ -375,6 +375,17 @@ estate as it is, not as it was.
   `i4` (`mail` has been on `i3` since 2026-10-15, which is why
   `check-alert-delivery.py` reads its log there).
 
+  **`clearpath` (`.83`) is the first container added since that reconciliation, and it
+  arrived as two.** The deployment landed it on `i2` with the address pinned statically
+  in its own netplan (`10-lxc.yaml`, `dhcp4: false`) and the app serving on `:3000` behind
+  NPM host `274`, but the first attempt had also left a second, device-less `clearpath` on
+  `i4` — created, never given a NIC, never used. The check reports a name on two hosts as
+  a warning, so the fix was the estate's: the `i4` copy was deleted, and the working one
+  joined the table at `192.168.1.83` (the address NPM's `app.denovocredit.com` forwards to).
+  The check reports **0 warnings** again. `scripts/tests/test_estate_checks_live.py`'s
+  fixture listing carries the row too — a table row without a host listing is a failure on
+  the clean-estate case, which is what caught this within the hour.
+
   The other findings were the state this page has warned about since the 2026-10-01
   outage: `auvik` (`.72`), `atheniq` (`.59`), `blueprint` (`.76`) and — once listed, so
   it was finally looked at — `regcache` (`.79`) were still on `dhcp4: true`. Each was
@@ -528,6 +539,7 @@ that table is a bug in one of them.
 | i2 | `atheniq` | `.59` | AthenIQ LMS (Tutor / Open edX) | 3.61 GiB (5.25 GiB) | 6 |
 | i2 | `blueprint` | `.76` | DayZero app server (`dayzero.service`) | 84 MiB (512 MiB) | 2 |
 | i2 | `capstone` | `.30` | Zeus / capstone telephony | 4.34 GiB (uncapped) | 2 |
+| i2 | `clearpath` | `.83` | Clearpath (`app.denovocredit.com`) | 109 MiB (256 MiB) | 2 |
 | i3 | `distro` | `.61` | distro control plane | 204 MiB (1 GiB) | 2 |
 | i3 | `magnate` | `.57` | Magnate | 181 MiB (1 GiB) | 2 |
 | i3 | `mail` | `.15` | mail (SMTP/IMAP) | 438 MiB (4 GiB) | 2 |
