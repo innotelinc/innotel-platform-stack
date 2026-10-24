@@ -12,8 +12,10 @@ exactly like a working server with a quiet queue. Nothing watched the chain.
 So this reads the live server and asserts the four things that make outbound delivery
 work, each of which has failed here at least once:
 
-  1. the outbound strategy routes non-local recipients at the smarthost;
-  2. the smarthost route exists and is reachable on the network;
+  1. the outbound strategy routes non-local recipients at an authenticated relay
+     (whichever route it names — the estate's primary is Mailjet, and SPF publishes
+     `include:spf.mailjet.com`; Resend is the route a retry takes);
+  2. that relay, and the retry route, exist and are reachable on the network;
   3. each sending domain has an **active** DKIM signature (a rotation stuck in
      `pending`/`retiring` sends mail unsigned — DMARC then rejects it at the far end);
   4. the queue is not backing up.
@@ -31,8 +33,8 @@ the check is here.
 
 THE RULES
 ---------
-1. A missing route, an unreachable smarthost, no active DKIM key, or a non-draining
-   queue is a **failure**, naming which.
+1. A route that is missing, points at no relay, or does not answer, no active DKIM key,
+   or a non-draining queue is a **failure**, naming which.
 2. A server that cannot be read at all is **exit 2**, never a quiet pass.
 
 Usage:
@@ -99,38 +101,76 @@ def port_open(host: str, port: int, timeout: int = 8) -> bool:
         return False
 
 
+def route_name(expression: str) -> str:
+    """The route a strategy expression names: `'mailjet'` -> `mailjet`.
+
+    Stalwart stores each branch as an expression string with its quotes kept, and the
+    checks here have to turn one into a key in `x:MtaRoute/get`. Anything that is not a
+    bare route name (`'local'`, `false`) simply does not match a route, which is the
+    finding, not a crash.
+    """
+    return expression.strip().strip("'\"")
+
+
 def audit() -> Audit:
     out = Audit()
 
-    # 1. outbound strategy -> smarthost for non-local recipients
+    routes = {r["name"]: r for r in jmap("x:MtaRoute/get", {})["list"]}
+
+    # 1. the outbound strategy's primary branch -> an authenticated relay.
+    #
+    # It does not have to be the route called `smarthost`: the estate sends through
+    # Mailjet (SPF publishes `include:spf.mailjet.com`) and keeps Resend as the route a
+    # *retry* takes. What matters is that non-local recipients reach a Relay with an
+    # address, through the branch the strategy picks first — a branch that resolves to
+    # `mx` sends straight to the recipient's server, and port 25 does not leave here.
     st = jmap("x:MtaOutboundStrategy/get", {"ids": ["singleton"]})["list"]
     route = st[0].get("route", {}) if st else {}
-    else_branch = str(route.get("else", ""))
-    if "smarthost" in else_branch:
-        out.findings.append(Finding("route-ok", "note",
-                                    f"non-local recipients route to the smarthost ({else_branch})"))
-    else:
+    primary = route_name(str(route.get("else", "")))
+    chosen = routes.get(primary)
+    if not chosen:
         out.findings.append(Finding("route-wrong", "fail",
-                                    f"non-local recipients do not route to a smarthost (else = {else_branch!r})"))
+                                    f"non-local recipients route to {primary!r}, which is not a configured route"))
+    else:
+        host, port = chosen.get("address"), chosen.get("port")
+        if not host or not port:
+            out.findings.append(Finding("route-direct", "fail",
+                                        f"non-local recipients route through {primary!r}, which has no smarthost "
+                                        "address — mail would go straight to the recipient's MX, and port 25 "
+                                        "does not leave this estate"))
+        else:
+            out.findings.append(Finding("route-ok", "note",
+                                        f"non-local recipients route through {primary} ({host}:{port})"))
+            if port_open(str(host), int(port)):
+                out.findings.append(Finding("route-reachable", "note",
+                                            f"{host}:{port} accepts a connection"))
+            else:
+                out.findings.append(Finding("route-unreachable", "fail",
+                                            f"{host}:{port} refused or timed out"))
 
-    # 2. the smarthost route exists and is reachable
-    routes = {r["name"]: r for r in jmap("x:MtaRoute/get", {})["list"]}
-    sm = routes.get("smarthost")
-    if not sm:
-        out.findings.append(Finding("smarthost-missing", "fail",
-                                    "no 'smarthost' route exists; outbound mail cannot leave"))
+    # 2. the retry branch (`retry_num > 0` in the strategy) has a route that answers.
+    # Skipped when it names the same route as the primary one: that host was just dialled.
+    branches = list((route.get("match") or {}).values())
+    retry = next((b for b in branches if "retry_num" in str(b.get("if", ""))), None)
+    fallback = route_name(str(retry.get("then", ""))) if retry else ""
+    sm = routes.get(fallback) if fallback else None
+    if not fallback or fallback == primary:
+        pass
+    elif not sm:
+        out.findings.append(Finding("retry-missing", "fail",
+                                    f"no {fallback!r} route exists; a retry has nowhere to go"))
     else:
         host, port = sm.get("address"), sm.get("port")
-        out.findings.append(Finding("smarthost-present", "note",
-                                    f"smarthost route is {host}:{port}"))
+        out.findings.append(Finding("retry-present", "note",
+                                    f"retry route {fallback} is {host}:{port}"))
         if not host or not port:
-            out.findings.append(Finding("smarthost-incomplete", "fail",
-                                        "smarthost route has no address/port"))
+            out.findings.append(Finding("retry-incomplete", "fail",
+                                        f"retry route {fallback!r} has no address/port"))
         elif port_open(str(host), int(port)):
-            out.findings.append(Finding("smarthost-reachable", "note",
+            out.findings.append(Finding("retry-reachable", "note",
                                         f"{host}:{port} accepts a connection"))
         else:
-            out.findings.append(Finding("smarthost-unreachable", "fail",
+            out.findings.append(Finding("retry-unreachable", "fail",
                                         f"{host}:{port} refused or timed out"))
 
     # 3. every sending domain has an ACTIVE DKIM signature

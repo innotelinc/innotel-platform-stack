@@ -688,7 +688,7 @@ services:
       STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-whsec_xxx}"
       STRIPE_CURRENCY: "${STRIPE_CURRENCY:-usd}"
       # Jellyfin server + API key (Dashboard → Advanced → API Keys)
-      JELLYFIN_URL: "${JELLYFIN_URL:-https://media.magnate.innotel.us}"
+      JELLYFIN_URL: "${JELLYFIN_URL:-https://media.innotel.us}"
       JELLYFIN_API_KEY: "${JELLYFIN_API_KEY:-your-jellyfin-api-key}"
       # Authentik — external by default. Set AUTHENTIK_BASE_URL and
       # AUTHENTIK_BOOTSTRAP_TOKEN for the shared IdentityOps instance, or
@@ -725,11 +725,36 @@ services:
       GENIE_PREVIEW_API_URL: "${GENIE_PREVIEW_API_URL:-}"
       GENIE_PREVIEW_CLAIM_TOKEN: "${GENIE_PREVIEW_CLAIM_TOKEN:-}"
       GENIE_PREVIEW_DOMAIN: "${GENIE_PREVIEW_DOMAIN:-genie.innotel.us}"
+      # Zeus (voice & PBX). A Zeus-service plan's deliverable is a phone
+      # number, so after checkout Magnate asks Zeus to assign one to the
+      # buyer's portal account (lib/zeus.ts -> POST /api/service/provision,
+      # Bearer token scoped `numbers:provision` on Zeus). These MUST be
+      # passed through: lib/zeus.ts reads them from process.env, so a value
+      # that only lives in .env never reaches the container and the
+      # assignment silently stays off. Leave the token empty to sell the
+      # plans without assigning a number.
+      ZEUS_PROVISION_URL: "${ZEUS_PROVISION_URL:-}"
+      ZEUS_PROVISION_TOKEN: "${ZEUS_PROVISION_TOKEN:-}"
+      # Cerulean (TrustOps) — the estate's one write for a tenant. Like the
+      # Zeus pair above, these must be passed through: lib/oasis-mail.ts
+      # reads them from process.env, and CERULEAN_SERVICE_KEY is a vault://
+      # reference the entrypoint resolves before boot. Leave it empty to sell
+      # mail plans without provisioning their tenant.
+      CERULEAN_API_URL: "${CERULEAN_API_URL:-}"
+      CERULEAN_SERVICE_KEY: "${CERULEAN_SERVICE_KEY:-}"
       # Entitlement API gate: the bearer Genie must present to
       # GET /api/entitlements (Genie holds it as ENTITLEMENTS_API_TOKEN). Empty
       # leaves the endpoint open on a trusted net. May be a `vault://` reference,
       # resolved at boot by the entrypoint.
       ENTITLEMENTS_API_TOKEN: "${ENTITLEMENTS_API_TOKEN:-}"
+      # The control plane (Distro) whose ledger owns credit balances. When a
+      # per-unit credit plan is paid for (a plan with billing_unit "credit"),
+      # lib/credits.ts grants the units to the buyer there, keyed on the payment
+      # so a retried webhook cannot grant twice. Empty = this Magnate does not
+      # meter credits and the grant is skipped; a plane that is set but down
+      # fails the event instead, so Stripe redelivers it.
+      CONTROL_PLANE_INTERNAL_URL: "${CONTROL_PLANE_INTERNAL_URL:-}"
+      CONTROL_INTERNAL_TOKEN: "${CONTROL_INTERNAL_TOKEN:-}"
       # Authentik (Cerulean SSO) — the admin panel's identity provider.
       # These MUST be passed through: lib/oidc.ts reads them from process.env,
       # so a value that only lives in .env (compose substitution) never reaches
@@ -1031,7 +1056,7 @@ services:
   # Observability + backup are opt-in (they are otherwise in the default set
   # and cost ~2 GB on modest hosts). Start with:
   #   docker compose -f docker-compose.prod.yml -f docker-compose.override.prod.yml \
-  #     --profile monitoring up -d prometheus alertmanager backup backup-metrics
+  #     --profile monitoring up -d prometheus alertmanager backup backup-metrics dns-probe
 
   meilisearch:   # from signara
     image: getmeili/meilisearch:v1.10
@@ -1185,6 +1210,10 @@ services:
       # `550 5.5.0 Invalid EHLO domain`; the entrypoint defaults it to a dotted
       # name when empty.
       SMTP_HELLO: ${SMTP_HELLO:-signara.innotel.us}
+      # The name the relay's certificate is verified against. Set it when the
+      # relay is dialled by an address its certificate does not name; that keeps
+      # verification on instead of reaching for the switch below.
+      SMTP_TLS_SERVERNAME: ${SMTP_TLS_SERVERNAME:-}
       # `true` keeps STARTTLS but skips verifying the relay's certificate; set
       # it for an internal relay reached by IP with a self-signed certificate.
       SMTP_TLS_INSECURE: ${SMTP_TLS_INSECURE:-false}
@@ -1266,6 +1295,26 @@ services:
       - '9101'
     depends_on:
       - backup
+    logging: *logging-default
+
+  # Resolves the public hostnames every scrape so that a record disappearing from
+  # the zone is an alert rather than a support ticket (the 2026-10-15 outage). No
+  # dependency on the API or the edge on purpose: this measures the one thing that
+  # can be broken while both of them look healthy.
+    profiles: ['monitoring']
+
+  dns-probe:   # from signara (profiles: 'monitoring')
+    image: python:3.12-alpine
+    restart: unless-stopped
+    command: ['python', '/metrics/dns_probe.py']
+    environment:
+      DNS_PROBE_HOSTS: ${DNS_PROBE_HOSTS:-signara.innotel.us,app.signara.innotel.us,api.signara.innotel.us,auth.signara.innotel.us,admin.signara.innotel.us,storage.signara.innotel.us,subscribe.signara.innotel.us}
+      # The address the names must resolve to; leaves resolution alone when unset.
+      DNS_PROBE_EXPECTED_ADDRESS: ${CERULEAN_WAN_IP:-}
+    volumes:
+      - ../../1-primary/signara/infra/monitoring/dns_probe.py:/metrics/dns_probe.py:ro
+    expose:
+      - '9102'
     logging: *logging-default
 
     profiles: ['monitoring']

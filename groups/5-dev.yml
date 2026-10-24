@@ -75,7 +75,7 @@ services:
   # ------------------------------------------------------------------
   # Convex backend — self-hosted reactive database & compute, and a deploy
   # target for apps the builder produces (convergence §2: Atlas keeps CodeOps,
-  # and Convex with it, while the *building* happens in Olympus). SQLite
+  # and Convex with it, while the *building* happens in Genie). SQLite
   # storage on a named volume by default.
   # The edge (NPM, on this host) fronts `convex.innotel.us` and Cerulean
   # attaches TLS; the ports are published on the host's own addresses rather
@@ -134,10 +134,10 @@ services:
   #
   # It used to be here as a `chef` profile (chef + chef-provisioner +
   # chef-sites), building apps onto this stack's Convex backend. The plan
-  # settled on *one* builder — Olympus's engine (project_plan → runner →
-  # package-app/website → app-runtime) — because it is the only one of the
-  # three that ends with a running, named application. Two app-builder front
-  # doors were two ways to do one job, and Chef's output was bound to Convex.
+  # settled on *one* builder — Genie (agent workspace → publish → repository
+  # here), because it is the one that ends with a running project and a
+  # repository. Two app-builder front doors were two ways to do one job, and
+  # Chef's output was bound to Convex.
   #
   # Nothing was deleted from the tree: `chef-provisioner/` and
   # docs/chef-auth-fork.md stay as the record of that work (their headers say
@@ -167,8 +167,33 @@ services:
       # GATEWAY_API_URL env overrides → Consul (CONTROL_CONSUL_URL).
       - GATEWAY_ADMIN_PASSWORD=${INITIAL_PASSWORD}
       - ADMIN_EMAILS=${CONTROL_ADMIN_EMAILS:-}
+      # Per-key token usage is aggregated from the gateway's own ledger
+      # (usage_history in its storage.sqlite). The gateway runs on the platform
+      # host, so a read-only snapshot is placed here by gateway-usage-sync.
+      - GATEWAY_DATA_DIR=/gateway-data
+      # The sync is off (0) unless this is set: with the volume mounted it is
+      # the thing that makes the gateway ledger authoritative per user.
+      - CONTROL_SYNC_INTERVAL_MS=${CONTROL_SYNC_INTERVAL_MS:-60000}
     volumes:
       - control-data:/data
+      # Cerulean Vault token (path-scoped `distro` policy). VAULT_TOKEN_FILE
+      # in .env names this path; the checkout keeps it at ./data/vault/token.
+      - ../../5-dev/distro/data/vault/token:/app/data/vault/token:ro
+      - ../../5-dev/distro/data/gateway-data:/gateway-data:ro
+      # The onyx shares, mounted on this host and carried in here. The mounts
+      # themselves live in /etc/fstab (NFSv3: ganesha's NFSv4 READDIR returns
+      # EIO on this build), one directory per pool:
+      #
+      #   /srv/onyx-pool/main-pool   192.168.1.60:/mnt/onyx/main-pool
+      #   /srv/onyx-pool/sdc         a bind of main-pool -- onyx records both the
+      #                              operator's share and the device reconciler's
+      #                              row, and both name the same export
+      #   /srv/onyx-pool/onyx-data   192.168.1.60:/mnt/onyx/onyx-data
+      #
+      # `rslave` so a remount on the host reaches the container. The pools are
+      # folders under it, and the storage adapter still checks the mount table:
+      # an unmounted pool says so instead of writing to the directory underneath.
+      - /srv/onyx-pool:/data/pools:rslave
     extra_hosts:
       # Lets CONTROL_ALERT_WEBHOOK_URL point at a receiver on the host, e.g.
       # http://host.docker.internal:8080/hook

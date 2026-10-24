@@ -38,8 +38,16 @@ probe = _load()
 
 #: A log line as Stalwart writes it: the RFC3339 UTC stamp leads, but an ANSI colour
 #: escape usually precedes it — the exact thing that made an unanchored match necessary.
-DELIVERED = '\x1b[37m2026-10-03T02:00:05Z\x1b[0m INFO Delivery completed (delivery.completed) queueId = q1, from = "alertmanager@innotel.us", to = ["admin@innotel.us"]\n'
-OLD_DELIVERY = "2020-01-01T00:00:00Z INFO Delivery completed (delivery.completed) queueId = q0, from = \"alertmanager@innotel.us\", to = [\"admin@innotel.us\"]\n"
+DELIVERED = '\x1b[37m2026-10-03T02:00:05Z\x1b[0m INFO Delivery completed (delivery.completed) queueId = q1, from = "alertmanager@innotel.us", to = ["alertmanager@innotel.us"]\n'
+OLD_DELIVERY = "2020-01-01T00:00:00Z INFO Delivery completed (delivery.completed) queueId = q0, from = \"alertmanager@innotel.us\", to = [\"alertmanager@innotel.us\"]\n"
+#: The same line as Stalwart actually writes it, with its field names coloured.
+TEXT_COLOURED = (
+    "\x1b[37m2026-10-03T02:00:05Z\x1b[0m \x1b[32;1mINFO\x1b[0m "
+    "\x1b[37;1mDelivery completed\x1b[0m (delivery.completed) "
+    '\x1b[36mqueueId\x1b[0m = q1, \x1b[36mqueueName\x1b[0m = "local", '
+    '\x1b[36mfrom\x1b[0m = "alertmanager@innotel.us", '
+    '\x1b[36mto\x1b[0m = ["alertmanager@innotel.us"]\n'
+)
 
 
 class CommandCase(unittest.TestCase):
@@ -67,6 +75,25 @@ class CommandCase(unittest.TestCase):
 
     def test_the_mail_log_read_never_fails_on_a_quiet_day(self):
         self.assertIn("|| true", probe.mail_log_command())
+
+    def test_the_probe_goes_to_the_alerts_account_not_the_human_inbox(self):
+        self.assertNotEqual(probe.MAIL_TO, "admin@innotel.us")
+
+    def test_the_log_filter_is_applied_after_the_colour_escapes_are_gone(self):
+        # Stalwart colours its field names (`\x1b[36mfrom\x1b[0m = "…"`), so a grep for
+        # `from = "` on the raw line matches nothing; the field filter has to run on the
+        # stripped text (measured 2026-10-24, with a probe already delivered).
+        coloured = TEXT_COLOURED
+        self.assertEqual(probe.delivery_times(coloured), probe.delivery_times(DELIVERED))
+        self.assertEqual(len(probe.delivery_times(coloured, from_address=probe.MAIL_FROM,
+                                                  to_address=probe.MAIL_TO)), 1)
+
+    def test_a_delivery_from_the_alerts_account_to_someone_else_does_not_count(self):
+        other = DELIVERED.replace("to = [\"alertmanager@innotel.us\"]", "to = [\"admin@innotel.us\"]")
+        self.assertEqual(
+            probe.delivery_times(other, from_address=probe.MAIL_FROM, to_address=probe.MAIL_TO),
+            [],
+        )
 
 
 class ParseCase(unittest.TestCase):
