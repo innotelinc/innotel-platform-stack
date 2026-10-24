@@ -38,6 +38,7 @@ CHECK_SCRIPTS = [
     "check-mail-auth",
     "check-mail-relay",
     "check-group-compose-freshness",
+    "check-authentik-privilege",
 ]
 
 
