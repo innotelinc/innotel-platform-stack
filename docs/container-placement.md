@@ -361,6 +361,30 @@ estate as it is, not as it was.
   table gives `signara`. The trap that guard cannot see is in
   §*Open items* (a host that mounts the estate-check rules without running the checks).
 
+### Changes applied 2026-10-24
+
+- **The address table was reconciled with the hosts, and the last four DHCP leases were
+  pinned.** `EstateCheckNotPinned{container_address}` had five findings. Three were the
+  table being stale rather than the estate being wrong: `nas` (`.89`, the Orion desktop)
+  and `regcache` (`.79`, the registry mirror) were running and unlisted, and the rows for
+  `proxy`/`terminal`/`mail`/`atheniq`/`atlas`/`genesis`/`rizzaura`/`www` still named the
+  hosts those containers had before the rebalance. Reading every host was the
+  fix — `atlas`, `auvik`, `genesis`, `genie-preview`, `monarch`, `nas`, `ontrak`,
+  `regcache`, `rizzaura` and `www` on `i1`; `atheniq`, `blueprint`, `capstone` on `i2`;
+  the seven mail/app containers on `i3`; and the edge with `terminal`, `vault`, `vpn` on
+  `i4` (`mail` has been on `i3` since 2026-10-15, which is why
+  `check-alert-delivery.py` reads its log there).
+
+  The other findings were the state this page has warned about since the 2026-10-01
+  outage: `auvik` (`.72`), `atheniq` (`.59`), `blueprint` (`.76`) and — once listed, so
+  it was finally looked at — `regcache` (`.79`) were still on `dhcp4: true`. Each was
+  converted in place in its own netplan (`10-lxc.yaml`, original kept as
+  `10-lxc.yaml.dhcp-bak`) to the address it already held, with gateway `.1` and
+  `nameservers` `192.168.1.1` (`atheniq` and `blueprint` also list `1.1.1.1`). `netplan
+  apply` kept every address on the wire, so no service moved. The check now reports
+  **0 failures, 0 warnings** and the textfile carries
+  `innotel_estate_check_last_status{check="container_address"} 1`.
+
 ## Changes applied 2026-09-27
 
 - **Limits set** on the unbounded heavies: i2 `atheniq`/`capstone` = 6 GiB,
@@ -485,39 +509,43 @@ its own gitignored `.env` instead (`ONTRAK_INCUS_PASSWORD` in Ontrak Sync's
 Memory is live usage; disk is the container rootfs.
 
 Memory is the container's live usage and the cap set on it (`limits.memory` / `limits.cpu`).
-The rows for the hosts the 2026-10-09 pass changed were read that day; the rest are the
-2026-10-02 reading.
+Every row below was read from the hosts on **2026-10-24**, and is the same table
+`scripts/check-container-addresses.py` enforces — a disagreement between this page and
+that table is a bug in one of them.
 
 | Host | Container | IP | Role | Mem (cap) | CPU cap |
 |---|---|---|---|---|---|
-| i1 | `genie-preview` | `.24` | the Genie preview (`innotel/ontrak-genie:main`) | 183 MiB (4 GiB) | 2 |
-| i1 | `monarch` | `.56` | media (Jellyfin etc.) | 3.83 GiB (6 GiB) | 2 |
-| i1 | `ontrak` | `.21` | Ontrak family stack + Ontrak Sync | 707 MiB (6 GiB) | 4 |
-| i1 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 3.02 GiB (5 GiB) | 2 |
-| i1 | `terminal` | `.22` | web terminal (termix, guacd, zapit) | 539 MiB (1024 MiB) | 1 |
-| i2 | `atlas` | `.90` | Gitea + convex + postgres + dashboard | 415 MiB (1 GiB) | — |
-| i2 | `capstone` | `.30` | Zeus / capstone telephony | **5.84 GiB** (6 GiB) | — |
-| i2 | `dev` | `.74` | **the `dev` container** — every project's docker stack | 1.85 GiB (4 GiB) | 4 |
-| i2 | `genesis` | `.66` | BusinessOps — intake + assisted EIN filing | 183 MiB (1024 MiB) | 2 |
-| i2 | `rizzaura` | `.62` | Rizz Aura (5 svc) | 207 MiB (512 MiB) | — |
-| i2 | `www` | `.80` | public website (+ `tun0`) | 655 MiB (1536 MiB) | 4 |
-| i3 | `distro` | `.61` | distro control plane | 191 MiB (1 GiB) | — |
-| i3 | `magnate` | `.57` | Magnate | 194 MiB (1 GiB) | — |
-| i3 | `olympus-archived-20260930` | — | archived Olympus — **STOPPED** | — (1 GiB) | — |
-| i3 | `onyx` | `.60` | Onyx (RAG) | 274 MiB (1 GiB) | — |
-| i3 | `pi` | `.70` | pi | 176 MiB (1536 MiB) | 4 |
-| i3 | `signara` | `.44` | Signara | 562 MiB (1 GiB) | — |
-| i3 | `subscribe` | `.58` | Subscribe | 88 MiB (1 GiB) | — |
-| i4 | `atheniq` | `.59` | AthenIQ LMS (Tutor / Open edX) | 3.09 GiB (8 GiB) | 3 |
-| i4 | `mail` | `.15` | mail (SMTP/IMAP) | 102 MiB (4 GiB) | 2 |
-| i4 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 960 MiB (2048 MiB) | 1 |
-| i4 | `vpn` | `.43` | WireGuard (`10.7.0.2` wg0) | 268 MiB (1024 MiB) | 1 |
+| i1 | `atlas` | `.90` | Gitea + convex + postgres + dashboard | 824 MiB (896 MiB) | 2 |
+| i1 | `auvik` | `.72` | Auvik collector (`auviknetworks/collector`) | 188 MiB (512 MiB) | 2 |
+| i1 | `genesis` | `.66` | BusinessOps — intake + assisted EIN filing | 196 MiB (512 MiB) | 2 |
+| i1 | `genie-preview` | `.24` | the Genie preview (`innotel/ontrak-genie:main`) | 155 MiB (512 MiB) | 2 |
+| i1 | `monarch` | `.56` | media (Jellyfin etc.) | 4.79 GiB (8 GiB) | 2 |
+| i1 | `nas` | `.89` | **the NAS desktop** (`nas.innotel.us`) — Orion SPA + API | 86 MiB (256 MiB) | 2 |
+| i1 | `ontrak` | `.21` | Ontrak family stack + Ontrak Sync | 1.50 GiB (2.13 GiB) | 2 |
+| i1 | `regcache` | `.79` | Docker registry mirror (`registry:2`) | 107 MiB (384 MiB) | 2 |
+| i1 | `rizzaura` | `.62` | Rizz Aura (5 svc) | 208 MiB (512 MiB) | 2 |
+| i1 | `www` | `.80` | public website (+ `tun0`) | 552 MiB (1 GiB) | 4 |
+| i2 | `atheniq` | `.59` | AthenIQ LMS (Tutor / Open edX) | 3.61 GiB (5.25 GiB) | 6 |
+| i2 | `blueprint` | `.76` | DayZero app server (`dayzero.service`) | 84 MiB (512 MiB) | 2 |
+| i2 | `capstone` | `.30` | Zeus / capstone telephony | 4.34 GiB (uncapped) | 2 |
+| i3 | `distro` | `.61` | distro control plane | 204 MiB (1 GiB) | 2 |
+| i3 | `magnate` | `.57` | Magnate | 181 MiB (1 GiB) | 2 |
+| i3 | `mail` | `.15` | mail (SMTP/IMAP) | 438 MiB (4 GiB) | 2 |
+| i3 | `onyx` | `.60` | Onyx (RAG) | 291 MiB (1 GiB) | 2 |
+| i3 | `pi` | `.70` | pi | 193 MiB (1 GiB) | 2 |
+| i3 | `signara` | `.44` | Signara | 539 MiB (896 MiB) | 2 |
+| i3 | `subscribe` | `.58` | Subscribe | 123 MiB (384 MiB) | 2 |
+| i4 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 3.99 GiB (4 GiB) | 2 |
+| i4 | `terminal` | `.22` | web terminal (termix, guacd, zapit) | 464 MiB (1280 MiB) | 1 |
+| i4 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 624 MiB (1536 MiB) | 1 |
+| i4 | `vpn` | `.43` | WireGuard (`10.7.0.2` wg0) | 222 MiB (768 MiB) | 1 |
 
-`cloud`, `voice`, `docs`, `ansible`, `slack` and `olympus`/`olympus-gw`, which the
+`cloud`, `voice`, `docs`, `ansible`, `slack`, `dev` and `olympus`/`olympus-gw`, which the
 2026-09-27 survey listed beside `atheniq`, are **no longer present on any host** — those
-repositories were retired with the `.46` migration. `atheniq` is the exception: it stayed,
-moved `i2` → `i1` → `i4`, and is a running container above. The retired names are kept
-here only so the two surveys can be read against each other.
+repositories were retired with the `.46` migration, and `dev` (`.74`) went with them.
+`atheniq` is the exception: it stayed, moved `i2` → `i1` → `i4` → `i2`, and is a running
+container above. The retired names are kept here only so the surveys can be read against
+each other.
 
 ## Findings
 

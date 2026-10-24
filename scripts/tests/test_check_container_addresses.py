@@ -96,7 +96,7 @@ class AddressCase(unittest.TestCase):
 
     def test_a_stopped_container_is_reported_and_not_failed(self):
         # A stopped container has no address to be wrong; it is a note, not a failure.
-        result = chk.audit(estate({("i1", "terminal"): dict(state="STOPPED", address=None)}))
+        result = chk.audit(estate({("i4", "terminal"): dict(state="STOPPED", address=None)}))
         self.assertTrue(result.ok, [f.message for f in result.failures])
         self.assertEqual([f.code for f in result.findings if f.level == "note"], ["stopped"])
 
@@ -108,7 +108,7 @@ class AddressCase(unittest.TestCase):
         self.assertEqual([f.code for f in result.findings if f.level == "warn"], ["unexpected"])
 
     def test_a_running_container_without_an_address_is_a_failure(self):
-        result = chk.audit(estate({("i2", "www"): dict(state="RUNNING", address=None)}))
+        result = chk.audit(estate({("i1", "www"): dict(state="RUNNING", address=None)}))
         self.assertFalse(result.ok)
         self.assertEqual([f.code for f in result.failures], ["no_address"])
 

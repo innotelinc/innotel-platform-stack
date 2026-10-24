@@ -125,17 +125,20 @@ class LiveCase(unittest.TestCase):
 ####################################################################################
 
 ADDRESS_ROWS = {
-    I1: [("genie-preview", "192.168.1.24"), ("monarch", "192.168.1.56"),
-         ("ontrak", "192.168.1.21"), ("proxy", "192.168.1.71"),
-         ("terminal", "192.168.1.22")],
-    I2: [("atlas", "192.168.1.90"), ("capstone", "192.168.1.30"), ("dev", "192.168.1.74"),
-         ("genesis", "192.168.1.66"), ("rizzaura", "192.168.1.62"), ("www", "192.168.1.80")],
-    I3: [("distro", "192.168.1.61"), ("magnate", "192.168.1.57"), ("onyx", "192.168.1.60"),
-         ("pi", "192.168.1.70"), ("signara", "192.168.1.44"), ("subscribe", "192.168.1.58")],
-    # The edge and three other containers moved i1 → i4 on 2026-10-02; on 2026-10-09 the
-    # edge and `terminal` moved back and `atheniq` and `mail` came the other way. The
-    # addresses travel with the pinned rootfs, so only the host key changes here.
-    I4: [("atheniq", "192.168.1.59"), ("mail", "192.168.1.15"),
+    I1: [("atlas", "192.168.1.90"), ("auvik", "192.168.1.72"), ("genesis", "192.168.1.66"),
+         ("genie-preview", "192.168.1.24"), ("monarch", "192.168.1.56"),
+         ("nas", "192.168.1.89"), ("ontrak", "192.168.1.21"),
+         ("regcache", "192.168.1.79"), ("rizzaura", "192.168.1.62"),
+         ("www", "192.168.1.80")],
+    I2: [("atheniq", "192.168.1.59"), ("blueprint", "192.168.1.76"),
+         ("capstone", "192.168.1.30")],
+    I3: [("distro", "192.168.1.61"), ("magnate", "192.168.1.57"), ("mail", "192.168.1.15"),
+         ("onyx", "192.168.1.60"), ("pi", "192.168.1.70"), ("signara", "192.168.1.44"),
+         ("subscribe", "192.168.1.58")],
+    # The edge and its three satellites live on i4; the media/business containers stay on
+    # i1. The addresses travel with the pinned rootfs, so only the host key changes when a
+    # container moves — which is why the rows here are read off the hosts, not remembered.
+    I4: [("proxy", "192.168.1.71"), ("terminal", "192.168.1.22"),
          ("vault", "192.168.1.73"), ("vpn", "192.168.1.43")],
 }
 
