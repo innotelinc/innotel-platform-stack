@@ -97,7 +97,12 @@ def mail_host() -> tuple[str, str]:
 AM_CONTAINER = "signara-alertmanager-1"
 AM_URL = "http://127.0.0.1:9093"
 MAIL_FROM = "alertmanager@innotel.us"
-MAIL_TO = "admin@innotel.us"
+#: Where the receiver sends the probe: `SMTP_USER` on the relay, the alerts account —
+#: not `ALERT_EMAIL_TO`, the human inbox. Alertmanager mails only `critical` there, and
+#: a delivery probe that pages somebody every half hour is a probe that teaches them to
+#: ignore the mailbox. `alertmanager.yml` routes `EstateDeliveryProbe*` to a `probe`
+#: receiver whose only `to` is this address, so the proof costs nobody an inbox.
+MAIL_TO = "alertmanager@innotel.us"
 STALWART_LOG = "/var/log/stalwart"
 
 #: group_wait is 30s and the mail hop takes a moment, so the probe needs to outwait the
@@ -111,6 +116,9 @@ POLL_SECONDS = 5
 #: stamp, so the escape is stripped before matching rather than anchored around.
 _STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})Z")
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
+#: The sender and recipient of a delivery line, once the colour escapes are gone:
+#: `from = "alertmanager@innotel.us", to = ["alertmanager@innotel.us"]`.
+_FIELDS = re.compile(r'from = "([^"]*)", to = \[([^\]]*)\]')
 
 
 def probe_name(nonce: str) -> str:
@@ -161,21 +169,46 @@ def mail_log_command() -> str:
     yet is an empty answer rather than an ssh failure (an empty answer is a *finding*: the
     receiver did not deliver).
     """
+    # Candidates only: every completed delivery in today's log, newest last. The
+    # sender/recipient filter is applied in Python, not here, because Stalwart colours its
+    # field names — the line reads `\x1b[36mfrom\x1b[0m = "…"`, so `grep -F 'from = "'`
+    # matches nothing at all. Measured 2026-10-24, after a probe was delivered and this
+    # check still called the receiver silent.
     inner = (
         f'f="{STALWART_LOG}/stalwart.$(date -u +%F)"; '
         f'grep -aE "delivery\\.(completed|dsn-success)" "$f" 2>/dev/null '
-        f'| grep -aF "{MAIL_FROM}" | grep -aF "{MAIL_TO}" | tail -n 40 || true'
+        f'| tail -n 400 || true'
     )
     return "incus exec mail -- sh -c " + shlex.quote(inner) + " </dev/null"
 
 
-def delivery_times(log_text: str) -> list[datetime]:
-    """Every delivery stamp in `log_text`, newest last. Unparseable lines are skipped."""
+def delivery_times(
+    log_text: str,
+    *,
+    from_address: str | None = None,
+    to_address: str | None = None,
+) -> list[datetime]:
+    """Every delivery stamp in `log_text`, newest last. Unparseable lines are skipped.
+
+    With `from_address`/`to_address` given, only deliveries between exactly those two
+    addresses count. That matters here because the probe is addressed to the same account
+    it is sent from: an unfiltered match would take any delivery from the alerts account —
+    including a real page to the human inbox — as proof of the probe's route.
+    """
     times: list[datetime] = []
     for line in log_text.splitlines():
-        match = _STAMP.match(_ANSI.sub("", line))
+        clean = _ANSI.sub("", line)
+        match = _STAMP.match(clean)
         if not match:
             continue
+        if from_address or to_address:
+            fields = _FIELDS.search(clean)
+            if not fields:
+                continue
+            if from_address and fields.group(1) != from_address:
+                continue
+            if to_address and f'"{to_address}"' not in fields.group(2):
+                continue
         try:
             times.append(datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc))
         except ValueError:
@@ -244,7 +277,7 @@ def run_probe(
     deadline = started + wait
     while True:
         text = read_host(mail_host, mail_target, mail_log_command(), runner)
-        times = delivery_times(text)
+        times = delivery_times(text, from_address=MAIL_FROM, to_address=MAIL_TO)
         if any(stamp.timestamp() >= started for stamp in times):
             return True, "", clock() - started
         if clock() >= deadline:

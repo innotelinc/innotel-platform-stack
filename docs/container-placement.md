@@ -99,14 +99,18 @@ estate as it is, not as it was.
   `check-host-disk.py` (each host's root filesystem has room — 80 % warns, 90 % fails),
   and `check-alert-delivery.py` (the estate's one Alertmanager actually *delivers*: it
   injects a short-lived probe alert through the receiver's own v2 API and reads the mail
-  server for the delivery — the one thing `amtool check-config` cannot tell you), and
+  server for the delivery — the one thing `amtool check-config` cannot tell you. The probe
+  is addressed to the alerts account (`SMTP_USER`), not to the human inbox the pages go
+  to, so the proof costs the person reading the mailbox nothing), and
   `check-mail-auth.py` (each mail domain's SPF, DKIM and DMARC records resolve in the
   zone the public reads, with the DKIM selectors versioned in the check — Stalwart now
   publishes a rotation itself, and this reads what the public zone actually serves —
   see §*Open items*), and
-  `check-mail-relay.py` (the **outbound** half: non-local recipients route at a
-  smarthost, that route exists and answers, every sending domain has an *active* DKIM
-  signature, and the queue drains — each of which has broken here with no symptom), and
+  `check-mail-relay.py` (the **outbound** half: non-local recipients route through an
+  authenticated relay — the route the outbound strategy names first, which is Mailjet,
+  with Resend as the route a retry takes — that route and the retry route exist and
+  answer, every sending domain has an *active* DKIM signature, and the queue drains — each
+  of which has broken here with no symptom), and
   `check-group-compose-freshness.py` (the one that is not about a host: the files in
   `groups/` are generated *and tracked*, so a member repo that adds or retires a service
   leaves the file a rebuilt host starts from behind — and CI only compares them when

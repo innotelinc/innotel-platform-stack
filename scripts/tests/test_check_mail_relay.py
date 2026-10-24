@@ -81,29 +81,64 @@ class RuleCase(unittest.TestCase):
         self.assertEqual(result.failures, [])
         self.assertEqual(result.warnings, [])
 
-    def test_a_non_smarthost_strategy_is_a_failure(self):
-        answers = dict(WIRED, **{"x:MtaOutboundStrategy/get": {"list": [{"route": {"else": "direct"}}]}})
+    def test_a_strategy_naming_no_route_is_a_failure(self):
+        answers = dict(WIRED, **{"x:MtaOutboundStrategy/get": {"list": [{"route": {"else": "'direct'"}}]}})
         result = _audit(answers)
         self.assertFalse(result.ok)
-        self.assertIn("do not route to a smarthost", result.failures[0].message)
+        self.assertEqual(result.failures[0].code, "route-wrong")
+        self.assertIn("not a configured route", result.failures[0].message)
 
-    def test_a_missing_smarthost_route_is_a_failure(self):
+    def test_a_missing_primary_route_is_a_failure(self):
         answers = dict(WIRED, **{"x:MtaRoute/get": {"list": []}})
         result = _audit(answers)
         self.assertFalse(result.ok)
-        self.assertEqual(result.failures[0].code, "smarthost-missing")
+        self.assertEqual(result.failures[0].code, "route-wrong")
 
-    def test_an_unreachable_smarthost_is_a_failure(self):
+    def test_an_unreachable_primary_route_is_a_failure(self):
         # The queue fills up later; the failure belongs to the host that stopped answering.
         result = _audit(dict(WIRED), port_open=lambda host, port, timeout=8: False)
         self.assertFalse(result.ok)
-        self.assertEqual(result.failures[0].code, "smarthost-unreachable")
+        self.assertEqual(result.failures[0].code, "route-unreachable")
 
-    def test_a_smarthost_without_an_address_is_a_failure(self):
+    def test_a_primary_route_without_an_address_is_a_failure(self):
         answers = dict(WIRED, **{"x:MtaRoute/get": {"list": [{"name": "smarthost", "address": "", "port": None}]}})
         result = _audit(answers)
         self.assertFalse(result.ok)
-        self.assertEqual(result.failures[0].code, "smarthost-incomplete")
+        self.assertEqual(result.failures[0].code, "route-direct")
+
+    def test_the_estate_shape_two_relays_is_clean(self):
+        # What the estate actually runs: Mailjet first (SPF publishes it), Resend as the
+        # route a retry takes. The route called `smarthost` is not the primary one, and
+        # that is not a finding.
+        answers = dict(WIRED, **{
+            "x:MtaOutboundStrategy/get": {"list": [{"route": {
+                "match": {"1": {"if": "retry_num > 0", "then": "'smarthost'"}},
+                "else": "'mailjet'",
+            }}]},
+            "x:MtaRoute/get": {"list": [
+                {"name": "smarthost", "address": "smtp.resend.com", "port": 587},
+                {"name": "mailjet", "address": "in-v3.mailjet.com", "port": 587},
+            ]},
+        })
+        result = _audit(answers)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.failures, [])
+        self.assertIn("in-v3.mailjet.com:587", " ".join(f.message for f in result.findings))
+
+    def test_a_retry_route_that_does_not_answer_is_a_failure(self):
+        answers = dict(WIRED, **{
+            "x:MtaOutboundStrategy/get": {"list": [{"route": {
+                "match": {"1": {"if": "retry_num > 0", "then": "'resend'"}},
+                "else": "'mailjet'",
+            }}]},
+            "x:MtaRoute/get": {"list": [
+                {"name": "resend", "address": "smtp.resend.com", "port": 587},
+                {"name": "mailjet", "address": "in-v3.mailjet.com", "port": 587},
+            ]},
+        })
+        result = _audit(answers, port_open=lambda host, port, timeout=8: host == "in-v3.mailjet.com")
+        self.assertFalse(result.ok)
+        self.assertEqual([f.code for f in result.failures], ["retry-unreachable"])
 
     def test_a_domain_with_no_active_signature_is_a_failure(self):
         # A rotation stuck in `pending` sends mail unsigned, which DMARC rejects at the
@@ -140,9 +175,9 @@ class RuleCase(unittest.TestCase):
 
     def test_an_empty_queue_is_a_note(self):
         result = _audit(dict(WIRED))
-        self.assertEqual([f.code for f in result.findings], ["route-ok", "smarthost-present",
-                                                             "smarthost-reachable", "dkim-active",
-                                                             "queue-empty"])
+        # One relay serves both branches here, so it is dialled once, not twice.
+        self.assertEqual([f.code for f in result.findings], ["route-ok", "route-reachable",
+                                                             "dkim-active", "queue-empty"])
 
 
 class RunCase(unittest.TestCase):

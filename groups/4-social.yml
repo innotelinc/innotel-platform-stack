@@ -22,6 +22,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/onyx-privd.Dockerfile
+      args: { VERSION: "${VERSION:-0.5.0-dev}" }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-privd:${IMAGE_TAG:-latest}
     # The single privilege boundary (docs/design/07): root, host devices, the
     # data pool, and the daemon-config dir. Everything else is unprivileged.
@@ -42,6 +43,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/onyx-storaged.Dockerfile
+      args: { VERSION: "${VERSION:-0.5.0-dev}" }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-storaged:${IMAGE_TAG:-latest}
     # privileged: uevent netlink watcher + block-device access
     privileged: true
@@ -64,7 +66,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/go-service.Dockerfile
-      args: { SERVICE: onyx-shared }
+      args: { VERSION: "${VERSION:-0.5.0-dev}", COMMIT: "${COMMIT:-unknown}", SERVICE: onyx-shared }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-shared:${IMAGE_TAG:-latest}
     <<: *onyx-sockets
     restart: unless-stopped
@@ -74,7 +76,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/go-service.Dockerfile
-      args: { SERVICE: onyx-core }
+      args: { VERSION: "${VERSION:-0.5.0-dev}", COMMIT: "${COMMIT:-unknown}", SERVICE: onyx-core }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-core:${IMAGE_TAG:-latest}
     volumes:
       - onyx-sockets:/run/onyx
@@ -87,7 +89,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/go-service.Dockerfile
-      args: { SERVICE: onyx-api }
+      args: { VERSION: "${VERSION:-0.5.0-dev}", COMMIT: "${COMMIT:-unknown}", SERVICE: onyx-api }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-api:${IMAGE_TAG:-latest}
     # Memory posture (docs/service-audit.md): Go daemons are small; cap each.
     mem_limit: 512m
@@ -159,7 +161,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/go-service.Dockerfile
-      args: { SERVICE: onyx-snapd }
+      args: { VERSION: "${VERSION:-0.5.0-dev}", COMMIT: "${COMMIT:-unknown}", SERVICE: onyx-snapd }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-snapd:${IMAGE_TAG:-latest}
     <<: *onyx-sockets
     volumes:
@@ -172,7 +174,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/go-service.Dockerfile
-      args: { SERVICE: onyx-backupd }
+      args: { VERSION: "${VERSION:-0.5.0-dev}", COMMIT: "${COMMIT:-unknown}", SERVICE: onyx-backupd }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-backupd:${IMAGE_TAG:-latest}
     volumes:
       - onyx-sockets:/run/onyx
@@ -192,7 +194,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/go-service.Dockerfile
-      args: { SERVICE: onyx-vmm }
+      args: { VERSION: "${VERSION:-0.5.0-dev}", COMMIT: "${COMMIT:-unknown}", SERVICE: onyx-vmm }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-vmm:${IMAGE_TAG:-latest}
     <<: *onyx-sockets
     volumes:
@@ -205,7 +207,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/go-service.Dockerfile
-      args: { SERVICE: onyx-appd }
+      args: { VERSION: "${VERSION:-0.5.0-dev}", COMMIT: "${COMMIT:-unknown}", SERVICE: onyx-appd }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-appd:${IMAGE_TAG:-latest}
     <<: *onyx-sockets
     volumes:
@@ -232,7 +234,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/go-service.Dockerfile
-      args: { SERVICE: onyx-ai }
+      args: { VERSION: "${VERSION:-0.5.0-dev}", COMMIT: "${COMMIT:-unknown}", SERVICE: onyx-ai }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-ai:${IMAGE_TAG:-latest}
     <<: *onyx-sockets
     volumes:
@@ -275,7 +277,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/go-service.Dockerfile
-      args: { SERVICE: onyx-objectstore }
+      args: { VERSION: "${VERSION:-0.5.0-dev}", COMMIT: "${COMMIT:-unknown}", SERVICE: onyx-objectstore }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-objectstore:${IMAGE_TAG:-latest}
     volumes:
       - onyx-sockets:/run/onyx
@@ -326,7 +328,7 @@ services:
     build:
       context: ../../4-social/onyx
       dockerfile: docker/go-service.Dockerfile
-      args: { SERVICE: onyx-davd }
+      args: { VERSION: "${VERSION:-0.5.0-dev}", COMMIT: "${COMMIT:-unknown}", SERVICE: onyx-davd }
     image: ghcr.io/innotelinc/onyx-oss-platform/onyx-davd:${IMAGE_TAG:-latest}
     <<: *onyx-sockets
     volumes:
