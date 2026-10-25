@@ -238,11 +238,13 @@ pure landing/marketing repo). But any repo that you `docker compose up` for must
 
 - Every conformant repo has a top-level `LICENSE`.
 - The repo's own new material license is stated in the README's License section and is one of
-  the portfolio's approved licenses: **MIT** or **AGPL-3.0-or-later** (AGPL for the platforms
-  that build on AGPL upstreams: Atlas, AthenIQ, Signara, Onyx).
-- Assembled/forked repos (Distro, Capstone, Monarch, etc.) keep upstream licenses in-tree and
-  document attribution in `THIRD_PARTY_NOTICES.md` (or the README License section) — never
-  re-license upstream material.
+  the portfolio's approved licenses: **MIT** or **AGPL-3.0** (AGPL for the platforms that
+  build on AGPL upstreams: Atlas, AthenIQ, Signara, Onyx).
+- Assembled/forked repos (Distro, Capstone, Monarch, freebuff, the upstream forks, etc.) keep
+  upstream licenses in-tree and document attribution in `THIRD_PARTY_NOTICES.md` (or the
+  README License section) — never re-license upstream material. The audit therefore accepts a
+  canonical full **Apache-2.0**, **GPL-2.0** or **GPL-3.0** text, and the matching shields
+  badge, for a repo whose new material is not the licensed upstream work.
 - The license file must be the **full canonical text** of the chosen license (verbatim AGPL-3.0
   or MIT body) — GitHub license detection returns NOASSERTION for short notices, which breaks
   the repo-page license badge. The conformity audit enforces this.

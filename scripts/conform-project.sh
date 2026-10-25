@@ -1686,6 +1686,15 @@ audit() {
     if [ "$_lc" -ge 400 ] && grep -qi 'END OF TERMS AND CONDITIONS' "$dir/LICENSE"; then _ok=ok; else _ok=""; fi
   elif grep -qi 'MIT License' "$dir/LICENSE" 2>/dev/null; then
     if [ "$_lc" -ge 15 ] && grep -qi 'THE SOFTWARE IS PROVIDED' "$dir/LICENSE"; then _ok=ok; else _ok=""; fi
+  elif grep -qi 'Apache License' "$dir/LICENSE" 2>/dev/null && grep -qi 'Version 2.0' "$dir/LICENSE"; then
+    # An assembled/forked repo retains its upstream Apache-2.0 licence; the
+    # standard (§7) never re-licenses upstream material. Require the full text,
+    # not a short notice, so GitHub can still detect it.
+    if [ "$_lc" -ge 150 ] && grep -qi 'END OF TERMS AND CONDITIONS' "$dir/LICENSE"; then _ok=ok; else _ok=""; fi
+  elif grep -qi 'GNU GENERAL PUBLIC LICENSE' "$dir/LICENSE" 2>/dev/null; then
+    # GPL-2.0 and GPL-3.0 are upstream licences too, kept with their text and
+    # never replaced by the platform's own MIT/AGPL choice.
+    if [ "$_lc" -ge 300 ] && grep -qi 'END OF TERMS AND CONDITIONS' "$dir/LICENSE"; then _ok=ok; else _ok=""; fi
   else
     _ok=
   fi
@@ -1776,7 +1785,7 @@ audit() {
       while IFS= read -r b; do
         [ -z "$b" ] && continue
         case "$b" in
-          *license-MIT-blue.svg|*license-AGPL--3.0--or--later-brightgreen.svg) : ;;
+          *license-MIT-blue.svg|*license-AGPL--3.0--or--later-brightgreen.svg|*license-AGPL--3.0--only-brightgreen.svg|*license-Apache--2.0-blue.svg|*license-GPL--2.0-blue.svg|*license-GPL--3.0-blue.svg) : ;;
           *) _ok=0 ;;
         esac
       done < <(grep -oE 'img\.shields\.io/badge/license-[^ )"`]+\.svg' "$dir/README.md" || true)
