@@ -1,0 +1,14 @@
+[Unit]
+Description=Reap a wedged or runaway agent session every ten minutes
+
+[Timer]
+# Ten minutes: the 2026-10-24 session burned a day and a half of CPU before anybody
+# noticed, and a `D`-state session does not recover on its own. Cheap enough that the
+# scan of a few hundred `/proc` entries does not matter.
+OnBootSec=5m
+OnCalendar=*:0/10
+Persistent=true
+RandomizedDelaySec=45s
+
+[Install]
+WantedBy=timers.target

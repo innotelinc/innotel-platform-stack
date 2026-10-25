@@ -1,0 +1,34 @@
+[Unit]
+Description=Reap an agent session that has wedged or run away
+
+# Runs on the host that carries the agent sessions — `i4` — and nowhere else: a reaper
+# with no sessions to look at reports 0 every ten minutes, which reads on a dashboard
+# exactly like a host that is fine. Nothing else in the estate reads that process table.
+Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/container-placement.md
+
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/innotel/agent-reaper
+
+# REAPER_TEXTFILE_DIR is where this host's node-exporter (if one is pointed at that
+# directory) collects the run: sessions live, sessions matching a rule, and what was
+# reaped, by reason. An empty directory is written and collected as zeros, which is the
+# point — a quiet hour and a stopped unit must not look the same.
+EnvironmentFile=-/etc/innotel/agent-reaper.env
+Environment=REAPER_TEXTFILE_DIR=/var/lib/node_exporter/textfile
+Environment=REAPER_HOME=/root
+Environment=REAPER_GRACE=10
+
+# `--apply` is what makes this a reaper. The thresholds are the script's own defaults
+# (15 min minimum age, 20 min of CPU behind a `D` state, 12 h + 2 h for a runaway);
+# they live there so the unit fails closed if this file is edited by hand. To spare a
+# session deliberately left running, write its pid into
+# `$REAPER_HOME/.config/manicode/reaper-hold` — see the script's rule 7.
+ExecStart=/usr/bin/python3 /opt/innotel/agent-reaper/reap-wedged-agents.py \
+  --apply \
+  --home ${REAPER_HOME} \
+  --grace ${REAPER_GRACE} \
+  --prom ${REAPER_TEXTFILE_DIR}/agent-reaper.prom
+
