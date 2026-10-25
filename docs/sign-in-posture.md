@@ -183,7 +183,7 @@ host's *own* empty docker0 and every gateway exits on
 
 | Host(s) | Gateway | Listen (host) | Upstream | Authentik client |
 | --- | --- | --- | --- | --- |
-| `proxy.innotel.us`, `admin.zeus`, `admin.monarch`, `admin.signara` | `cerulean-npm-sso` | `127.0.0.1:4180` (the edge's own netns) | NPM admin UI `127.0.0.1:81` | `npm-edge` |
+| `proxy.innotel.us`, `admin.monarch.innotel.us` | `cerulean-npm-sso` | `172.31.42.10:4180` (its own `npm-gate` address; the edge trusts it via `AUTH_SSO_EDGE_PEERS`) | NPM admin UI (the edge itself, `:81`) | `npm-edge` |
 | `radarr` · `sonarr` · `lidarr` · `whisparr` · `bazarr` · `prowlarr` `.monarch.innotel.us` | `{radarr,sonarr,lidarr,whisparr,bazarr,prowlarr}-sso` | `14001`–`14006` | `http://<app>:<port>` | `monarch-media` |
 | `qbittorrent` · `sabnzbd` `.monarch.innotel.us` | `qbittorrent-sso`, `sabnzbd-sso` | `14007`, `14008` | `http://qbittorrent:8080`, `http://sabnzbd:8080` | `monarch-media` |
 | `req.monarch.innotel.us`, `req.innotel.us` | `jellyseerr-sso` | `14009` | `http://jellyseerr:5055` | `monarch-media` |
@@ -256,7 +256,7 @@ handler that mints the session is the control.
 | **Zeus** | portal | Authentik when the `AUTHENTIK_*` vars are set (`AUTH_MODE` auto) | `src/lib/oidc.ts` `passwordLoginEnabled()`, `app/api/auth/login/route.ts` → 403 | `AUTH_MODE=both` (button + form) |
 | **Rizz Aura** | app / rankings / community / admin | Authentik OIDC only — **no password store at all** | `api/auth.mjs` | none |
 | **Capstone dashboard** | Control Center | Authentik OIDC only | `dashboard-backend/app/main.py` `/auth/login` is an OIDC redirect | none |
-| **NPM Edge (admin UI)** | `proxy.innotel.us`, `admin.zeus`, `admin.monarch`, `admin.signara` | Authentik OIDC only, via the `cerulean-npm-sso` gateway — **no password path on the edge** | `backend/lib/sso.js`: `cameFromEdge()` (loopback) + `identityAllowed()` gate `POST /tokens/sso`; `passwordGrantAllowed()` refuses `POST /tokens` on every edge request | `BREAKGLASS_LOGIN=1`, off the edge (the LAN admin port) |
+| **NPM Edge (admin UI)** | `proxy.innotel.us`, `admin.monarch.innotel.us` | Authentik OIDC only, via the `cerulean-npm-sso` gateway — **no password path on the edge** | `backend/lib/sso.js`: `cameFromEdge()` (loopback, or the declared gateway address) + `identityAllowed()` gate `POST /tokens/sso`; `passwordGrantAllowed()` refuses `POST /tokens` on every edge request | `BREAKGLASS_LOGIN=1`, off the edge (the LAN admin port) |
 | **Vault** | `secrets.cerulean.innotel.us` | Authentik OIDC (native `auth/oidc`, role `operator`, group `cerulean-platform`) | `scripts/vault-entrypoint.sh` step 4c configures it; the role's `bound_claims` requires the group | Vault's **token method**, which cannot be disabled, off the public name |
 
 ### The break-glass convention
