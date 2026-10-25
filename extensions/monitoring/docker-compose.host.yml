@@ -49,6 +49,11 @@ services:
     restart: unless-stopped
     mem_limit: 128m
     memswap_limit: 128m
+    # CPU ceilings on the observers, added 2026-10-24 with the rest of the host's
+    # containers: Grafana was measured at 11.8 % of a two-core box while idle-ish, and
+    # on a host this small an uncapped observer competes with what it observes. Each is
+    # a ceiling, not a reservation — nothing is lost when the host is quiet.
+    cpus: 0.25
     command:
       - "--path.rootfs=/host"
       - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
@@ -73,6 +78,7 @@ services:
     restart: unless-stopped
     mem_limit: ${PROMETHEUS_MEM_LIMIT:-1g}
     memswap_limit: ${PROMETHEUS_MEM_LIMIT:-1g}
+    cpus: 0.5
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -110,6 +116,7 @@ services:
     restart: unless-stopped
     mem_limit: ${GRAFANA_MEM_LIMIT:-512m}
     memswap_limit: ${GRAFANA_MEM_LIMIT:-512m}
+    cpus: 0.5
     environment:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:?set GRAFANA_PASSWORD}"
       GF_USERS_ALLOW_SIGN_UP: "false"

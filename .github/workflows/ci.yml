@@ -150,6 +150,12 @@ jobs:
       # hold a rule to a series that is deliberately not there, so the rules are tested
       # in the same Prometheus image the estate runs (docker-compose.host.yml). Without
       # this, the rule that exists to catch a silent check would itself be untested.
+      #
+      # `host-resources.test.yml` is there for the opposite reason: every rule in it is
+      # a threshold somebody chose after an incident (2026-10-24 on i4), and the cases
+      # are the readings that incident actually produced — including the one a 40 % swap
+      # line would have missed. A threshold edited without its case going red is a rule
+      # nobody is holding.
       - name: Prometheus alert rules (promtool unit tests)
         run: |
           set -euo pipefail
@@ -158,7 +164,9 @@ jobs:
           # Prometheus flag ("unexpected promtool") and the step fails open.
           docker run --rm --entrypoint promtool -v "$PWD":/work -w /work \
             prom/prometheus:v3.13.3 \
-            test rules extensions/monitoring/prometheus/rules/tests/estate-checks.test.yml
+            test rules \
+            extensions/monitoring/prometheus/rules/tests/estate-checks.test.yml \
+            extensions/monitoring/prometheus/rules/tests/host-resources.test.yml
 
       - name: Python syntax
         run: python3 -m py_compile scripts/*.py scripts/tests/*.py

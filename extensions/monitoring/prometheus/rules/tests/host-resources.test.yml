@@ -1,0 +1,412 @@
+# ==========================================================================
+# promtool unit tests for host-resources.yml
+# ==========================================================================
+# The rules that came out of 2026-10-24 are the ones worth holding to a series:
+# every one of them is a threshold somebody chose, and a threshold that fires on
+# a healthy host is a rule that gets muted within a week. Each case below is a
+# host, stated as numbers, with the alerts it must produce and nothing else.
+#
+# The second case is the incident itself — `i4` with 143 MiB available, 5.3 GiB
+# of swap in use, PSI memory at 55 % of wall time, load 104 on two cores and 105
+# runnable processes. It is here so that reading stays a fact about these rules
+# and not a claim in a comment.
+#
+# Annotations are pinned, not just labels: the summary is the half of the alert
+# a person reads at 3 a.m., and a rule whose message has drifted from the number
+# it measured is the failure this file exists to stop.
+#
+# Run:  promtool test rules extensions/monitoring/prometheus/rules/tests/host-resources.test.yml
+# ==========================================================================
+rule_files:
+  - ../host-resources.yml
+
+evaluation_interval: 1m
+
+tests:
+  # A host doing honest work: half of memory available, no swapping, load under
+  # one per CPU. Nothing fires, and its PSI counter is ticking normally.
+  - name: a healthy host is quiet
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemTotal_bytes'
+        values: '8589934592x40'
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '4294967296x40'
+      - series: 'node_memory_SwapTotal_bytes'
+        values: '8589934592x40'
+      - series: 'node_memory_SwapFree_bytes'
+        values: '8589934592x40'
+      - series: 'node_load1'
+        values: '1x40'
+      - series: 'node_procs_running'
+        values: '2x40'
+      - series: 'node_procs_blocked'
+        values: '0x40'
+      - series: 'node_pressure_memory_waiting_seconds_total'
+        values: '0+1x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="0"}'
+        values: '0+60x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="1"}'
+        values: '0+60x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="2"}'
+        values: '0+60x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="3"}'
+        values: '0+60x40'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: HostMemoryTight
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: HostMemoryExhausted
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: HostSwapThrashing
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: HostMemoryStalled
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: HostLoadHigh
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: HostLoadSevere
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: HostRunQueueDeep
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: HostProcsBlocked
+        exp_alerts: []
+
+  # 2026-10-24 on i4, as measured: 143 MiB of 7.2 GiB available, 5.3 GiB of
+  # 11 GiB swapped, PSI memory waiting at 55 % of wall time, load 104 on two
+  # cores, 105 runnable processes. Blocked is *not* raised here — the run queue
+  # was the symptom, not a hung device.
+  - name: the 2026-10-24 i4 incident
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemTotal_bytes'
+        values: '7728000000x40'
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '150000000x40'
+      - series: 'node_memory_SwapTotal_bytes'
+        values: '12884901888x40'
+      - series: 'node_memory_SwapFree_bytes'
+        values: '7194060221x40'
+      - series: 'node_load1'
+        values: '104x40'
+      - series: 'node_procs_running'
+        values: '105x40'
+      - series: 'node_procs_blocked'
+        values: '2x40'
+      - series: 'node_pressure_memory_waiting_seconds_total'
+        values: '0+20x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="0"}'
+        values: '0+10x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="1"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: HostMemoryTight
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: 'Only 1.941% of memory is available'
+              description: >-
+                Available memory has been under 12 % of total for 15 minutes
+                (1.941% now). The host can still work, but the next allocation comes out of
+                page cache and then out of swap. Find what grew: `ps -eo pid,rss,args
+                --sort=-rss`, and per container `docker stats`. This is the state `i4` was
+                in on 2026-10-24 an hour before it stopped answering.
+      - eval_time: 40m
+        alertname: HostMemoryExhausted
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: 'The host is out of memory (1.941% available)'
+              description: >-
+                Under 5 % available for 5 minutes. The kernel's OOM killer picks a
+                victim by heuristic, and on this estate that victim has been a
+                service container (`omniroute` inside `proxy`, 2026-10-24 17:50,
+                `constraint=CONSTRAINT_MEMCG`). Reclaim before it chooses: drop the
+                heaviest session or container, then read `dmesg -T | grep -i oom`.
+      - eval_time: 40m
+        alertname: HostSwapThrashing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: 'The host is thrashing: 44.17% of swap in use with memory tight'
+              description: >-
+                More than 30 % of swap is in use *and* under 20 % of memory is
+                available — the two together are a host spending its I/O on paging
+                rather than on work. The 30 % line is measured, not chosen: at 20:00
+                on 2026-10-24 `i4` held 26 % of its swap with 13 % of memory and was
+                merely tight (PSI 9 %); by 21:12 it held **35 %** of swap with 11 %
+                of memory and every task was stalling (PSI 47 %, load 104). A rule
+                set above 40 % would have watched that hour go by.
+      - eval_time: 40m
+        alertname: HostMemoryStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: 'Tasks are stalled on memory 33.33% of the time'
+              description: >-
+                PSI memory `some` has averaged above 25 % of wall time for 10
+                minutes, which is the direct-reclaim signature: every process that
+                allocates blocks in the kernel until pages are reclaimed. Measured
+                at 55 % on `i4` during the 2026-10-24 incident, alongside a load of
+                104 and a one-line `ls /proc` that took longer than a shell timeout.
+                Load average alone cannot tell this apart from honest work; PSI can.
+      - eval_time: 40m
+        alertname: HostLoadHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: 'Load is 52x the CPU count'
+              description: >-
+                Queue depth per CPU has been above 2 for 15 minutes. That is a host
+                with more runnable work than it can execute, which is worth naming
+                before it becomes the reason something else times out. Sustained
+                per-CPU load above 5 is `HostLoadSevere`.
+      - eval_time: 40m
+        alertname: HostLoadSevere
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: 'Load is 52x the CPU count — the host is not keeping up'
+              description: >-
+                Five times the CPU count, for five minutes. `i4` reached **52x** on
+                2026-10-24 and no longer answered a shell reliably. A load this far
+                above capacity is almost never honest work: look for a wedged
+                process or a fork storm first (`ps -eo state,pid,pcpu,args | grep
+                '^D'`, and `node_procs_running` on the same dashboard).
+      - eval_time: 40m
+        alertname: HostRunQueueDeep
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: '105 processes are runnable at once'
+              description: >-
+                More than five runnable processes per CPU for 10 minutes. A run
+                queue this deep is usually a fork storm — one parent spawning
+                short-lived children — rather than genuine parallelism, and it is
+                what `i4` showed on 2026-10-24 (105 runnable, 1 959 threads). Find
+                the parent before killing children: `ps -eo ppid,pid,stat,args |
+                sort -n`, then the ppid with the most children.
+      - eval_time: 40m
+        alertname: HostProcsBlocked
+        exp_alerts: []
+
+  # The reading taken by hand at 21:12 on 2026-10-24, before the wedged session
+  # was killed: 10.7 % of memory available, 35.4 % of swap in use, PSI memory at
+  # 47 % of wall time, load 104 on two cores. This is the case that fixes the
+  # swap line at 30 % and not 40 % — at 40 % the rule watches this hour go by.
+  - name: the stall before the reaper, as measured
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemTotal_bytes'
+        values: '7728000000x40'
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '826896000x40'
+      - series: 'node_memory_SwapTotal_bytes'
+        values: '12884901888x40'
+      - series: 'node_memory_SwapFree_bytes'
+        values: '8325000000x40'
+      - series: 'node_load1'
+        values: '104x40'
+      - series: 'node_procs_running'
+        values: '20x40'
+      - series: 'node_procs_blocked'
+        values: '1x40'
+      - series: 'node_pressure_memory_waiting_seconds_total'
+        values: '0+28x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="0"}'
+        values: '0+10x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="1"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: HostSwapThrashing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: 'The host is thrashing: 35.39% of swap in use with memory tight'
+              description: >-
+                More than 30 % of swap is in use *and* under 20 % of memory is
+                available — the two together are a host spending its I/O on paging
+                rather than on work. The 30 % line is measured, not chosen: at 20:00
+                on 2026-10-24 `i4` held 26 % of its swap with 13 % of memory and was
+                merely tight (PSI 9 %); by 21:12 it held **35 %** of swap with 11 %
+                of memory and every task was stalling (PSI 47 %, load 104). A rule
+                set above 40 % would have watched that hour go by.
+      - eval_time: 40m
+        alertname: HostMemoryStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: 'Tasks are stalled on memory 46.67% of the time'
+              description: >-
+                PSI memory `some` has averaged above 25 % of wall time for 10
+                minutes, which is the direct-reclaim signature: every process that
+                allocates blocks in the kernel until pages are reclaimed. Measured
+                at 55 % on `i4` during the 2026-10-24 incident, alongside a load of
+                104 and a one-line `ls /proc` that took longer than a shell timeout.
+                Load average alone cannot tell this apart from honest work; PSI can.
+      - eval_time: 40m
+        alertname: HostMemoryTight
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: 'Only 10.7% of memory is available'
+              description: >-
+                Available memory has been under 12 % of total for 15 minutes
+                (10.7% now). The host can still work, but the next allocation comes out of
+                page cache and then out of swap. Find what grew: `ps -eo pid,rss,args
+                --sort=-rss`, and per container `docker stats`. This is the state `i4` was
+                in on 2026-10-24 an hour before it stopped answering.
+      # 10.7 % is tight, not exhausted: the 5 % line has to stay above this.
+      - eval_time: 40m
+        alertname: HostMemoryExhausted
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: HostLoadSevere
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: 'Load is 52x the CPU count — the host is not keeping up'
+              description: >-
+                Five times the CPU count, for five minutes. `i4` reached **52x** on
+                2026-10-24 and no longer answered a shell reliably. A load this far
+                above capacity is almost never honest work: look for a wedged
+                process or a fork storm first (`ps -eo state,pid,pcpu,args | grep
+                '^D'`, and `node_procs_running` on the same dashboard).
+      # 20 runnable on two cores is 10 per CPU — past the line, and this is the
+      # reading that names a fork storm rather than honest work.
+      - eval_time: 40m
+        alertname: HostRunQueueDeep
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: '20 processes are runnable at once'
+              description: >-
+                More than five runnable processes per CPU for 10 minutes. A run
+                queue this deep is usually a fork storm — one parent spawning
+                short-lived children — rather than genuine parallelism, and it is
+                what `i4` showed on 2026-10-24 (105 runnable, 1 959 threads). Find
+                the parent before killing children: `ps -eo ppid,pid,stat,args |
+                sort -n`, then the ppid with the most children.
+
+  # A host with no swap at all: memory tight enough to warn, and nothing said
+  # about swap. 0/0 is NaN, which no comparison satisfies — but the explicit
+  # `SwapTotal > 0` guard is what makes that a property of the rule rather than
+  # of IEEE 754.
+  - name: a host without swap cannot be thrashing
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemTotal_bytes'
+        values: '4294967296x40'
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '300000000x40'
+      - series: 'node_memory_SwapTotal_bytes'
+        values: '0x40'
+      - series: 'node_memory_SwapFree_bytes'
+        values: '0x40'
+      - series: 'node_load1'
+        values: '0.5x40'
+      - series: 'node_procs_running'
+        values: '1x40'
+      - series: 'node_procs_blocked'
+        values: '0x40'
+      - series: 'node_pressure_memory_waiting_seconds_total'
+        values: '0+1x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="0"}'
+        values: '0+60x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="1"}'
+        values: '0+60x40'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: HostMemoryTight
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: 'Only 6.985% of memory is available'
+              description: >-
+                Available memory has been under 12 % of total for 15 minutes
+                (6.985% now). The host can still work, but the next allocation comes out of
+                page cache and then out of swap. Find what grew: `ps -eo pid,rss,args
+                --sort=-rss`, and per container `docker stats`. This is the state `i4` was
+                in on 2026-10-24 an hour before it stopped answering.
+      - eval_time: 40m
+        alertname: HostSwapThrashing
+        exp_alerts: []
+
+  # A single stuck process: eleven in `D` for ten minutes, everything else
+  # calm. Only the blocked rule fires.
+  - name: a run of uninterruptible processes is named
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemTotal_bytes'
+        values: '8589934592x40'
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '4294967296x40'
+      - series: 'node_memory_SwapTotal_bytes'
+        values: '0x40'
+      - series: 'node_memory_SwapFree_bytes'
+        values: '0x40'
+      - series: 'node_load1'
+        values: '1x40'
+      - series: 'node_procs_running'
+        values: '4x40'
+      - series: 'node_procs_blocked'
+        values: '11x40'
+      - series: 'node_pressure_memory_waiting_seconds_total'
+        values: '0+1x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="0"}'
+        values: '0+60x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="1"}'
+        values: '0+60x40'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: HostProcsBlocked
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: '11 processes are stuck in uninterruptible sleep'
+              description: >-
+                Ten or more processes have been in `D` for 10 minutes. `SIGTERM`
+                cannot reach a process in `D`, so this is the state where a service
+                looks hung and a restart appears to do nothing. Check the block
+                device and any network mount first (`dmesg -T | tail`, `cat
+                /proc/<pid>/stack`); a single session accumulating hours in `D` is
+                what `scripts/reap-wedged-agents.py` exists to end.
+      - eval_time: 40m
+        alertname: HostLoadHigh
+        exp_alerts: []

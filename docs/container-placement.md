@@ -15,6 +15,76 @@ evening pass moved the edge services back onto i1, right-sized i1's CPU caps, an
 put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
 
+## Changes applied 2026-10-24
+
+- **`i4` was at load 104 on two vCPU, and the cause was not a container.** One agent
+  session — started 2026-10-23 15:26 on `pts/0`, abandoned — sat in `D` with 5 h 40 m
+  of accumulated CPU and 674 MiB resident, spawning short-lived `node` children
+  (`tsc --noEmit`, a probe script in `/tmp`) the whole time. The host measured
+  `MemAvailable` at **1.9 %**, PSI memory `some` at **47 % of wall time**, load
+  **104–120**, and `node_procs_running` **105–132**; 5.3 GiB of its 11 GiB of swap was
+  in use. `ps` and `ls /proc` timed out for minutes at a time. Killing that session and
+  the wedged nginx worker beside it took the host to load 1.9 and freed 3.3 GiB of
+  swap; nothing else was wrong with it.
+- **`scripts/reap-wedged-agents.py` is the guard, and it is the one job here that
+  acts.** It reaps an agent session that is (a) in `D` with 20 m+ of CPU behind it,
+  (b) older than 12 h *and* past 2 h of CPU, or (c) orphaned past 15 minutes — sending
+  `SIGTERM`, then `SIGKILL` after 10 s, and removing the session's
+  `freebuff-live-<pid>.json` so a stale file cannot read as a live session. A pid in
+  `~/.config/manicode/reaper-hold` is never touched: a person has to be able to spare
+  the soak test they are watching. `systemd/agent-reaper.{service,timer}` runs it every
+  ten minutes on `i4`, where the sessions are, and publishes
+  `innotel_agent_sessions_*`/`innotel_agent_reaped_total` for whoever points a
+  node-exporter at `/var/lib/node_exporter/textfile` (nothing does yet — see Open
+  items). The thresholds are deliberately far out: the session this file was written
+  in ran 9 h 40 m with 1 h 40 m of CPU and is *not* a candidate, which is why the
+  runaway line is 12 h/2 h and not 4 h/45 m.
+- **The host's own resources are now alerted on:**
+  `extensions/monitoring/prometheus/rules/host-resources.yml` covers memory available
+  (warn 12 %, critical 5 %), swap in use *with* memory tight, PSI memory stall
+  (>25 % of wall time), load per CPU (2 warn, 5 critical), run-queue depth
+  (>5 runnable per CPU) and blocked processes (>10 in `D`). Every threshold was read
+  back off this incident rather than chosen — and the swap line is **30 %**, not 40 %,
+  because at 20:00 `i4` held 26 % of swap with 13 % of memory and was merely tight
+  (PSI 9 %), while at 21:12 it held 35 % with 11 % and every task was stalling. A rule
+  set at 40 % would have watched that hour go by. The rules are unit-tested with
+  promtool against the recorded readings (`rules/tests/host-resources.test.yml`), and
+  CI runs those alongside the estate-check cases.
+- **Every container on `i4` now has a memory *and* a CPU ceiling.** The Incus caps were
+  already there (`proxy` 2 vCPU/4 GiB, `terminal` 1/1.25 GiB, `vault` 1/1.5 GiB,
+  `vpn` 1/750 MiB) — what was missing was *inside* `proxy`, where the stacks declared
+  no CPU limit at all and four had no memory ceiling: `proxy` had already OOM-killed
+  `omniroute` at 17:50 (`oom_memcg=/lxc.payload.proxy`) because the container's 4 GiB
+  was shared out on trust. Applied live with `docker update` and written into the
+  compose files the containers come from:
+
+  | container | memory | CPU |
+  |---|---|---|
+  | `omniroute` | 3g → **2g** | — → **0.75** |
+  | `cerulean-npm` | none → **1536m** | — → **1.0** |
+  | `cerulean-authentik` | 1500m → **1g** | — → **0.75** |
+  | `cerulean-authentik-worker` | none → **768m** | — → **0.5** |
+  | `cerulean-authentik-postgres` | none → **512m** | — → **0.5** |
+  | `cerulean-technitium` | none → **384m** | — → **0.25** |
+  | `metrics-prometheus` | 1g (unchanged) | — → **0.5** |
+  | `metrics-grafana` | 512m (unchanged) | — → **0.5** |
+  | `metrics-node-exporter` | 128m (unchanged) | — → **0.25** |
+
+  **The `omniroute` reduction is a deliberate trade, not a tidy-up.** Its compose
+  header says 3g because its own pressure guard refuses work at 85 % of the cap (~2.55
+  GiB) and answers `503` rather than degrading. At 2g that guard trips at 1.7 GiB,
+  still well above the ~1 GiB it reaches under combo load — but it is 1.3 GiB less
+  headroom than the product asks for, and it is here because 3g was 75 % of the
+  container it lives in, which is how the container came to OOM-kill it. The deployed
+  copy (`/usr/src/projects/complete/ips/extensions/llm/docker-compose.host.yml` on
+  `proxy`) carries 2g; the repo template still says 3g, because it is also the file
+  `i1` deploys.
+
+  The capped containers' ceilings still sum to well over `proxy`'s 4 GiB — caps are
+  ceilings, not reservations, and that is the point: no single stack can now take the
+  container, while all of them can still burst. The remaining overcommit is the reason
+  `proxy` should move to 5 GiB the next time `i4` has the room.
+
 ## Changes applied 2026-10-01
 
 - **`ontrak` renumbered `.21` → `.20` and the sync stack died.** The container was
@@ -375,6 +445,17 @@ estate as it is, not as it was.
   `i4` (`mail` has been on `i3` since 2026-10-15, which is why
   `check-alert-delivery.py` reads its log there).
 
+  **`clearpath` (`.83`) is the first container added since that reconciliation, and it
+  arrived as two.** The deployment landed it on `i2` with the address pinned statically
+  in its own netplan (`10-lxc.yaml`, `dhcp4: false`) and the app serving on `:3000` behind
+  NPM host `274`, but the first attempt had also left a second, device-less `clearpath` on
+  `i4` — created, never given a NIC, never used. The check reports a name on two hosts as
+  a warning, so the fix was the estate's: the `i4` copy was deleted, and the working one
+  joined the table at `192.168.1.83` (the address NPM's `app.denovocredit.com` forwards to).
+  The check reports **0 warnings** again. `scripts/tests/test_estate_checks_live.py`'s
+  fixture listing carries the row too — a table row without a host listing is a failure on
+  the clean-estate case, which is what caught this within the hour.
+
   The other findings were the state this page has warned about since the 2026-10-01
   outage: `auvik` (`.72`), `atheniq` (`.59`), `blueprint` (`.76`) and — once listed, so
   it was finally looked at — `regcache` (`.79`) were still on `dhcp4: true`. Each was
@@ -528,6 +609,7 @@ that table is a bug in one of them.
 | i2 | `atheniq` | `.59` | AthenIQ LMS (Tutor / Open edX) | 3.61 GiB (5.25 GiB) | 6 |
 | i2 | `blueprint` | `.76` | DayZero app server (`dayzero.service`) | 84 MiB (512 MiB) | 2 |
 | i2 | `capstone` | `.30` | Zeus / capstone telephony | 4.34 GiB (uncapped) | 2 |
+| i2 | `clearpath` | `.83` | Clearpath (`app.denovocredit.com`) | 109 MiB (256 MiB) | 2 |
 | i3 | `distro` | `.61` | distro control plane | 204 MiB (1 GiB) | 2 |
 | i3 | `magnate` | `.57` | Magnate | 181 MiB (1 GiB) | 2 |
 | i3 | `mail` | `.15` | mail (SMTP/IMAP) | 438 MiB (4 GiB) | 2 |
