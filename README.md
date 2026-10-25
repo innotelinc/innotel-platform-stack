@@ -151,6 +151,28 @@ the member repos (unlike `stack-lib.sh`, which they source at runtime). Exit cod
 truncates for speed and says so when it does, since a silent truncation would turn an audit
 into a false clean.
 
+## Conformity audit — `scripts/conform-project.sh`
+
+The standard is enforced twice: the [guard](docs/standard.md#5-attribution-guard--the-one-rule-every-repo-enforces)
+checks attribution, and this script checks shape. It scaffolds a new repository
+(`--new <name> <classification>`) with the canonical layout, and audits an existing one in place
+(`scripts/conform-project.sh <repo-dir>`), printing a ✓ or ✗ per rule and exiting non-zero when any
+rule fails:
+
+- the file layout (§2), the canonical LICENSE text, a committed `.env.example`, `docs/stack.md`;
+- the README shape (§3) — badges, the Why table, the stack link and the landing link;
+- the landing page (§4) — title, OG tags, inline SVG favicon, no AI attribution;
+- the shared guard (§5) — `guard-lib` byte-identical to the policy this script writes, and a
+  300 KB input the guard must still judge;
+- GitHub Pages actually enabled and reachable at `https://innotelinc.github.io/<repo>/`.
+
+Every product repository runs it from CI (`.github/workflows/conform.yml`, which checks out this
+repository for the standard and the script), so drift fails the repository that drifted rather
+than a central index. Two behaviours are deliberate: it **never overwrites an existing
+`.env.example`** — it appends only the posture lines the audit looks for, because a file that
+documents every variable its runtime reads is worth more than a generic template — and Pages
+must be enabled once per repository, since an Actions token cannot create the site itself.
+
 ## Architecture principles
 
 1. **One job per platform.** Identity, secrets, trust, storage, and revenue are each owned
