@@ -728,6 +728,21 @@ check-compose: ## Validate the root compose file against .env.example
 MAKEFILE_EOF
 }
 
+ensure_env_posture() {
+  # Append only the lines the audit asks for, and only when they are absent, so
+  # an existing .env.example keeps every variable it documents.
+  local dir="$1" f="$1/.env.example"
+  local add=""
+  grep -qiE 'never commit.*\.env|\.env.*gitignored|gitignored' "$f" || add="${add}# Never commit \`.env\` — only this template is tracked; \`.env\` is gitignored.\n"
+  grep -qi 'cerulean' "$f" || add="${add}# Identity is Cerulean Authentik (OIDC); DNS, TLS and the public proxy are Cerulean.\n"
+  grep -qi 'vault' "$f" || add="${add}# Production secrets live in Cerulean Vault (KV v2) and are resolved from vault://<mount>/<path>#<KEY> refs.\n"
+  [ -n "$add" ] || return 0
+  {
+    printf '\n# ── Innotel Platform Stack posture ─────────────────────────────────────\n'
+    printf '%b' "$add"
+  } >> "$f"
+}
+
 write_env_example() {
   # $4 is the repo slug the Vault policy path is named for. It defaults to the
   # repo name, which is what every current caller passes — without the default
@@ -1886,6 +1901,15 @@ scaffold() {
   write_pages_yml            "$dir"
   write_makefile             "$dir" "$name"
 
+  # NEVER overwrite an environment contract that already exists. A repo that
+  # documents every variable it reads (OmniRoute had 3,000 lines of it) loses
+  # that documentation the moment a generic template replaces the file, and no
+  # audit notices because the generic file still passes. Append only what the
+  # standard asks for and leave the rest alone.
+  if [ -f "$dir/.env.example" ]; then
+    ensure_env_posture "$dir"
+  fi
+
   # Landing placeholder — conformant outline, platform-specific bits unfilled.
   write_landing              "$dir" "$name" "$classification"
 
@@ -1899,7 +1923,7 @@ scaffold() {
     "" \
     ""
 
-  write_env_example          "$dir" "$name" "${name}.innotel.us"
+  [ -f "$dir/.env.example" ] || write_env_example "$dir" "$name" "${name}.innotel.us"
   write_license              "$dir" "MIT"
   write_stack_doc            "$dir" "$name" "$classification" \
     "- (fill in what ${name} owns)" \
