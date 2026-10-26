@@ -196,13 +196,17 @@ ROLES: dict[str, str] = {
 
 @dataclass
 class Instance:
-    """One container as it actually is."""
+    """One instance as it actually is."""
 
     name: str
     state: str
     address: str | None = None
     #: False when no manager declares the address static — see rule 3.
     pinned: bool = True
+    #: `container` or `virtual-machine`. A VM is not a container: it has no cgroup to
+    #: probe and, unless something runs an agent inside the guest, no address incus can
+    #: report — so the rules that read those are container-shaped (see `audit`).
+    kind: str = "container"
 
 
 def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
@@ -225,6 +229,17 @@ def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
                 )
                 continue
             if inst.address is None:
+                if inst.kind == "virtual-machine":
+                    out.findings.append(
+                        Finding(
+                            "vm_no_address",
+                            "note",
+                            f"{host} {name}: a virtual machine with no address incus can see — "
+                            "its guest reports one only with an agent installed, so this is "
+                            "not the renumber rule 1 is about",
+                        )
+                    )
+                    continue
                 out.findings.append(
                     Finding("no_address", "fail", f"{host} {name}: running with no IPv4 (the table expects {address})")
                 )
@@ -261,6 +276,19 @@ def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
 
         for name, inst in sorted(seen.items()):
             if inst.state == "RUNNING":
+                if inst.kind == "virtual-machine":
+                    # A VM that answers to no address is not the table being stale; the
+                    # first Windows build VM in the estate (2026-10-26) warned on every
+                    # run for exactly this.
+                    out.findings.append(
+                        Finding(
+                            "vm_unlisted",
+                            "note",
+                            f"{host} {name}: running virtual machine, not in the table — "
+                            "add it only if the estate dials its address",
+                        )
+                    )
+                    continue
                 out.findings.append(
                     Finding("unexpected", "warn", f"{host} {name}: running and not in the table — update the table")
                 )
@@ -315,16 +343,19 @@ def gather(hosts: dict[str, str], runner: Callable[[str, str], str] = _ssh) -> d
     """
     observed: dict[str, list[Instance]] = {}
     for host, target in hosts.items():
-        listing = read_host(host, target, "incus list --format csv -c ns4", runner)
+        listing = read_host(host, target, "incus list --format csv -c nts4", runner)
         instances: list[Instance] = []
         for line in listing.splitlines():
             if not line.strip():
                 continue
             name, _, rest = line.partition(",")
+            kind, _, rest = rest.partition(",")
             state, _, addresses = rest.partition(",")
+            # `incus list -c t` prints the type upper-case: CONTAINER, VIRTUAL-MACHINE.
+            kind = kind.strip().lower()
             address = _first_lan_address(addresses)
             pinned = True
-            if state == "RUNNING":
+            if state == "RUNNING" and kind != "virtual-machine":
                 try:
                     # One shell probe, because it runs inside the container and the
                     # three managers are told apart only there. `s` starts as dhcp and
@@ -346,7 +377,10 @@ def gather(hosts: dict[str, str], runner: Callable[[str, str], str] = _ssh) -> d
                     pinned = "static" in probe
                 except Exception:  # a container we cannot exec into is not pinned *silently*
                     pinned = False
-            instances.append(Instance(name=name.strip(), state=state.strip(), address=address, pinned=pinned))
+            instances.append(
+                Instance(name=name.strip(), state=state.strip(), address=address, pinned=pinned,
+                         kind=kind or "container")
+            )
         observed[host] = instances
     return observed
 

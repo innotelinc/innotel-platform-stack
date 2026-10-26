@@ -64,12 +64,16 @@ HOSTS: dict[str, str] = {
 
 @dataclass
 class Container:
-    """One container's declared cap and the cpuset actually in force."""
+    """One instance's declared cap and the cpuset actually in force."""
 
     name: str
     state: str
     declared: int | None = None
     effective: int | None = None
+    #: `container` or `virtual-machine`. The cpuset rule is container-shaped: a VM's
+    #: `limits.cpu` is the vCPU count incus hands qemu at boot (`-smp N`), so there is no
+    #: `lxc.payload.<name>` cgroup to read and its absence proves nothing (see `audit`).
+    kind: str = "container"
 
 
 def audit(observed: dict[str, list[Container]], host_cpus: dict[str, int]) -> Audit:
@@ -94,6 +98,20 @@ def audit(observed: dict[str, list[Container]], host_cpus: dict[str, int]) -> Au
                         f"incus clamps it, so the written cap is not the fenced one",
                     )
                 )
+            if inst.kind == "virtual-machine":
+                # The first VM in the estate (a Windows packaging build, 2026-10-26) failed
+                # this check on every run for having no container cgroup. Its cap is the
+                # vCPU count qemu was started with, which incus applies at boot.
+                out.findings.append(
+                    Finding(
+                        "vm_cap_at_boot",
+                        "note",
+                        f"{host} {inst.name}: virtual machine with limits.cpu={inst.declared} — "
+                        "the cap is the vCPU count qemu boots with, not a cpuset, so the "
+                        "container rule does not apply",
+                    )
+                )
+                continue
             if inst.effective is None:
                 out.findings.append(
                     Finding(
@@ -160,6 +178,7 @@ def gather(hosts: dict[str, str], runner=ssh) -> tuple[dict[str, list[Container]
                     state=entry.get("status", "").upper(),
                     declared=declared,
                     effective=count_cpus(spec) if spec else None,
+                    kind=entry.get("type", "container") or "container",
                 )
             )
         observed[host] = containers

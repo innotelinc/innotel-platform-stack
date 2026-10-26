@@ -79,6 +79,34 @@ class AddressCase(unittest.TestCase):
         self.assertEqual(len(mismatched), 2, "both ONTRAK_API_BIND and ONTRAK_WEB_BIND")
         self.assertTrue(all("cannot bind" in f.message for f in mismatched))
 
+    def test_a_virtual_machine_outside_the_table_is_a_note_not_a_warning(self):
+        # The estate's first VM (a Windows packaging build, 2026-10-26) warned on every run
+        # for having no address. A VM reports one only with an agent in the guest, so
+        # "not in the table" is not the table being stale.
+        result = chk.audit(
+            estate({("i2", "ontrak-winpack-build"): dict(state="RUNNING", address=None, kind="virtual-machine")})
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.warnings, [])
+        self.assertEqual([f.code for f in result.findings], ["vm_unlisted"])
+
+    def test_a_table_listed_virtual_machine_without_an_address_is_a_note(self):
+        # Rule 1 is about a renumber. A VM whose guest has no agent is not that, and saying
+        # so is different from saying the container is missing.
+        result = chk.audit(
+            estate({("i1", "ontrak"): dict(state="RUNNING", address=None, kind="virtual-machine")})
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual([f.code for f in result.findings], ["vm_no_address"])
+
+    def test_a_virtual_machine_that_does_report_an_address_is_held_to_it(self):
+        # If the guest does report one, the table still has the last word.
+        result = chk.audit(
+            estate({("i1", "ontrak"): dict(state="RUNNING", address="192.168.1.20", kind="virtual-machine")})
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("address_moved", [f.code for f in result.failures])
+
     def test_a_dhcp_address_is_a_warning_not_a_pass(self):
         result = chk.audit(estate({("i1", "ontrak"): dict(state="RUNNING", address="192.168.1.21", pinned=False)}))
         self.assertTrue(result.ok, "right address is not a failure")

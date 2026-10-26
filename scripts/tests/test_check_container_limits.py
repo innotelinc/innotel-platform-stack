@@ -67,6 +67,28 @@ class CapCase(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual([f.code for f in result.findings], ["stopped"])
 
+    def test_a_virtual_machine_is_not_held_to_the_container_rule(self):
+        # The estate's first VM (a Windows packaging build, 2026-10-26) failed this check on
+        # every run: a VM's limits.cpu is the vCPU count qemu boots with, so there is no
+        # `lxc.payload.<name>` cgroup to read and its absence proves nothing.
+        result = chk.audit(
+            {"i1": [chk.Container(name="ontrak-winpack-build", state="RUNNING", declared=2,
+                                  effective=None, kind="virtual-machine")]},
+            {"i1": 2},
+        )
+        self.assertTrue(result.ok, [f.message for f in result.failures])
+        self.assertEqual([f.code for f in result.findings], ["vm_cap_at_boot"])
+
+    def test_a_virtual_machine_asking_for_more_cpus_than_the_host_has_still_warns(self):
+        # The exemption is the cpuset rule, not arithmetic: a cap incus has to clamp is
+        # still worth saying out loud.
+        result = chk.audit(
+            {"i1": [chk.Container(name="vm", state="RUNNING", declared=8, effective=None,
+                                  kind="virtual-machine")]},
+            {"i1": 4},
+        )
+        self.assertEqual([f.code for f in result.warnings], ["cap_above_host"])
+
     def test_a_running_container_with_no_readable_cpuset_is_a_failure(self):
         result = chk.audit(observed([("proxy", 2, None, "RUNNING")]), HOST_CPUS)
         self.assertFalse(result.ok)

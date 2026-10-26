@@ -150,8 +150,8 @@ def _address_rules(moved: tuple[str, str] | None = None) -> dict:
         for name, address in rows:
             if moved and moved == (host, name):
                 address = "192.168.1.20"  # the 2026-10-01 renumber
-            listing.append(f'{name},RUNNING,"{address} (eth0)"')
-        rules[host] = {"answers": [["ns4", _csv(listing)], ["incus exec", "static\n"]]}
+            listing.append(f'{name},CONTAINER,RUNNING,"{address} (eth0)"')
+        rules[host] = {"answers": [["nts4", _csv(listing)], ["incus exec", "static\n"]]}
     return rules
 
 
