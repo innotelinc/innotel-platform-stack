@@ -220,8 +220,8 @@ estate as it is, not as it was.
   see §*Open items*), and
   `check-mail-relay.py` (the **outbound** half: non-local recipients route through an
   authenticated relay — the route the outbound strategy names first, which is Mailjet,
-  with Resend as the route a retry takes — that route and the retry route exist and
-  answer, every sending domain has an *active* DKIM signature, and the queue drains — each
+  and a retry is retried through the same route since 2026-10-26 — that route exists and
+  answers, every sending domain has an *active* DKIM signature, and the queue drains — each
   of which has broken here with no symptom), and
   `check-group-compose-freshness.py` (the one that is not about a host: the files in
   `groups/` are generated *and tracked*, so a member repo that adds or retires a service

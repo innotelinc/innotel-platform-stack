@@ -13,9 +13,11 @@ So this reads the live server and asserts the four things that make outbound del
 work, each of which has failed here at least once:
 
   1. the outbound strategy routes non-local recipients at an authenticated relay
-     (whichever route it names — the estate's primary is Mailjet, and SPF publishes
-     `include:spf.mailjet.com`; Resend is the route a retry takes);
-  2. that relay, and the retry route, exist and are reachable on the network;
+     (whichever route it names — the estate sends through Mailjet, and SPF publishes
+     `include:spf.mailjet.com`);
+  2. that relay, and the retry route when the strategy names one (the estate retries
+     through the same Mailjet route, so it does not), exist and are reachable on the
+     network;
   3. each sending domain has an **active** DKIM signature (a rotation stuck in
      `pending`/`retiring` sends mail unsigned — DMARC then rejects it at the far end);
   4. the queue is not backing up.
@@ -120,10 +122,10 @@ def audit() -> Audit:
     # 1. the outbound strategy's primary branch -> an authenticated relay.
     #
     # It does not have to be the route called `smarthost`: the estate sends through
-    # Mailjet (SPF publishes `include:spf.mailjet.com`) and keeps Resend as the route a
-    # *retry* takes. What matters is that non-local recipients reach a Relay with an
-    # address, through the branch the strategy picks first — a branch that resolves to
-    # `mx` sends straight to the recipient's server, and port 25 does not leave here.
+    # Mailjet (SPF publishes `include:spf.mailjet.com`) and retries through the same
+    # route. What matters is that non-local recipients reach a Relay with an address,
+    # through the branch the strategy picks first — a branch that resolves to `mx` sends
+    # straight to the recipient's server, and port 25 does not leave here.
     st = jmap("x:MtaOutboundStrategy/get", {"ids": ["singleton"]})["list"]
     route = st[0].get("route", {}) if st else {}
     primary = route_name(str(route.get("else", "")))
@@ -148,8 +150,10 @@ def audit() -> Audit:
                 out.findings.append(Finding("route-unreachable", "fail",
                                             f"{host}:{port} refused or timed out"))
 
-    # 2. the retry branch (`retry_num > 0` in the strategy) has a route that answers.
-    # Skipped when it names the same route as the primary one: that host was just dialled.
+    # 2. the retry branch (`retry_num > 0` in the strategy), when there is one, has a
+    # route that answers. Skipped when it names the same route as the primary one — the
+    # estate's shape, where a retry is retried through Mailjet — because that host was
+    # just dialled.
     branches = list((route.get("match") or {}).values())
     retry = next((b for b in branches if "retry_num" in str(b.get("if", ""))), None)
     fallback = route_name(str(retry.get("then", ""))) if retry else ""

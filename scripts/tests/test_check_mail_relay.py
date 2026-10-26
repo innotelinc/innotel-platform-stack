@@ -106,17 +106,17 @@ class RuleCase(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.failures[0].code, "route-direct")
 
-    def test_the_estate_shape_two_relays_is_clean(self):
-        # What the estate actually runs: Mailjet first (SPF publishes it), Resend as the
-        # route a retry takes. The route called `smarthost` is not the primary one, and
-        # that is not a finding.
+    def test_the_estate_shape_mailjet_only_is_clean(self):
+        # What the estate actually runs: Mailjet (SPF publishes it) is the only relay, and
+        # a retry is retried through the same route, so there is no retry branch to check.
         answers = dict(WIRED, **{
             "x:MtaOutboundStrategy/get": {"list": [{"route": {
-                "match": {"1": {"if": "retry_num > 0", "then": "'smarthost'"}},
+                "match": {"0": {"if": "is_local_domain(rcpt_domain)", "then": "'local'"}},
                 "else": "'mailjet'",
             }}]},
             "x:MtaRoute/get": {"list": [
-                {"name": "smarthost", "address": "smtp.resend.com", "port": 587},
+                {"name": "mx", "address": None, "port": None},
+                {"name": "local", "address": None, "port": None},
                 {"name": "mailjet", "address": "in-v3.mailjet.com", "port": 587},
             ]},
         })
@@ -124,15 +124,18 @@ class RuleCase(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.failures, [])
         self.assertIn("in-v3.mailjet.com:587", " ".join(f.message for f in result.findings))
+        self.assertNotIn("retry", " ".join(f.message for f in result.findings))
 
     def test_a_retry_route_that_does_not_answer_is_a_failure(self):
+        # A second route kept for retries is fine, but only if it answers; a dead one
+        # turns every first-attempt failure into a permanent one.
         answers = dict(WIRED, **{
             "x:MtaOutboundStrategy/get": {"list": [{"route": {
-                "match": {"1": {"if": "retry_num > 0", "then": "'resend'"}},
+                "match": {"1": {"if": "retry_num > 0", "then": "'backup'"}},
                 "else": "'mailjet'",
             }}]},
             "x:MtaRoute/get": {"list": [
-                {"name": "resend", "address": "smtp.resend.com", "port": 587},
+                {"name": "backup", "address": "relay.example.net", "port": 587},
                 {"name": "mailjet", "address": "in-v3.mailjet.com", "port": 587},
             ]},
         })
