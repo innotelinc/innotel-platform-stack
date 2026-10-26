@@ -64,8 +64,13 @@ services:
     # At 1g it trips `reason=cgroup_ratio` and EVERY model call answers
     # `503 Service temporarily unavailable due to resource pressure` in ~30 ms,
     # which nothing downstream can tell apart from a broken provider.
-    mem_limit: 3g
-    memswap_limit: 3g
+    # 3g is the product requirement (its pressure guard refuses work at 85% of the cap);
+    # lowered to 2g on 2026-10-24 because the cap was 75% of the 4 GiB container it lives
+    # in, so the container OOM-killed it instead. The guard now trips at 1.7 GiB, still far
+    # above the ~1 GiB it reaches under combo load (docs/container-placement.md).
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 0.75
     environment:
       # The image ships a 1 GiB V8 heap; raise it with the cgroup, since the
       # pressure guard also watches heap ratio (85% of the heap limit).
@@ -136,6 +141,10 @@ services:
       - --scope=openid email profile
       - --code-challenge-method=S256
       - --upstream=${GATEWAY_SSO_UPSTREAM:-http://127.0.0.1:20128}
+      # The proxy answers its own HTML 502 after 30s (oauth2-proxy default),
+      # which is shorter than a long lesson-generation call: the classroom saw
+      # "Bad Gateway" mid-run on any completion slower than half a minute.
+      - --upstream-timeout=300s
       # THE LAN ADDRESS, NOT 0.0.0.0. `omniroute` already holds 127.0.0.1:20128
       # (host-mode callers) and 172.17.0.1:20128 (containers on this host), so a
       # wildcard bind overlaps both and fails EADDRINUSE — the proxy would not

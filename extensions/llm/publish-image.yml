@@ -1,0 +1,182 @@
+# Publish the estate's OmniRoute gateway image to GHCR.
+#
+# DESTINATION IN THE REPO: .github/workflows/publish-image.yml on
+# innotelinc/omniroute (the mirror). This file is kept beside OMNIROUTE-IMAGE.md
+# so the deploy doc and the workflow that feeds it move together.
+#
+# WHY THIS REPLACES THE OLD PATH
+# ------------------------------
+# The estate used to build `innotel/omniroute:<version>` by hand on a local box
+# (`.31`, "the big machine") and push it to Docker Hub from `.46`. Both hosts are
+# gone (checked 2026-10-18: `.31` still answers ARP but has no open ports, `.46`
+# does not answer at all), so the 3.8.52 release would have had no build host.
+# This workflow reproduces upstream's own publish job — same target, same build
+# args — on CI, and publishes where the gateway host can already pull from: the
+# gateway host holds a `ghcr.io` login in /root/.docker/config.json.
+#
+# WHY GHCR AND NOT DOCKER HUB
+# ---------------------------
+# `innotelinc/omniroute` has ZERO Actions secrets (verified 2026-10-18:
+# `gh api repos/innotelinc/omniroute/actions/secrets` -> total_count 0), so a
+# Docker Hub push has no credential to authenticate with. GHCR needs none: the
+# job's own `GITHUB_TOKEN` with `packages: write` is enough. This is also the
+# house pattern — innotelinc/cerulean's release.yml publishes to ghcr.io the same
+# way.
+#
+# WHY THE RUNNER IS A VARIABLE
+# ----------------------------
+# Upstream documents that this tree does NOT build on a standard hosted runner:
+# "Hosted ubuntu-24.04 is ~7 GB and dies ResourceExhausted (#11976)". Their own
+# amd64 leg therefore runs on a 31 GB / 32-core self-hosted box. If the estate
+# has a >= 24 GB machine to register as a runner, set the repository variable
+# ESTATE_RUNNER to its JSON label array, e.g.
+#
+#     gh variable set ESTATE_RUNNER -R innotelinc/omniroute \
+#       --body '["self-hosted","estate-build"]'
+#
+# (or a larger GitHub-hosted runner such as `"ubuntu-24.04-4-cores"`). Unset, the
+# job runs on `ubuntu-24.04` and may OOM — see "Success signature" in
+# OMNIROUTE-IMAGE.md to tell a memory death from a real build failure.
+#
+# amd64 ONLY: the estate gateway host is amd64 and pulls this image locally.
+# Upstream's arm64 leg exists for their public multi-arch tag, not for us.
+
+name: Publish to GHCR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Upstream version to build, without the v (e.g. 3.8.52)"
+        required: true
+        type: string
+      promote_latest:
+        description: "Also move :latest to this version"
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*"
+  release:
+    types: [released]
+
+# One publish per ref — a merge storm must not fan out concurrent heavy builds
+# (upstream #11976: eight at once, each OOM-killing `npm run build` in BuildKit).
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege at the top level; the build job grants itself packages: write.
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build runner-base and push to GHCR
+    runs-on: ${{ vars.ESTATE_RUNNER != '' && fromJSON(vars.ESTATE_RUNNER) || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/innotelinc/omniroute
+    steps:
+      - name: Check out the tagged tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # A dispatch builds the requested tag; a tag push/release builds itself.
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', inputs.version) || '' }}
+          fetch-depth: 0
+
+      - name: Resolve the image version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="${INPUT_VERSION#v}"
+          else
+            VERSION="${REF_NAME#v}"
+          fi
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Resolved version '$VERSION' is not a plain semver — refusing to publish."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing $IMAGE:$VERSION (promote_latest=${{ inputs.promote_latest || 'false' }})"
+
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # An immutable version tag that already exists is left alone, so a re-run
+      # after a flake cannot silently rewrite an image the estate has deployed.
+      - name: Skip if this version is already published
+        id: exists
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if docker manifest inspect "$IMAGE:$VERSION" >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "$IMAGE:$VERSION already exists — nothing to build."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The two build args are the ones upstream's docker-publish.yml passes to
+      # the same `runner-base` target, and the ones OMNIROUTE-IMAGE.md records as
+      # learned the hard way: 6144 OOMs the Next.js webpack worker, and
+      # Turbopack's Rust workers size to all cores and OOM-killed a 15 GB VM.
+      - name: Build and push runner-base
+        if: steps.exists.outputs.published != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: runner-base
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          build-args: |
+            OMNIROUTE_USE_TURBOPACK=0
+            OMNIROUTE_BUILD_MEMORY_MB=12288
+            DOCKER_BUILDKIT_INLINE_CACHE=1
+          cache-from: type=gha,scope=estate-omniroute-amd64
+          cache-to: type=gha,scope=estate-omniroute-amd64,mode=max,ignore-error=true
+
+      - name: Move :latest
+        # Only on an explicit request: :latest is what a rollback reaches for,
+        # so it must never move as a side effect of an unrelated tag.
+        if: steps.exists.outputs.published != 'true' && inputs.promote_latest == true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE:$VERSION"
+
+      - name: Report the verified digest
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        # Reporting only. Deliberately NOT `set -e`: the image is already pushed
+        # by this point, so a transient failure reading the manifest back (auth
+        # or network) must not mark a successful publish as a failed run. The
+        # steps that decide whether we publish keep `set -euo pipefail`.
+        run: |
+          set -uo pipefail
+          DIGEST=$(docker buildx imagetools inspect "$IMAGE:$VERSION" \
+            --format '{{json .Manifest}}' 2>/dev/null \
+            | sed -n 's/.*"digest":"\(sha256:[a-f0-9]*\)".*/\1/p' | head -1) || true
+          {
+            echo "### $IMAGE:$VERSION"
+            echo
+            echo "- digest: \`${DIGEST:-unavailable — inspect manually}\`"
+            echo "- deploy with: \`OMNIROUTE_IMAGE=$IMAGE:$VERSION\` in .env.host, then recreate the omniroute service"
+          } >> "$GITHUB_STEP_SUMMARY"
