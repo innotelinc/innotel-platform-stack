@@ -133,8 +133,8 @@ ADDRESS_ROWS = {
     I2: [("atheniq", "192.168.1.59"), ("blueprint", "192.168.1.76"),
          ("capstone", "192.168.1.30"), ("clearpath", "192.168.1.83")],
     I3: [("distro", "192.168.1.61"), ("magnate", "192.168.1.57"), ("mail", "192.168.1.15"),
-         ("onyx", "192.168.1.60"), ("pi", "192.168.1.70"), ("signara", "192.168.1.44"),
-         ("subscribe", "192.168.1.58")],
+         ("monitor", "192.168.1.88"), ("onyx", "192.168.1.60"), ("pi", "192.168.1.70"),
+         ("signara", "192.168.1.44"), ("subscribe", "192.168.1.58")],
     # The edge and its three satellites live on i4; the media/business containers stay on
     # i1. The addresses travel with the pinned rootfs, so only the host key changes when a
     # container moves — which is why the rows here are read off the hosts, not remembered.

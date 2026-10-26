@@ -104,6 +104,11 @@ CHECK = "container_address"
 #: its alerts are *delivered* rather than only configured (the probe reads a mail log on
 #: a host the server has left, and the check exits 2 instead of reporting).
 #: `acme` (`.49`) was retired off i1 on 2026-10-02 and is no longer an address to watch.
+#: `monitor` (`.88`, SigNoz) joined on 2026-10-26: it was created on `i3` on 2026-10-25 and
+#: was the estate's last running container no row named, so every run of this check warned
+#: about a container that was behaving. It is static in its own netplan
+#: (`/etc/netplan/50-static.yaml`, `dhcp4: false`) — the address is pinned, so it is a row,
+#: not a DHCP conversion waiting to happen.
 EXPECTED: dict[str, dict[str, str]] = {
     "i1": {
         "atlas": "192.168.1.90",
@@ -127,6 +132,7 @@ EXPECTED: dict[str, dict[str, str]] = {
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
         "mail": "192.168.1.15",
+        "monitor": "192.168.1.88",
         "onyx": "192.168.1.60",
         "pi": "192.168.1.70",
         "signara": "192.168.1.44",
@@ -179,6 +185,7 @@ ROLES: dict[str, str] = {
     "192.168.1.79": "regcache",
     "192.168.1.83": "Clearpath (`app.denovocredit.com`)",
     "192.168.1.89": "the NAS desktop (`nas.innotel.us`)",
+    "192.168.1.88": "SigNoz (`monitor`) — traces, metrics and logs for the estate",
 }
 
 
