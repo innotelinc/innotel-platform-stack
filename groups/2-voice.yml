@@ -1891,7 +1891,7 @@ services:
       # hardcoded the http scheme, overriding the correct value documented in
       # .env.example. An explicit NEXT_PUBLIC_AVANTFAX_URL wins; the default is
       # the edge hostname NPM already terminates TLS for.
-      NEXT_PUBLIC_AVANTFAX_URL: ${NEXT_PUBLIC_AVANTFAX_URL:-https://fax.zeus.innotel.us/fax}
+      NEXT_PUBLIC_AVANTFAX_URL: ${NEXT_PUBLIC_AVANTFAX_URL:-https://fax.pbx.services/fax}
 
       # ── Atlas integration ──
       ATLAS_API_URL: ${ATLAS_API_URL:-http://atlas-server:3000}
