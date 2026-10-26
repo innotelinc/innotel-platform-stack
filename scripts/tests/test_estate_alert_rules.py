@@ -39,6 +39,7 @@ CHECK_SCRIPTS = [
     "check-mail-relay",
     "check-group-compose-freshness",
     "check-authentik-privilege",
+    "check-sso-callbacks",
 ]
 
 

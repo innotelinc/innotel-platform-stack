@@ -1,5 +1,5 @@
 [Unit]
-Description=Estate host checks — addresses, CPU caps, the host and pool inventory, latency, disk headroom, that the alert receiver delivers, that the mail server's outbound chain is wired, and that the mail domains' SPF/DKIM/DMARC resolve, and that every generated group compose still matches the member repos it is built from, and that only `authentik Admins` grants Authentik superuser rights
+Description=Estate host checks — addresses, CPU caps, the host and pool inventory, latency, disk headroom, that the alert receiver delivers, that the mail server's outbound chain is wired, and that the mail domains' SPF/DKIM/DMARC resolve, and that every generated group compose still matches the member repos it is built from, and that only `authentik Admins` grants Authentik superuser rights, and that every sign-in gate's callback fits its proxy's header buffer
 Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/container-placement.md
 
 # Each check reads the estate hosts over ssh, so the LAN has to be up first. None of
@@ -49,3 +49,9 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-relay.py --bas
 # year's `main` against that year's repos. ~15 s a run (17 shallow clones, all small).
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-group-compose-freshness.py --prom ${TEXTFILE_DIR}/estate-check-group-compose-freshness.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-authentik-privilege.py --prom ${TEXTFILE_DIR}/estate-check-authentik-privilege.prom
+
+# A gate's callback, not its front page: oauth2-proxy's session cookie is larger
+# than nginx's stock 4k header buffer, so a gated host answers 502 on the
+# callback after the person has already signed in (2026-10-25). This probes
+# every gated name's callback and reads each proxy block's buffer.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --prom ${TEXTFILE_DIR}/estate-check-sso-callbacks.prom

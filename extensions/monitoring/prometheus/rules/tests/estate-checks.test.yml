@@ -41,6 +41,10 @@ tests:
       # had grown a branch the test did not know about. Every case below now carries it.
       - series: 'innotel_estate_check_last_run_timestamp{check="authentik_privilege"}'
         values: '0x60'
+      # Added 2026-10-26: `check-sso-callbacks` joined the unit on the edge before it was
+      # in this repo, so it was a check nothing would page about going absent.
+      - series: 'innotel_estate_check_last_run_timestamp{check="sso_callback"}'
+        values: '0x60'
     alert_rule_test:
       - eval_time: 35m
         alertname: EstateCheckAbsent
@@ -69,6 +73,8 @@ tests:
       - series: 'innotel_estate_check_last_run_timestamp{check="group_compose_freshness"}'
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="authentik_privilege"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="sso_callback"}'
         values: '0x60'
     alert_rule_test:
       - eval_time: 35m
@@ -186,6 +192,15 @@ tests:
               description: >-
                 No `innotel_estate_check_last_run_timestamp` series exists for the
                 `authentik_privilege` check — it has not run, or its textfile is not in the
+                directory node-exporter reads. Every other rule here keys on a series
+                that exists, so this is the one that catches the check itself being
+                absent. Check the timer and `TEXTFILE_DIR` on the edge.
+          - exp_labels: {severity: critical, team: platform, check: sso_callback}
+            exp_annotations:
+              summary: 'The sso_callback check has never reported'
+              description: >-
+                No `innotel_estate_check_last_run_timestamp` series exists for the
+                `sso_callback` check — it has not run, or its textfile is not in the
                 directory node-exporter reads. Every other rule here keys on a series
                 that exists, so this is the one that catches the check itself being
                 absent. Check the timer and `TEXTFILE_DIR` on the edge.
