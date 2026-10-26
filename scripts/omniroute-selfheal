@@ -1,0 +1,700 @@
+#!/usr/bin/env python3
+"""Keep the gateway's provider pool honest without a human in the loop.
+
+The gateway already knows which connections are broken — the health autopilot
+report names them — but nothing acts on that knowledge: a provider that stops
+answering sits in the free-tier pools (auto/best-free and friends) until somebody
+notices and disables it by hand. This job closes that loop, and only in the
+direction that cannot invent capacity:
+
+* It never enables a connection a person disabled. Those are not in the state
+  file and are never touched.
+* It disables a connection it has watched fail twice in a row with a terminal
+  error (missing/invalid credential, revoked account, unsupported provider).
+  Two runs apart, so a single hiccup or a 429 cannot take a provider down.
+* It re-tries its own quarantines on a growing backoff (1 h, 6 h, 1 d, 3 d,
+  1 week) and re-enables one as soon as a probe passes. A provider that was
+  merely broken for an afternoon comes back by itself; one that keeps failing
+  stays out for longer each time.
+* It clears the stale error fields and expired cooldowns/lockouts the autopilot
+  flags, so a connection that is fine does not keep looking broken. It never
+  resets a provider circuit breaker: that is the router's own recovery path.
+
+Every run also publishes what it did as a Prometheus textfile
+(`OMNIROUTE_SELFHEAL_METRICS`, default the node-exporter textfile directory on
+the proxy container). That is how a quarantine becomes an alert rather than a
+line in a log nobody opens: the metrics feed the rules in
+`extensions/monitoring/prometheus/rules/omniroute-selfheal.yml`, which fire on
+the event (`..._changes_total{action="quarantine"}` rising) and on a provider
+staying out (`..._quarantined_connections`), and on this job stopping
+(`..._last_run_timestamp` going stale) — the last one because a job that fails
+to start says nothing at all, and its silence looks like a quiet pool.
+
+Auth is the dashboard's own password (the same one `/api/auth/login` takes); the
+job talks to the gateway over loopback, inside its container network, so the
+SSO door in front of the management API is not involved.
+
+    omniroute-selfheal --dry-run --verbose     # say what would change
+    omniroute-selfheal                        # do it (cron: every 10 minutes)
+    omniroute-selfheal --self-test            # check the policy, no network
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+
+BASE_URL = os.environ.get("OMNIROUTE_BASE_URL", "http://127.0.0.1:20128").rstrip("/")
+ENV_FILE = os.environ.get(
+    "OMNIROUTE_ENV_FILE", "/usr/src/projects/complete/ips/extensions/llm/.env.host"
+)
+STATE_FILE = os.environ.get(
+    "OMNIROUTE_SELFHEAL_STATE", "/var/lib/omniroute-selfheal/state.json"
+)
+# The node-exporter textfile directory: what `TEXTFILE_DIR` mounts on the proxy
+# container. Series written anywhere else are never scraped, so a quarantine that
+# nobody is told about is the default failure and this file is the fix for it.
+METRICS_FILE = os.environ.get(
+    "OMNIROUTE_SELFHEAL_METRICS",
+    "/root/cerulean-backup/authentik/omniroute-selfheal.prom",
+)
+# An active connection is re-probed this often, and only when it already carries
+# an error signal — probing healthy ones every ten minutes is upstream traffic
+# nobody asked for.
+ACTIVE_PROBE_S = int(os.environ.get("OMNIROUTE_PROBE_ACTIVE_SECONDS", 1800))
+# Backoff for our own quarantines, indexed by how many times it has happened.
+BACKOFF_S = (3600, 6 * 3600, 24 * 3600, 3 * 24 * 3600, 7 * 24 * 3600)
+# Two consecutive terminal probes, ACTIVE_PROBE_S apart, before we disable.
+FAILURES_BEFORE_QUARANTINE = 2
+
+TERMINAL_TYPES = {
+    "auth_missing",
+    "reauth_required",
+    "invalid_key",
+    "invalid_api_key",
+    "unauthorized",
+    "forbidden",
+    "account_deactivated",
+    "banned",
+    "expired",
+    "credits_exhausted",
+    "not_found",
+    "model_not_found",
+}
+TERMINAL_CODES = {401, 402, 403, 404}
+TERMINAL_MESSAGE = re.compile(
+    r"invalid api key|invalid_api_key|unauthori[sz]ed|forbidden|missing api key|"
+    r"missing_api_key|no api key|account (is )?deactivated|has been deactivated|"
+    r"insufficient (credit|quota|balance)|quota exhausted|"
+    r"unsupported (provider|model)|no longer available",
+    re.IGNORECASE,
+)
+# "Provider test not supported" is the gateway saying it cannot judge this
+# connection, not the connection failing — disabling it would take a working
+# provider out of the pool on a guess.
+UNTESTABLE_MESSAGE = re.compile(
+    r"(test|testing) (is )?not supported|not supported for (this )?(provider|connection)|"
+    r"provider test not supported",
+    re.IGNORECASE,
+)
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def read_password() -> str:
+    """The dashboard password: environment first, then the gateway's own env file."""
+    password = os.environ.get("OMNIROUTE_DASHBOARD_PASSWORD", "").strip()
+    if password:
+        return password
+    try:
+        with open(ENV_FILE, encoding="utf-8") as handle:
+            for line in handle:
+                match = re.match(r"^OMNIROUTE_INITIAL_PASSWORD=(.+)$", line.strip())
+                if match:
+                    return match.group(1).strip().strip("\"'")
+    except OSError:
+        pass
+    raise SystemExit(
+        f"omniroute-selfheal: no dashboard password (OMNIROUTE_DASHBOARD_PASSWORD, "
+        f"or OMNIROUTE_INITIAL_PASSWORD in {ENV_FILE})"
+    )
+
+
+class Gateway:
+    """The sliver of the management API this job needs."""
+
+    def __init__(self, base: str, password: str, verbose: bool = False):
+        self.base = base
+        self.password = password
+        self.verbose = verbose
+        self.cookie = ""
+
+    def _call(self, method: str, path: str, body=None, timeout: float = 30.0):
+        data = json.dumps(body).encode() if body is not None else None
+        request = urllib.request.Request(self.base + path, data=data, method=method)
+        request.add_header("Accept", "application/json")
+        if data is not None:
+            request.add_header("Content-Type", "application/json")
+        if self.cookie:
+            request.add_header("Cookie", self.cookie)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw = response.read().decode("utf-8", "replace")
+                headers = response.headers
+                return response.status, raw, headers
+        except urllib.error.HTTPError as error:
+            return error.code, error.read().decode("utf-8", "replace"), error.headers
+
+    def login(self) -> None:
+        status, raw, headers = self._call("POST", "/api/auth/login", {"password": self.password})
+        if status != 200:
+            raise SystemExit(f"omniroute-selfheal: dashboard login failed: HTTP {status} {raw[:200]}")
+        for value in headers.get_all("Set-Cookie") or []:
+            if value.startswith("auth_token="):
+                self.cookie = value.split(";", 1)[0]
+        if not self.cookie:
+            raise SystemExit("omniroute-selfheal: dashboard login returned no auth_token cookie")
+
+    def connections(self) -> list[dict]:
+        status, raw, _ = self._call("GET", "/api/providers")
+        if status != 200:
+            raise SystemExit(f"omniroute-selfheal: GET /api/providers -> HTTP {status} {raw[:200]}")
+        return json.loads(raw).get("connections", [])
+
+    def probe(self, connection_id: str) -> dict:
+        status, raw, _ = self._call(
+            "POST", f"/api/providers/{connection_id}/test", {}, timeout=90.0
+        )
+        if status != 200:
+            # A refused probe says nothing about the provider; treat it as such.
+            return {"valid": False, "error": f"probe HTTP {status}", "diagnosis": {"type": "transient"}}
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {"valid": False, "error": "probe returned non-JSON", "diagnosis": {"type": "transient"}}
+
+    def set_active(self, connection_id: str, active: bool) -> bool:
+        status, raw, _ = self._call(
+            "PATCH", f"/api/providers/{connection_id}", {"isActive": active}
+        )
+        if status != 200:
+            log(f"could not set {connection_id[:8]} active={active}: HTTP {status} {raw[:160]}")
+            return False
+        return True
+
+    def autopilot(self) -> dict:
+        status, raw, _ = self._call("GET", "/api/providers/health-autopilot?includeActions=1")
+        if status != 200:
+            return {}
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+
+    def action(self, action: dict, dry_run: bool) -> bool:
+        if dry_run:
+            return True
+        status, raw, _ = self._call(
+            "POST",
+            "/api/providers/health-autopilot/actions",
+            {
+                "type": action["type"],
+                "target": action["target"],
+                "preconditionsHash": action["preconditionsHash"],
+                "confirm": True,
+            },
+        )
+        if status != 200:
+            log(f"action {action['type']} failed: HTTP {status} {raw[:160]}")
+            return False
+        return True
+
+
+def log(message: str) -> None:
+    print(f"{now_iso()} {message}", flush=True)
+
+
+def classify(probe: dict) -> str:
+    """ok | terminal | transient.
+
+    Terminal means trying again will not help: the credential is gone, the
+    account is closed, or the provider does not serve what is configured.
+    Everything else (timeouts, 5xx, 429) is transient and belongs to the router's
+    own breaker and backoff, not to this job.
+    """
+    if probe.get("valid") is True:
+        return "ok"
+    diagnosis = probe.get("diagnosis") or {}
+    if UNTESTABLE_MESSAGE.search(str(probe.get("error") or diagnosis.get("message") or "")):
+        return "untestable"
+    kind = str(diagnosis.get("type") or diagnosis.get("code") or "").lower()
+    reason = f"{diagnosis.get('code') or ''} {diagnosis.get('message') or ''} {probe.get('error') or ''}"
+    if probe.get("error") == "probe returned non-JSON" or probe.get("error", "").startswith("probe HTTP"):
+        return "transient"
+    if kind in TERMINAL_TYPES:
+        return "terminal"
+    status_code = probe.get("statusCode")
+    if isinstance(status_code, int) and status_code in TERMINAL_CODES:
+        return "terminal"
+    if TERMINAL_MESSAGE.search(reason):
+        return "terminal"
+    return "transient"
+
+
+def plan(connection: dict, entry: dict, probe: dict | None, now: float) -> tuple[str, dict]:
+    """Decide what to do with one connection. Pure, so --self-test can drive it.
+
+    Returns (action, entry) where action is one of
+    "none" | "quarantine" | "release" | "keep-quarantined" | "record-failure".
+    """
+    entry = dict(entry)
+    quarantined = bool(entry.get("quarantined"))
+    active = connection.get("isActive", True) is not False
+
+    if probe is None:
+        return "none", entry
+
+    verdict = classify(probe)
+    entry["last_probe_at"] = now
+
+    if verdict == "untestable":
+        # Nothing to learn from this connection: stop spending requests on it
+        # and never let it be quarantined on a probe that cannot fail fairly.
+        entry["untestable"] = True
+        entry["failures"] = 0
+        return "none", entry
+
+    if verdict == "ok":
+        entry["failures"] = 0
+        if quarantined and not active:
+            # Fully released: it is a healthy connection again, not ours to
+            # watch. If it breaks later it comes back as an error-bearing
+            # untracked connection, which is due a probe all by itself.
+            return "release", {}
+        return "none", entry
+
+    if verdict == "transient":
+        # A timeout or a 429 is not a reason to take a provider away, and it is
+        # not progress either: keep the record, reset the streak.
+        entry["failures"] = 0
+        entry["last_transient"] = probe.get("error")
+        return "none", entry
+
+    # terminal
+    entry["failures"] = int(entry.get("failures", 0)) + 1
+    entry["last_error"] = probe.get("error")
+    entry["terminal_since"] = entry.get("terminal_since") or now
+
+    if quarantined:
+        index = min(int(entry.get("backoff_index", 0)) + 1, len(BACKOFF_S) - 1)
+        entry["backoff_index"] = index
+        entry["next_probe_at"] = now + BACKOFF_S[index]
+        return "keep-quarantined", entry
+
+    if active and entry["failures"] >= FAILURES_BEFORE_QUARANTINE:
+        # First quarantine waits the shortest window; each failed retry after
+        # that escalates (see the keep-quarantined branch above).
+        index = min(int(entry.get("backoff_index", 0)), len(BACKOFF_S) - 1)
+        entry["quarantined"] = True
+        entry["quarantined_at"] = now
+        entry["backoff_index"] = index
+        entry["next_probe_at"] = now + BACKOFF_S[index]
+        return "quarantine", entry
+
+    return "record-failure", entry
+
+
+def due(connection: dict, entry: dict, now: float) -> bool:
+    """Is this connection worth a probe on this run?"""
+    active = connection.get("isActive", True) is not False
+    last = float(entry.get("last_probe_at") or 0)
+    if entry.get("untestable"):
+        return False
+    if entry.get("quarantined"):
+        return now >= float(entry.get("next_probe_at") or 0)
+    if not active:
+        # A person disabled it: not ours to re-enable, not ours to probe.
+        return False
+    if not entry and not carries_error(connection):
+        # Healthy and untracked — no signal, no reason to spend a request.
+        return False
+    return now - last >= ACTIVE_PROBE_S
+
+
+def carries_error(connection: dict) -> bool:
+    status = str(connection.get("testStatus") or "").lower()
+    return bool(
+        status in {"error", "failed", "invalid"}
+        or connection.get("lastError")
+        or connection.get("lastErrorType")
+    )
+
+
+def load_state() -> dict:
+    try:
+        with open(STATE_FILE, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_state(state: dict, dry_run: bool) -> None:
+    if dry_run:
+        return
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    temporary = STATE_FILE + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(state, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(temporary, STATE_FILE)
+
+
+def label(value: str) -> str:
+    """A Prometheus label value: quotes, backslashes and newlines escaped."""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+
+
+def tracked(state: dict) -> dict:
+    """The connection entries, without this job's own bookkeeping keys."""
+    return {key: value for key, value in state.items() if not key.startswith("_")}
+
+
+def metrics_text(state: dict, ok: bool, now: float, prior_success: float | None = None) -> str:
+    """The textfile body for one run. Pure, so --self-test can hold the contract."""
+    connections = tracked(state)
+    quarantined = sorted(
+        (str(value.get("provider") or "unknown"), str(value.get("name") or key[:8]))
+        for key, value in connections.items()
+        if value.get("quarantined")
+    )
+    totals = state.get("_totals") or {}
+    success = now if ok else prior_success
+    lines = [
+        "# HELP innotel_omniroute_selfheal_last_status 1 when the last run finished",
+        "# TYPE innotel_omniroute_selfheal_last_status gauge",
+        f"innotel_omniroute_selfheal_last_status {1 if ok else 0}",
+        "# HELP innotel_omniroute_selfheal_last_run_timestamp When the job last ran",
+        "# TYPE innotel_omniroute_selfheal_last_run_timestamp gauge",
+        f"innotel_omniroute_selfheal_last_run_timestamp {now:.0f}",
+        "# HELP innotel_omniroute_quarantined_connections Connections this job has disabled and not yet released",
+        "# TYPE innotel_omniroute_quarantined_connections gauge",
+        f"innotel_omniroute_quarantined_connections {len(quarantined)}",
+        "# HELP innotel_omniroute_selfheal_changes_total Changes this job has made, by kind",
+        "# TYPE innotel_omniroute_selfheal_changes_total counter",
+    ]
+    for action in ("quarantine", "release", "clear"):
+        lines.append(
+            f'innotel_omniroute_selfheal_changes_total{{action="{action}"}} '
+            f"{int(totals.get(action, 0))}"
+        )
+    if success is not None:
+        lines += [
+            "# HELP innotel_omniroute_selfheal_last_success_timestamp When the job last finished without error",
+            "# TYPE innotel_omniroute_selfheal_last_success_timestamp gauge",
+            f"innotel_omniroute_selfheal_last_success_timestamp {success:.0f}",
+        ]
+    if quarantined:
+        lines += [
+            "# HELP innotel_omniroute_connection_quarantined 1 for a connection this job has disabled",
+            "# TYPE innotel_omniroute_connection_quarantined gauge",
+        ]
+        lines += [
+            f'innotel_omniroute_connection_quarantined{{provider="{label(provider)}", '
+            f'connection="{label(name)}"}} 1'
+            for provider, name in quarantined
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def prior_success(path: str) -> float | None:
+    """The last success already published, so one failed run does not erase it."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                key, _, value = line.partition(" ")
+                if key == "innotel_omniroute_selfheal_last_success_timestamp":
+                    return float(value)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def write_metrics(state: dict, ok: bool, now: float, dry_run: bool) -> None:
+    """Publish the run atomically, world-readable, where the textfile collector reads.
+
+    A missing directory is not a failure of the job: the gateway still needs the
+    healing, and the host that has no textfile collector has no rules to feed.
+    """
+    if dry_run:
+        return
+    directory = os.path.dirname(METRICS_FILE) or "."
+    if not os.path.isdir(directory):
+        log(f"no metrics directory at {directory}; skipping the textfile")
+        return
+    body = metrics_text(state, ok, now, prior_success=prior_success(METRICS_FILE))
+    handle = tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=directory, delete=False, prefix=".omniroute-selfheal-"
+    )
+    try:
+        handle.write(body)
+        handle.close()
+        # 0644: node-exporter reads this as an unprivileged user, and a 0600 file
+        # there reads as "no metrics" rather than as a permission problem.
+        os.chmod(handle.name, 0o644)
+        os.replace(handle.name, METRICS_FILE)
+    except BaseException:
+        os.unlink(handle.name)
+        raise
+
+
+def housekeeping(gateway: Gateway, dry_run: bool, verbose: bool) -> tuple[int, int]:
+    """Clear what the autopilot calls stale, and nothing that is still in force."""
+    report = gateway.autopilot()
+    issues = [issue for provider in report.get("providers", []) for issue in provider.get("issues", [])]
+    applied = skipped = 0
+    for issue in issues:
+        kind = issue.get("kind")
+        evidence = issue.get("evidence") or {}
+        if kind == "stale_connection_error":
+            allowed = True
+        elif kind in {"connection_cooldown", "model_lockout"}:
+            # Only once the window it waits for has actually passed.
+            allowed = float(evidence.get("remainingMs") or 0) <= 0
+        else:
+            # provider_circuit_open and friends are the router's own recovery
+            # path; clearing them early would put traffic back on a dead provider.
+            allowed = False
+        if not allowed:
+            skipped += 1
+            continue
+        action = next(
+            (
+                candidate
+                for candidate in issue.get("actions", [])
+                if candidate.get("type")
+                in {"clear_stale_connection_error", "clear_connection_cooldown", "clear_model_lockout"}
+            ),
+            None,
+        )
+        if action is None:
+            skipped += 1
+            continue
+        if gateway.action(action, dry_run):
+            applied += 1
+            if verbose:
+                log(f"{'would clear' if dry_run else 'cleared'} {kind} for {issue['target'].get('provider')} "
+                    f"{(issue['target'].get('connectionId') or '')[:8]}")
+    return applied, skipped
+
+
+def run(dry_run: bool, verbose: bool) -> int:
+    gateway = Gateway(BASE_URL, read_password(), verbose)
+    gateway.login()
+    state = load_state()
+    totals = dict(state.get("_totals") or {})
+    now = time.time()
+    connections = gateway.connections()
+
+    changed = probed = 0
+    for connection in connections:
+        connection_id = connection.get("id") or ""
+        if not connection_id:
+            continue
+        entry = state.get(connection_id, {})
+        # A connection nobody has ever failed on is only interesting once it has
+        # an error signal; otherwise we would be probing the whole pool forever.
+        if not entry and not carries_error(connection):
+            continue
+        if entry.get("quarantined") and not entry.get("provider"):
+            # Written before this job published metrics: the quarantine is real,
+            # the name is not in the state file. Take it from the live list so
+            # the alert says which provider is down — even on runs where this
+            # connection is not yet due for its retry.
+            entry["provider"] = connection.get("provider")
+            entry["name"] = connection.get("name") or ""
+            state[connection_id] = entry
+        if not due(connection, entry, now):
+            continue
+
+        provider = connection.get("provider")
+        label = f"{provider}/{(connection.get('name') or '')[:24]}"
+        if dry_run:
+            # A probe is a write on the gateway (it records test status), so a
+            # dry run reports it rather than spending it.
+            log(f"would probe {label}{' (quarantined)' if entry.get('quarantined') else ''}")
+            continue
+
+        probe = gateway.probe(connection_id)
+        probed += 1
+        action, entry = plan(connection, entry, probe, now)
+
+        if action == "quarantine":
+            if gateway.set_active(connection_id, False):
+                changed += 1
+                # What the metrics need to name the connection after the state
+                # file is the only thing left to read it from.
+                entry["provider"] = provider
+                entry["name"] = connection.get("name") or ""
+                totals["quarantine"] = int(totals.get("quarantine", 0)) + 1
+                log(
+                    f"ALERT disabled {label}: {probe.get('error')} "
+                    f"(terminal, {entry['failures']} probe(s); retry in "
+                    f"{BACKOFF_S[int(entry['backoff_index'])] // 3600}h)"
+                )
+        elif action == "release":
+            if gateway.set_active(connection_id, True):
+                changed += 1
+                totals["release"] = int(totals.get("release", 0)) + 1
+                log(f"ALERT re-enabled {label}: probe passes again")
+        elif action == "keep-quarantined":
+            if verbose:
+                log(f"still down {label}: {probe.get('error')} "
+                    f"(next retry in {BACKOFF_S[int(entry['backoff_index'])] // 3600}h)")
+        elif action == "record-failure":
+            log(f"watching {label}: {probe.get('error')} "
+                f"({entry['failures']}/{FAILURES_BEFORE_QUARANTINE})")
+
+        if action != "none":
+            state[connection_id] = entry
+        elif entry:
+            state[connection_id] = entry
+
+    cleared, skipped = housekeeping(gateway, dry_run, verbose)
+    totals["clear"] = int(totals.get("clear", 0)) + cleared
+    state["_totals"] = totals
+    save_state(state, dry_run)
+    write_metrics(state, True, time.time(), dry_run)
+
+    verb = "would have" if dry_run else "did"
+    log(
+        f"probed {probed}, {verb} change {changed} connection(s), "
+        f"cleared {cleared} stale state(s), left {skipped} alone "
+        f"({len(connections)} connections, {len(tracked(state))} tracked, "
+        f"{len([entry for entry in tracked(state).values() if entry.get('quarantined')])} quarantined)"
+    )
+    return 0
+
+
+def self_test() -> int:
+    """Drive the policy with synthetic probes — no gateway, no state on disk."""
+    now = 1_000_000.0
+    active = {"id": "a", "provider": "p", "isActive": True, "testStatus": "error"}
+    ok = {"valid": True, "error": None, "diagnosis": {"type": "ok"}}
+    auth = {"valid": False, "error": "Missing API key", "diagnosis": {"type": "auth_missing"}}
+    rate = {"valid": False, "error": "429", "statusCode": 429, "diagnosis": {"type": "rate_limited"}}
+    failures: list[str] = []
+
+    def expect(label, condition):
+        if not condition:
+            failures.append(label)
+        print(f"{'ok  ' if condition else 'FAIL'}  {label}")
+
+    # A single terminal probe only watches; the second one acts.
+    action, entry = plan(active, {}, auth, now)
+    expect("one terminal probe does not disable", action == "record-failure")
+    action, entry = plan(active, entry, auth, now + ACTIVE_PROBE_S)
+    expect("two terminal probes disable", action == "quarantine" and entry["quarantined"])
+    first_wait = entry["next_probe_at"] - now
+    expect(
+        "the first quarantine waits the shortest window",
+        abs(first_wait - (ACTIVE_PROBE_S + BACKOFF_S[0])) < 1,
+    )
+
+    # A transient failure breaks the streak instead of counting toward it.
+    _, streak = plan(active, {"failures": 1}, rate, now)
+    expect("a 429 resets the terminal streak", streak["failures"] == 0)
+
+    # Once quarantined, it waits out its backoff and the backoff grows.
+    action, entry = plan({**active, "isActive": False}, entry, auth, now + first_wait + 1)
+    expect("a quarantined connection stays down on a failed retry", action == "keep-quarantined")
+    expect("the retry window grows", entry["next_probe_at"] - now > first_wait)
+
+    # ...and comes back by itself as soon as a probe passes.
+    live = {**active, "isActive": False}
+    action, entry = plan(live, {"quarantined": True, "next_probe_at": now, "failures": 2}, ok, now)
+    expect("a passing retry releases the connection", action == "release" and not entry.get("quarantined"))
+
+    # A provider the gateway cannot test is never judged on that test.
+    unsupported = {"valid": False, "error": "Provider test not supported"}
+    expect("an untestable provider is recognised", classify(unsupported) == "untestable")
+    action, entry = plan(active, {}, unsupported, now)
+    expect("an untestable provider is not counted as a failure", action == "none" and entry.get("failures") == 0)
+    expect("an untestable provider is not probed again", not due(active, entry, now + 10**6))
+
+    # A person's disabled connection is never probed, so never re-enabled.
+    disabled = {"id": "b", "provider": "p", "isActive": False, "testStatus": "active"}
+    expect("a human-disabled connection is not due", not due(disabled, {}, now))
+    expect("an unprobed connection is never released", plan(disabled, {}, None, now)[0] == "none")
+
+    # Probing is rate limited for active connections.
+    entry = {"last_probe_at": now - 60, "failures": 0}
+    expect("an active connection is not re-probed immediately", not due(active, entry, now))
+    expect("it is re-probed after the interval", due(active, {"last_probe_at": now - ACTIVE_PROBE_S - 1}, now))
+    expect("an error-bearing connection is probed even when untracked", due(active, {}, now))
+    healthy = {"id": "c", "provider": "p", "isActive": True, "testStatus": "active"}
+    expect("a healthy untracked connection is left alone", not due(healthy, {}, now))
+
+    # The textfile is the alert's only input, so its contract is a test case too:
+    # a metric renamed here silently disarms the rules that read it.
+    text = metrics_text({}, True, now)
+    expect("a healthy run publishes status 1", "innotel_omniroute_selfheal_last_status 1\n" in text)
+    expect("no quarantine publishes a zero", "innotel_omniroute_quarantined_connections 0\n" in text)
+    text = metrics_text(
+        {
+            "abc": {"quarantined": True, "provider": "openrouter", "name": 'free "tier"'},
+            "def": {"quarantined": False, "provider": "openrouter"},
+            "_totals": {"quarantine": 3, "release": 1},
+        },
+        True,
+        now,
+    )
+    expect("a quarantine is counted", "innotel_omniroute_quarantined_connections 1\n" in text)
+    expect(
+        "a quarantined connection is named, with its label values escaped",
+        'innotel_omniroute_connection_quarantined{provider="openrouter", '
+        'connection="free \\"tier\\""} 1' in text,
+    )
+    expect(
+        "the change counter carries its total",
+        'innotel_omniroute_selfheal_changes_total{action="quarantine"} 3' in text,
+    )
+    expect(
+        "a failed run does not erase the last success",
+        f"innotel_omniroute_selfheal_last_success_timestamp {int(now) - 60}"
+        in metrics_text({}, False, now, prior_success=now - 60),
+    )
+
+    if failures:
+        print(f"self-test: {len(failures)} failing case(s): {', '.join(failures)}")
+        return 1
+    print("self-test: all cases pass")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dry-run", action="store_true", help="report what would change, change nothing")
+    parser.add_argument("--verbose", action="store_true", help="log every decision, not just changes")
+    parser.add_argument("--self-test", action="store_true", help="exercise the policy without a gateway")
+    args = parser.parse_args(argv)
+    if args.self_test:
+        return self_test()
+    try:
+        return run(args.dry_run, args.verbose)
+    except urllib.error.URLError as error:
+        log(f"gateway unreachable at {BASE_URL}: {error}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

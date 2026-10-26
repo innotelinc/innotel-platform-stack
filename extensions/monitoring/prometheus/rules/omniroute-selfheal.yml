@@ -1,0 +1,69 @@
+# ==========================================================================
+# OmniRoute provider self-heal alert rules
+# ==========================================================================
+# `omniroute-selfheal` (installed at /usr/local/sbin/omniroute-selfheal on the
+# proxy container, cron every 10 minutes) disables a gateway provider connection
+# it has watched fail twice in a row with a terminal error, and re-enables its
+# own quarantines when a probe passes again. It publishes what it did as a
+# Prometheus textfile in `TEXTFILE_DIR`, surfaced by node-exporter's textfile
+# collector:
+#
+#   innotel_omniroute_selfheal_last_status            1 last run finished, 0 it failed
+#   innotel_omniroute_selfheal_last_run_timestamp     unix seconds, every run
+#   innotel_omniroute_selfheal_last_success_timestamp unix seconds, clean runs only
+#   innotel_omniroute_quarantined_connections         how many are disabled right now
+#   innotel_omniroute_selfheal_changes_total{action}  counters: quarantine|release|clear
+#   innotel_omniroute_connection_quarantined{provider,connection}  1 per disabled connection
+#
+# Every rule is keyed on the series being PRESENT, like `backup.yml`: this file is
+# loaded by the shared per-host stack, and a host that does not run the gateway is
+# not paged about a job it does not own.
+#
+# There is deliberately no "a connection is still quarantined" rule. Being down for
+# hours is the job working as designed — the retry windows are 1h, 6h, 1d, 3d and a
+# week, and a rule on the gauge would fire for the whole of a normal backoff. The
+# event is what someone has to look at; the gauge is there for a dashboard.
+# ==========================================================================
+groups:
+  - name: innotel-omniroute
+    rules:
+      # The ask, in one rule: the job took a provider out of the pool. This is a
+      # warning rather than a page because the job is careful — two terminal probes
+      # apart, never a human's disabled connection — but it is the one event here
+      # that a person may have to act on, and until now it was a line in a log.
+      - alert: OmnirouteConnectionQuarantined
+        expr: increase(innotel_omniroute_selfheal_changes_total{action="quarantine"}[20m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'A gateway provider connection was quarantined'
+          description: >-
+            The self-heal job disabled a provider connection after repeated terminal
+            probe failures — a missing or revoked credential, a closed account, or a
+            provider that no longer serves what is configured. It retries on a growing
+            backoff (1h, 6h, 1d, 3d, then a week) and re-enables the connection by
+            itself as soon as a probe passes, so a provider that was briefly broken
+            comes back without anyone acting. One that really is gone will not: renew
+            the credential, or leave it out of the pool on purpose. For the current
+            view run `omniroute-selfheal --dry-run --verbose` on the proxy container.
+
+      # The failure the job cannot report about itself, and the one that looks like
+      # success: a job that never starts publishes nothing, and a pool with no
+      # failures in it is exactly what a quiet morning looks like. The cron interval
+      # is 10 minutes, so 45 minutes of silence is four missed runs.
+      - alert: OmnirouteSelfhealStale
+        expr: (time() - innotel_omniroute_selfheal_last_run_timestamp) > 45 * 60
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'The OmniRoute self-heal job has stopped reporting'
+          description: >-
+            No self-heal run in 45 minutes, against a cron interval of 10. The job
+            either stopped running or stopped reaching the gateway, and while it is
+            silent a provider that breaks stays in the free-tier pools — the state
+            this job exists to end. Check `/etc/cron.d/omniroute-selfheal` and
+            `journalctl -t omniroute-selfheal` on the proxy container.

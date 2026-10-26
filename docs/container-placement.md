@@ -937,6 +937,18 @@ placement (finding 7).
   §*Changes applied 2026-10-15* is what makes the resulting mail actually arrive. The
   fix is to give the estate-check half its own mount (or move those rules into the
   edge's config) rather than deciding by hand which host may run `up -d`.
+- **A quarantine needed a rule, not a log line.** `omniroute-selfheal` on the proxy
+  disables a gateway provider connection after two terminal probes, and until now that
+  only reached `journalctl`. It now publishes each run as a textfile
+  (`TEXTFILE_DIR/omniroute-selfheal.prom`), and `rules/omniroute-selfheal.yml` alerts on
+  the *event* — `changes_total{action="quarantine"}` rising — rather than on a
+  connection still being down: the retry windows are 1 h to a week, so a rule on the
+  gauge would fire for the whole of a normal backoff. A second rule covers the job
+  itself going silent, which looks exactly like a quiet pool. Both key on the series
+  being present, the way `backup.yml` does, so a host that does not run the gateway
+  stays quiet. Verified 2026-10-26: the rule group loads (`health=ok`), `promtool test
+  rules rules/tests/omniroute-selfheal.test.yml` passes on the mounted copy, and the
+  labelled series (`provider`, `connection`) reaches Prometheus through node-exporter.
 - **`check-mail-auth.py` cannot run on the edge.** It needs `dig`, which is not
   installed there, so it exits 2 (a host it needs could not be read) and the estate has
   no `dig`-based proof of its SPF/DKIM/DMARC records — the finding that

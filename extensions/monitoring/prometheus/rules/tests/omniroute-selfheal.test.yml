@@ -1,0 +1,109 @@
+# ==========================================================================
+# promtool unit tests for omniroute-selfheal.yml
+# ==========================================================================
+# The event rule keys on a counter rising, and the stale rule on a timestamp
+# standing still — neither is something the job can produce on demand without
+# taking a provider out of the gateway, so the rule set is tested here against
+# synthetic series instead.
+#
+# Run:  promtool test rules extensions/monitoring/prometheus/rules/tests/omniroute-selfheal.test.yml
+# ==========================================================================
+rule_files:
+  - ../omniroute-selfheal.yml
+
+evaluation_interval: 1m
+
+tests:
+  # A host that does not run the gateway publishes nothing. Both rules key on a
+  # series, so the honest result is silence rather than a page.
+  - name: no metrics at all means no alert
+    interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: OmnirouteConnectionQuarantined
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: OmnirouteSelfhealStale
+        exp_alerts: []
+
+  # The counter carries its lifetime total, so it is usually not zero. A total
+  # that is simply standing there is not an event — only a rise is.
+  - name: a counter that does not move is not an event
+    interval: 1m
+    input_series:
+      - series: 'innotel_omniroute_selfheal_changes_total{action="quarantine"}'
+        values: '3x30'
+      - series: 'innotel_omniroute_selfheal_last_run_timestamp'
+        values: '0+60x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: OmnirouteConnectionQuarantined
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: OmnirouteSelfhealStale
+        exp_alerts: []
+
+  # The quarantine itself: the counter rises once, and the alert names the action.
+  - name: a quarantine that happens fires the event alert
+    interval: 1m
+    input_series:
+      - series: 'innotel_omniroute_selfheal_changes_total{action="quarantine"}'
+        values: '0x5 1x10'
+      - series: 'innotel_omniroute_selfheal_last_run_timestamp'
+        values: '0+60x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: OmnirouteConnectionQuarantined
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              action: quarantine
+            exp_annotations:
+              summary: 'A gateway provider connection was quarantined'
+              description: >-
+                The self-heal job disabled a provider connection after repeated terminal
+                probe failures — a missing or revoked credential, a closed account, or a
+                provider that no longer serves what is configured. It retries on a growing
+                backoff (1h, 6h, 1d, 3d, then a week) and re-enables the connection by
+                itself as soon as a probe passes, so a provider that was briefly broken
+                comes back without anyone acting. One that really is gone will not: renew
+                the credential, or leave it out of the pool on purpose. For the current
+                view run `omniroute-selfheal --dry-run --verbose` on the proxy container.
+      # A release is not a quarantine: the release counter rising must not fire it.
+  - name: a release is not a quarantine
+    interval: 1m
+    input_series:
+      - series: 'innotel_omniroute_selfheal_changes_total{action="release"}'
+        values: '0x5 1x10'
+      - series: 'innotel_omniroute_selfheal_last_run_timestamp'
+        values: '0+60x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: OmnirouteConnectionQuarantined
+        exp_alerts: []
+
+  # The job stopped publishing an hour ago: nothing will be quarantined, released
+  # or cleared until someone notices, which is what this rule is for.
+  # 45m to go stale plus the rule's 15m `for`, so the first firing evaluation is 61m.
+  - name: a silent job goes stale
+    interval: 1m
+    input_series:
+      - series: 'innotel_omniroute_selfheal_last_run_timestamp'
+        values: '0x80'
+    alert_rule_test:
+      - eval_time: 62m
+        alertname: OmnirouteSelfhealStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: 'The OmniRoute self-heal job has stopped reporting'
+              description: >-
+                No self-heal run in 45 minutes, against a cron interval of 10. The job
+                either stopped running or stopped reaching the gateway, and while it is
+                silent a provider that breaks stays in the free-tier pools — the state
+                this job exists to end. Check `/etc/cron.d/omniroute-selfheal` and
+                `journalctl -t omniroute-selfheal` on the proxy container.
