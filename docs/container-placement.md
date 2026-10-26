@@ -15,6 +15,48 @@ evening pass moved the edge services back onto i1, right-sized i1's CPU caps, an
 put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
 
+## Changes applied 2026-10-26
+
+- **The edge's `ips` tree is a checkout now, not a hand copy.**
+  `/usr/src/projects/complete/ips` in the `proxy` container — the directory the
+  prometheus and grafana containers mount — held 24 tracked files that had been edited
+  in place with `.bak` files beside each change. That is how
+  `check-sso-callbacks.py` came to run on this host for a day without existing in the
+  repo, and how the gateway compose came to be tuned here (2 GiB, `cpus: 0.75`,
+  `--upstream-timeout=300s`) while `main` still declared 3 GiB with no CPU share. Both
+  are in `main` now, and the tree is a sparse checkout of it (`extensions/monitoring/`,
+  `extensions/llm/`, `scripts/tests/test_estate_alert_rules.py` — the paths this host
+  actually mounts), with `.env.host` and the `.bak`/`.pre-*` files excluded locally
+  because they are this host's, not the repo's. A deploy is `git pull`; `git status`
+  answers whether the host is what `main` says. The pre-change tree is tarred at
+  `/root/ips-pre-git-20261026.tar.gz`.
+- **The Authentik dump mirrors off-host again — the cron file was the bug.** The
+  mirror env block in `/etc/cron.d/authentik-db-backup` sat *below* the schedule line,
+  and cron applies an env setting only to the entries that follow it, so the job ran
+  with `BACKUP_S3_*` unset while the credentials sat in the same file:
+  `cerulean_authentik_backup_mirror_offhost` stayed 0 and
+  `AuthentikBackupMirrorIsLocalOnly` paged for months' worth of runs that never left
+  the box. The block is above the schedule now, and a manual run mirrored a 24 MB dump
+  to the estate's object store (`192.168.1.60:2091`, `signara-backups/authentik/`,
+  off-host because `BACKUP_LOCAL_ADDRESSES` is only `.71`) — `remote_enabled` and
+  `mirror_offhost` both read 1.
+- **`i4`'s caps added up to more than the host had.** `proxy` 4096 + `terminal` 1408
+  + `vault` 1408 + `vpn` 640 = **7552 MiB** on a 7341 MiB box, so every container could
+  have been inside its own cap while the host OOM-killed something. `terminal` and
+  `vault` are cut to 896 MiB and `vpn` to 512 (each still ~1.5× measured use: 457, 609
+  and 242 MiB), leaving **6400 MiB of caps against 7341 MiB of RAM** and 941 MiB for the
+  host's own processes. `proxy` keeps 4 GiB deliberately: it is at 3916 MiB of that cap
+  and the tenants inside it (`cerulean-npm` 897, `omniroute` 527, authentik 690,
+  grafana/prometheus/technitium/postgres) are the edge's product; the way to give it
+  room is to move a tenant, not to shrink the cap under a running service.
+- **The 81 % of swap is host-side agent sessions, and no container can be the cause.**
+  Every container on `i4` has `memory.swap.max=0`, so the swapped pages belong to host
+  processes: two `freebuff` agent sessions (**768 MiB** of swap between them) and
+  `incusd` (153 MiB), with two `rea mcp` node servers behind them. `agent-reaper` counts
+  both sessions and reaps neither — they are computing, not wedged — so this is a
+  placement question, not a runaway: agent sessions belong on the dev host, not on the
+  box that fronts every gated name. `vm.swappiness` is already 10.
+
 ## Changes applied 2026-10-24
 
 - **`i4` was at load 104 on two vCPU, and the cause was not a container.** One agent
