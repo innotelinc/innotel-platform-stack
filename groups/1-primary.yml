@@ -342,12 +342,12 @@ services:
     # the Authentik forward-auth sign-in (`backend/lib/sso.js`), which the
     # upstream image does not have. NPM is no longer a second user directory:
     # the admin UI signs in with the identity the edge already authenticated.
-    image: innotel/npm-edge:2.16.0
+    image: innotel/npm-edge:2.16.1
     build:
       context: ../../1-primary/npm
       dockerfile: docker/Dockerfile.sso
       args:
-        BUILD_VERSION: '2.16.0'
+        BUILD_VERSION: '2.16.1'
     container_name: cerulean-npm
     profiles: ["npm"]
     restart: unless-stopped
@@ -361,10 +361,12 @@ services:
       # ── Authentik forward-auth sign-in (see docs/stack.md) ──
       # Off by default: an upgrade must not change how anyone signs in. With it
       # on, the admin UI signs in with the identity the edge authenticated, and
-      # the password form is closed on the gated doors. Every proxy host that
-      # fronts this UI must forward to the UI's LOOPBACK address — `127.0.0.1`,
-      # port ${NPM_ADMIN_PORT:-81} — so this image's admin vhost sees a loopback
-      # peer and vouches for the request (see backend/lib/sso.js).
+      # the password form is closed on the gated doors. The vhost vouches for a
+      # request only when it arrives from a peer listed here or from loopback
+      # (see backend/lib/sso.js and docker/rootfs/.../production.conf.template),
+      # and this is the SSO gateway's own address on `npm-gate` — one address,
+      # never a subnet.
+      AUTH_SSO_EDGE_PEERS: "${NPM_SSO_EDGE_PEERS:-${NPM_GATE_IP:-172.31.42.10}}"
       AUTH_SSO_ENABLED: "${NPM_SSO_ENABLED:-0}"
       AUTH_SSO_REQUIRED_GROUP: "${NPM_SSO_REQUIRED_GROUP:-cerulean-platform}"
       AUTH_SSO_ADMIN_GROUP: "${NPM_SSO_ADMIN_GROUP:-cerulean-platform}"
@@ -388,6 +390,17 @@ services:
     volumes:
       - ../../1-primary/npm/data:/data
       - ../../1-primary/npm/letsencrypt:/etc/letsencrypt
+    # `npm-gate` carries this edge's own fixed address (`NPM_GATE_EDGE_IP`) as
+    # well as the gateway's: the gateway's upstream points at THAT address, so
+    # the source address of its request is its `npm-gate` one — the address the
+    # vhost vouches for. Dialling the service name instead would leave the choice
+    # of interface to the routing table, and the same request would arrive from
+    # the `default` network's address and be refused. `default` is where the
+    # database and the session store live.
+    networks:
+      default:
+      npm-gate:
+        ipv4_address: ${NPM_GATE_EDGE_IP:-172.31.42.20}
     depends_on:
       cerulean-npm-db:
         condition: service_healthy
@@ -395,11 +408,20 @@ services:
   # ── SSO gateway (oauth2-proxy) ────────────────────────────────────────────
   # Nginx Proxy Manager has no OIDC support, so the admin UI's sign-in is a real
   # OIDC code flow performed here by oauth2-proxy — no outpost and no
-  # auth_request in the path. It shares the edge's network namespace
-  # (network_mode: service:cerulean-npm), so it listens on the edge's loopback
-  # and the proxy host that fronts the admin UI forwards to
-  # 127.0.0.1:${NPM_SSO_GATEWAY_PORT} instead of :${NPM_ADMIN_PORT}. Binding to
-  # 127.0.0.1 keeps the gateway off the published LAN ports.
+  # auth_request in the path.
+  #
+  # IT RUNS IN ITS OWN NETWORK NAMESPACE. It used to share the edge's
+  # (`network_mode: service:cerulean-npm`) for one reason: the admin vhost only
+  # vouches for a request that arrives over loopback. The cost of that was a
+  # restart of `cerulean-npm` replacing the namespace under a running gateway —
+  # it stayed up, logged nothing, and every gated name answered 502 until someone
+  # restarted it by hand. Now the gateway is an ordinary neighbour: it listens on
+  # its own address (npm-gate, `NPM_GATE_IP`), the proxy host that fronts the
+  # admin UI forwards to that address, and the vhost is told to trust exactly it
+  # (`AUTH_SSO_EDGE_PEERS`). A restart of either container strands nothing.
+  #
+  # `--http-address` is therefore 0.0.0.0 (inside this container only — nothing
+  # publishes the port) and the upstream is the edge by service name.
   #
   # Same cookie name/secret/domain as every other gateway in the stack, so one
   # Authentik sign-in is shared by all of them.
@@ -409,10 +431,13 @@ services:
     container_name: cerulean-npm-sso
     profiles: ["npm"]
     restart: unless-stopped
-    network_mode: "service:cerulean-npm"
+    networks:
+      default:
+      npm-gate:
+        ipv4_address: ${NPM_GATE_IP:-172.31.42.10}
     # The session (not the browser) is what holds the identity: one opaque id
-    # travels in the _innotel_sso cookie instead. Reached by service name
-    # because this container shares the edge's network namespace.
+    # travels in the _innotel_sso cookie instead. `cerulean-npm` resolves on the
+    # default network the edge is also on.
     environment:
       OAUTH2_PROXY_REDIS_CONNECTION_URL: redis://:${SSO_SESSION_REDIS_PASSWORD:-}@cerulean-sso-sessions:6379/0
     depends_on:
@@ -465,8 +490,8 @@ services:
       - --oidc-groups-claim=groups
       - --allowed-group=${SSO_REQUIRED_GROUP:-cerulean-platform}
       - --scope=openid email profile groups
-      - --http-address=127.0.0.1:${NPM_SSO_GATEWAY_PORT:-4180}
-      - --upstream=http://127.0.0.1:${NPM_ADMIN_PORT:-81}
+      - --http-address=0.0.0.0:${NPM_SSO_GATEWAY_PORT:-4180}
+      - --upstream=http://${NPM_GATE_EDGE_IP:-172.31.42.20}:${NPM_ADMIN_PORT:-81}
       - --reverse-proxy=true
       - --pass-user-headers=true
       - --set-xauthrequest=true
@@ -577,17 +602,18 @@ services:
       cerulean-npm-db:
         condition: service_healthy
 
+
   app:   # from npm
     # First-party image: this fork, built from docker/Dockerfile.sso. It adds the
     # Authentik forward-auth sign-in the upstream image does not have — see
     # docs/stack.md. Leave AUTH_SSO_ENABLED unset for a plain upstream-like
     # install (the password form behaves exactly as before).
-    image: 'innotel/npm-edge:2.16.0'
+    image: 'innotel/npm-edge:2.16.1'
     build:
       context: ../../1-primary/npm
       dockerfile: docker/Dockerfile.sso
       args:
-        BUILD_VERSION: '2.16.0'
+        BUILD_VERSION: '2.16.1'
     restart: unless-stopped
     ports:
       - '${NPM_HTTP_PORT:-80}:80'   # Public HTTP Port
@@ -1551,6 +1577,10 @@ networks:
     name: g1-net
   innotel-mesh-net:
     external: true
+  npm-gate:
+    ipam:
+      config:
+        - subnet: ${NPM_GATE_SUBNET:-172.31.42.0/24}
   magnate-net:
     name: magnate-net
   app-network:
