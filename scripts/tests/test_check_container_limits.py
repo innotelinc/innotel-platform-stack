@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Unit tests for check-container-limits.py — the CPU-cap invariant.
+"""Unit tests for check-container-limits.py — the CPU-cap and file-descriptor invariants.
 
-The cases are the mistake this check exists to prevent: a `limits.cpu` that is written
-down but not in force, and a verification that read the wrong file and called a correct
-state broken. Each case builds the estate as data and asserts what the check said.
+The cases are the mistakes this check exists to prevent: a `limits.cpu` that is written
+down but not in force, a verification that read the wrong file and called a correct
+state broken, and a soft `nofile` that is in force and already spent (`cerulean-npm`
+held 572 of 1024 and could not reload its config). Each case builds the estate as data
+and asserts what the check said.
 
 The module under test has hyphens in its filename, so it is loaded by path.
 """
@@ -93,6 +95,122 @@ class CapCase(unittest.TestCase):
         result = chk.audit(observed([("proxy", 2, None, "RUNNING")]), HOST_CPUS)
         self.assertFalse(result.ok)
         self.assertEqual([f.code for f in result.failures], ["no_cpuset"])
+
+
+def measured(rows, host="i2"):
+    """`rows` is [(scope, container, process, soft, open)] on one host."""
+    return {
+        host: [
+            chk.FdPressure(host=host, scope=scope, container=name, process=proc, soft=soft, open=held)
+            for scope, name, proc, soft, held in rows
+        ]
+    }
+
+
+class FdHeadroomCase(unittest.TestCase):
+    """Rules 5-7: a file limit that is in force and nearly out."""
+
+    def test_the_estate_as_it_is_has_no_failure(self):
+        # Measured 2026-10-27: the estate's worst is Monarch's Whisparr at 431 of 1024
+        # (42 %), and the edge after the fix holds 575 of 65536 (0.9 %).
+        result = chk.audit(
+            observed([("proxy", 2, 2, "RUNNING")]),
+            HOST_CPUS,
+            measured([("monarch", "whisparr", "Whisparr", 1024, 431),
+                      ("proxy", "cerulean-npm", "nginx", 65536, 575)]),
+        )
+        self.assertTrue(result.ok, [f.message for f in result.failures])
+        self.assertEqual(result.findings, [])
+
+    def test_the_edge_as_it_was_is_a_warning_that_names_both_numbers(self):
+        # 2026-10-27, before the ulimit: nginx's master held 572 of 1024 — 56 % — and the
+        # reload it could not do needed ~1050 of them. Nothing failed until the reload.
+        result = chk.audit(
+            observed([("proxy", 2, 2, "RUNNING")]),
+            HOST_CPUS,
+            measured([("proxy", "cerulean-npm", "nginx", 1024, 572)]),
+        )
+        self.assertTrue(result.ok, [f.message for f in result.failures])
+        self.assertEqual([f.code for f in result.warnings], ["fd_near_limit"])
+        self.assertIn("572", result.warnings[0].message)
+        self.assertIn("1024", result.warnings[0].message)
+        self.assertIn("nginx", result.warnings[0].message)
+
+    def test_half_the_budget_is_the_line_and_it_is_not_past_it(self):
+        # Rule 6 is "more than half", so exactly half is quiet and one descriptor past it
+        # is not. Locked here so a later edit cannot quietly move the line.
+        self.assertEqual(chk.fd_findings(measured([("proxy", "a", "nginx", 1024, 512)])), [])
+        self.assertEqual(
+            [f.code for f in chk.fd_findings(measured([("proxy", "a", "nginx", 1024, 513)]))],
+            ["fd_near_limit"],
+        )
+
+    def test_a_process_at_its_limit_is_a_failure(self):
+        result = chk.audit(
+            observed([("proxy", 2, 2, "RUNNING")]),
+            HOST_CPUS,
+            measured([("proxy", "a", "nginx", 1024, 1024)]),
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual([f.code for f in result.failures], ["fd_exhausted"])
+        self.assertIn("of 1024 open files", result.failures[0].message)
+
+    def test_the_worst_container_on_a_host_is_reported_first(self):
+        # The journal is read top-down, and the point of the rule is the container that
+        # is closest to failing.
+        codes = chk.fd_findings(measured([("proxy", "quiet", "nginx", 1024, 520),
+                                          ("proxy", "loud", "nginx", 1024, 900)]))
+        self.assertEqual([f.code for f in codes], ["fd_near_limit", "fd_near_limit"])
+        self.assertIn("loud", codes[0].message)
+
+    def test_a_host_with_no_docker_container_is_a_note(self):
+        # Four hosts have docker somewhere, so a host reporting nothing is the probe
+        # having stopped working — not a host that happens to run nothing.
+        result = chk.audit(observed([("proxy", 2, 2, "RUNNING")]), HOST_CPUS, {"i1": []})
+        self.assertTrue(result.ok)
+        self.assertEqual([f.code for f in result.findings], ["fd_unread"])
+
+    def test_a_cap_finding_and_an_fd_finding_are_reported_together(self):
+        # One check publishes one failures count, so both families have to land in it.
+        result = chk.audit(
+            observed([("proxy", 2, 1, "RUNNING")]),
+            HOST_CPUS,
+            measured([("proxy", "a", "nginx", 1024, 1024)]),
+        )
+        self.assertEqual(sorted(f.code for f in result.findings),
+                         ["cap_not_enforced", "fd_exhausted"])
+
+
+class ProbeCase(unittest.TestCase):
+    """The probe's lines as data — the half that can silently read nothing."""
+
+    def test_a_line_becomes_the_scope_container_limit_and_count(self):
+        parsed = chk.parse_fd("i2", "proxy|cerulean-npm|65536|575|nginx")
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual((parsed[0].scope, parsed[0].container, parsed[0].process), ("proxy", "cerulean-npm", "nginx"))
+        self.assertEqual((parsed[0].soft, parsed[0].open), (65536, 575))
+        self.assertEqual(parsed[0].share, 575 / 65536)
+
+    def test_the_process_name_is_last_so_a_separator_in_it_cannot_break_the_line(self):
+        # `/proc/<pid>/comm` is 16 bytes of whatever the program called itself, and it is
+        # written last so the fields before it stay at fixed positions.
+        parsed = chk.parse_fd("i4", "host|app|1024|9|weird|name")
+        self.assertEqual(parsed[0].process, "weird|name")
+        self.assertEqual((parsed[0].soft, parsed[0].open), (1024, 9))
+
+    def test_an_unlimited_limit_has_no_number_to_compare_against(self):
+        # The kernel reports RLIM_INFINITY as `unlimited`; nothing can exhaust it, and
+        # inventing a number for it would invent a finding.
+        self.assertEqual(chk.parse_fd("i1", "monarch|app|unlimited|900|nginx"), [])
+
+    def test_a_truncated_or_foreign_line_is_dropped_rather_than_guessed(self):
+        self.assertEqual(chk.parse_fd("i1", "docker ps: command not found\nproxy|app\n"), [])
+        self.assertEqual(chk.parse_fd("i1", ""), [])
+
+    def test_a_container_reading_no_process_is_not_invented(self):
+        # The probe only prints a container once it found a process to measure, so an
+        # empty read is an empty list rather than a container at 0 of 0.
+        self.assertEqual(chk.parse_fd("i3", "\n\n"), [])
 
 
 class CpusetCase(unittest.TestCase):
