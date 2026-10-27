@@ -351,6 +351,19 @@ services:
     container_name: cerulean-npm
     profiles: ["npm"]
     restart: unless-stopped
+    # nginx's master inherits ~570 open files (235 generated vhost configs plus
+    # the log files it holds) and opens one more per generated vhost log every
+    # time it parses the config, so a reload needs ~1050 fds — above this image's
+    # default soft limit of 1024. The reload then died with
+    #   nginx: [emerg] open() "/data/logs/redirection-host-NN_error.log"
+    #                        failed (24: Too many open files)
+    # and the OLD config kept serving, so every NPM host change silently needed a
+    # full container restart (a ~10 s ingress blip) instead of `nginx -s reload`.
+    # The container's hard limit is already 1048576; raise the soft one to match.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     environment:
       DB_MYSQL_HOST: cerulean-npm-db
       DB_MYSQL_PORT: 3306
