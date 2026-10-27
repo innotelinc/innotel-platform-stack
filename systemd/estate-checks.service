@@ -55,3 +55,9 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-authentik-privilege
 # callback after the person has already signed in (2026-10-25). This probes
 # every gated name's callback and reads each proxy block's buffer.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --prom ${TEXTFILE_DIR}/estate-check-sso-callbacks.prom
+
+# A process somebody left behind: a `docker exec … grep -r /` ran for 18 h in
+# `metrics-prometheus` and an nginx worker sat in `worker process is shutting down` for
+# 8 h on `cerulean-npm`, holding 393 MiB, while `i4` swapped (2026-10-27). One `ps` and
+# one `ss` per host; a draining worker that still holds a socket is not a finding.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stuck-processes.py --prom ${TEXTFILE_DIR}/estate-check-stuck-processes.prom

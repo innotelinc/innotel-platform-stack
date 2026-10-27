@@ -79,7 +79,8 @@ class DashboardCase(unittest.TestCase):
         # Let to drift by hand, the panel reads either a permanent red or a green that
         # tolerates a check going silent, which is the silence this dashboard exists to
         # break. `check-mail-relay` arrived on 2026-10-09 and moved this from 7 to 8;
-        # `check-authentik-privilege` arrived on 2026-10-23 and moved it from 9 to 10.
+        # `check-authentik-privilege` arrived on 2026-10-23 and moved it from 9 to 10;
+        # `check-stuck-processes` arrived on 2026-10-27 and moved it from 11 to 12.
         unit = UNIT.read_text(encoding="utf-8")
         checks = set(re.findall(r"/opt/innotel/estate-checks/(check-[a-z0-9-]+)\.py", unit))
         self.assertTrue(checks, "the unit must run the checks")

@@ -40,6 +40,7 @@ CHECK_SCRIPTS = [
     "check-group-compose-freshness",
     "check-authentik-privilege",
     "check-sso-callbacks",
+    "check-stuck-processes",
 ]
 
 

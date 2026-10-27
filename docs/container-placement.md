@@ -15,6 +15,44 @@ evening pass moved the edge services back onto i1, right-sized i1's CPU caps, an
 put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
 
+## Changes applied 2026-10-27
+
+- **The 2026-10-26 cap cut had never reached the instances.** The entry below records
+  `terminal` and `vault` cut to 896 MiB and `vpn` to 512; the hosts still carried
+  **1408, 1280 and 768 MiB** (`incus config get`, 2026-10-27). The caps were reapplied,
+  and each now carries `limits.memory.enforce=soft`: `memory.high` is the 896/896/512
+  fence, so a container that grows reclaims its own page cache and is throttled there
+  instead of dragging the host into swap, but a real spike is not OOM-killed inside a
+  hard wall. Live after the change: `terminal` 327, `vault` 325, `vpn` 233 MiB — the
+  cache the old caps were letting them hold came back on its own. Caps now total
+  **6400 MiB against 7341 MiB of RAM**, which is what the record claimed all along.
+- **Two dead processes were most of `i4`'s load, not the containers.** A
+  `docker exec metrics-prometheus sh -c 'grep -rn TEXTFILE_DIR /'` had been walking
+  that container's filesystem for **18 h 20 m**, and `cerulean-npm` carried an nginx
+  worker stuck in `worker process is shutting down` for **7 h 58 m** plus a
+  cache-manager process orphaned when its master died (393 + 390 MiB resident).
+  Killing the three and dropping page cache took the `proxy` cgroup from 4200 to
+  3333 MiB and the load average from 13.3 to 3.8, with all 22 containers still up and
+  the edge answering. The edge itself was redeployed in the same pass: the
+  `cerulean-cerulean` image was rebuilt from the host's own source tree (the `SRV` /
+  `CAA` / `PTR` delete fix) and the `cerulean` container recreated from it, with
+  `cerulean-cerulean:pre-srv-fix` kept as the rollback tag.
+- **A process left behind is now a check.** Nothing watched for that shape: the
+  estate checks ask whether a name is lit, a cap enforced, a disk filling, and
+  `agent-reaper` watches the agent binary only. `check-stuck-processes.py` reads each
+  host's process table once and fails on a worker in `worker process is shutting down`
+  for over an hour **that holds no established socket** (a draining worker still
+  proxying a long-lived stream is doing its job and is not reported — told apart with
+  one `ss` in the same round trip), and on a probe command line older than an hour:
+  `docker exec`/`run`, a recursive `grep`, a log follow, `watch`, `timeout`, `tcpdump`,
+  `strace`, `dd if=`. Three jobs are named as long-lived by design and are never
+  reported — the Auvik agent's own `tail -F`, and the Vault bootstrap wrapper and its
+  `sleep 43200`. Its own series is
+  `innotel_estate_stuck_processes{host,kind}`; the shared contract and the alert rules
+  are wired like every other check (`stuck_processes`, and 12 branches in
+  `EstateCheckAbsent`). Verified against the estate: it found the two 386 MiB workers
+  still in shutdown on `cerulean-npm` and then read clean once they held sockets.
+
 ## Changes applied 2026-10-26
 
 - **The edge's `ips` tree is a checkout now, not a hand copy.**
@@ -659,10 +697,10 @@ that table is a bug in one of them.
 | i3 | `pi` | `.70` | pi | 193 MiB (1 GiB) | 2 |
 | i3 | `signara` | `.44` | Signara | 539 MiB (896 MiB) | 2 |
 | i3 | `subscribe` | `.58` | Subscribe | 123 MiB (384 MiB) | 2 |
-| i4 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 3.99 GiB (4 GiB) | 2 |
-| i4 | `terminal` | `.22` | web terminal (termix, guacd, zapit) | 464 MiB (1280 MiB) | 1 |
-| i4 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 624 MiB (1536 MiB) | 1 |
-| i4 | `vpn` | `.43` | WireGuard (`10.7.0.2` wg0) | 222 MiB (768 MiB) | 1 |
+| i4 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 3.6 GiB (4 GiB) | 2 |
+| i4 | `terminal` | `.22` | web terminal (termix, guacd, zapit) | 327 MiB (896 MiB, soft) | 1 |
+| i4 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 325 MiB (896 MiB, soft) | 1 |
+| i4 | `vpn` | `.43` | WireGuard (`10.7.0.2` wg0) | 233 MiB (512 MiB, soft) | 1 |
 
 `cloud`, `voice`, `docs`, `ansible`, `slack`, `dev` and `olympus`/`olympus-gw`, which the
 2026-09-27 survey listed beside `atheniq`, are **no longer present on any host** — those
