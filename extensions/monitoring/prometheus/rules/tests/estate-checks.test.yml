@@ -40,6 +40,7 @@ tests:
       # left these three cases at nine checks, so promtool was failing on a rule set that
       # had grown a branch the test did not know about. Every case below now carries it.
       - series: 'innotel_estate_check_last_run_timestamp{check="authentik_privilege"}'
+      - series: 'innotel_estate_check_last_run_timestamp{check="sso_callback"}'
         values: '0x60'
       # Added 2026-10-26: `check-sso-callbacks` joined the unit on the edge before it was
       # in this repo, so it was a check nothing would page about going absent.
@@ -73,6 +74,7 @@ tests:
       - series: 'innotel_estate_check_last_run_timestamp{check="group_compose_freshness"}'
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="authentik_privilege"}'
+      - series: 'innotel_estate_check_last_run_timestamp{check="sso_callback"}'
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="sso_callback"}'
         values: '0x60'

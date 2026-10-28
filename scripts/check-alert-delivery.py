@@ -25,7 +25,8 @@ THE RULES
 2. **A host that cannot be read is exit 2**, never silence, the same rule every check here
    follows. `i3` holds Alertmanager; the host holding Stalwart (the mail server) is read
    from the container address table rather than pinned here, because it moves — `mail` was
-   on `i1` when this check was written and on `i4` after the 2026-10-09 pass, and a check
+   on `i1` when this check was written, on `i4` after the 2026-10-09 pass and on `i3`
+   since 2026-10-15, and a check
    that reads the mail log on the host the server has left exits 2 instead of reporting
    the silence it exists to catch.
 3. The probe alert is short-lived (`--end` a few minutes out) so it resolves itself and

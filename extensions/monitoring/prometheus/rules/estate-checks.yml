@@ -11,7 +11,8 @@
 # `check-mail-auth.py` (`mail_auth`), `check-mail-relay.py` (`mail_relay`),
 # `check-group-compose-freshness.py` (`group_compose_freshness`) and
 # `check-authentik-privilege.py` (`authentik_privilege`) — the one about who can
-# administer the directory — run by
+# administer the directory — and `check-sso-callbacks.py` (`sso_callback`), the one
+# about a sign-in gate's answer fitting the proxy in front of it — run by
 # `systemd/estate-checks.{service,timer}` on the Cerulean edge, which writes each into
 # node-exporter's textfile directory.
 #
@@ -38,6 +39,10 @@
 # queue that drains, each of which has broken here without a symptom. (It arrived in this
 # repo on 2026-10-09; it had been running on the edge with a literal password in a
 # mode-0755 file and no rules, so a failure in it reached nobody.)
+# `sso_callback` is the one that is about the proxy rather than about an app: a
+# gated host's callback answers 502 when its session cookie is larger than the
+# proxy's header buffer, which is a sign-in that fails *after* it succeeded and is
+# invisible in the app's log because the app was never reached.
 # `group_compose_freshness` is the one that is not about a host: the group composes are
 # generated from the member repos and tracked, so a repo that moves on leaves the file a
 # rebuild starts from behind — and CI only compares them when *this* repo changes, while
@@ -84,6 +89,7 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="group_compose_freshness"}), "check", "group_compose_freshness", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="authentik_privilege"}), "check", "authentik_privilege", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="sso_callback"}), "check", "sso_callback", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="dmarc_alignment"}), "check", "dmarc_alignment", "check", ".*")
         for: 30m
         labels:
           severity: critical

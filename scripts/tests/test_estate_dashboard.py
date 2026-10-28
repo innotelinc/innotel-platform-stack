@@ -73,6 +73,12 @@ class DashboardCase(unittest.TestCase):
         # metric is renamed the panel must go with it, or the dashboard shows a stale green.
         self.assertIn("innotel_estate_check_mail_auth_records_ok", self.raw)
 
+    def test_it_shows_the_messages_a_tightened_dmarc_policy_would_drop(self):
+        # The number the `p=reject` decision is waiting on. `p=reject` fails silently —
+        # unaligned mail is dropped and the symptom is a reset link that never arrives —
+        # so this has to be visible before the policy moves, not after.
+        self.assertIn("innotel_estate_check_dmarc_messages_both_fail", self.raw)
+
     def test_the_reporting_threshold_matches_the_checks_the_unit_runs(self):
         # "Checks reporting" goes green at a number, and that number is how many checks
         # should be publishing — which is what the unit decides, one ExecStart line each.

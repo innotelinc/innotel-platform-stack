@@ -1,5 +1,5 @@
 [Unit]
-Description=Estate host checks — addresses, CPU caps, the host and pool inventory, latency, disk headroom, that the alert receiver delivers, that the mail server's outbound chain is wired, and that the mail domains' SPF/DKIM/DMARC resolve, and that every generated group compose still matches the member repos it is built from, and that only `authentik Admins` grants Authentik superuser rights, and that every sign-in gate's callback fits its proxy's header buffer
+Description=Estate host checks — addresses, CPU caps, the host and pool inventory, latency, disk headroom, that the alert receiver delivers, that the mail server's outbound chain is wired, and that the mail domains' SPF/DKIM/DMARC resolve, and that every generated group compose still matches the member repos it is built from, and that only `authentik Admins` grants Authentik superuser rights, and that every sign-in gate's callback fits its proxy's header buffer, and that the DMARC aggregate reports show every sending stream aligning (the evidence behind tightening the policy to p=reject)
 Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/container-placement.md
 
 # Each check reads the estate hosts over ssh, so the LAN has to be up first. None of
@@ -33,10 +33,12 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-address-latency.py 
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-host-disk.py --prom ${TEXTFILE_DIR}/estate-check-host-disk.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-alert-delivery.py --prom ${TEXTFILE_DIR}/estate-check-alert-delivery.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-auth.py --prom ${TEXTFILE_DIR}/estate-check-mail-auth.prom
-# The mail server is reached at its own address (`mail` in the container address table),
-# so the check keeps working when the container moves host — it moved i1 → i4 on
-# 2026-10-09. STALWART_USER/STALWART_PASSWORD come from the EnvironmentFile above; the
-# check has no default credential and must never carry one.
+# The mail server is reached at its own address (`mail`, 192.168.1.15, in the container
+# address table), so the check keeps working when the container moves host — and it has:
+# it is on `i3` since 2026-10-15, having been on `i1` then `i4` before that. The table is
+# the authority for which host that is, not this comment. STALWART_USER/
+# STALWART_PASSWORD come from the EnvironmentFile above; the check has no default
+# credential and must never carry one.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-relay.py --base http://192.168.1.15:8080 --prom ${TEXTFILE_DIR}/estate-check-mail-relay.prom
 
 # The one check that is about this repo rather than about a host. The files in `groups/`
@@ -55,3 +57,11 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-authentik-privilege
 # callback after the person has already signed in (2026-10-25). This probes
 # every gated name's callback and reads each proxy block's buffer.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --prom ${TEXTFILE_DIR}/estate-check-sso-callbacks.prom
+
+# The other half of the mail story: `check-mail-auth` proves the records are in the
+# zone, this reads the reports receivers send back and says which sending streams do
+# not align — the evidence behind tightening `_dmarc` to `p=reject`, which fails
+# silently when it is wrong. DMARC_USER/DMARC_PASSWORD come from the EnvironmentFile
+# above (the `rua` mailbox); the check has no default credential and must never carry
+# one. No reports in the window is exit 2, never a quiet pass.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-dmarc-alignment.py --prom ${TEXTFILE_DIR}/estate-check-dmarc-alignment.prom

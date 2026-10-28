@@ -63,8 +63,9 @@ from estate_check import Audit, Finding, METRIC, write_prom  # noqa: E402
 
 CHECK = "mail_auth"
 
-#: The server the public actually sees: Technitium on the edge — `.71`, which is a
-#: container on `i4` when this was written and on `i1` since 2026-10-09 — answering for
+#: The server the public actually sees: Technitium on the edge — `.71`, an `i4`
+#: container again since 2026-10-24 (it has been on `i1` and on `i4` before that; the
+#: container address table is the authority) — answering for
 #: `ns1/ns2.innotel.us`. Explicitly not the resolver (which may serve a
 #: cached, older copy) and not the BIND on `www` (a second copy of the zone the LAN
 #: reads, authoritative only for the nameservers themselves).

@@ -43,7 +43,7 @@
       "gridPos": { "h": 6, "w": 4, "x": 5, "y": 0 },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 11 }] },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 12 }] },
           "color": { "mode": "thresholds" }
         },
         "overrides": []
@@ -237,6 +237,23 @@
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_auth_records_ok", "instant": true, "legendFormat": "resolved", "refId": "A" },
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_auth_records_expected", "instant": true, "legendFormat": "expected", "refId": "B" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "DMARC: messages p=reject would drop",
+      "description": "The DMARC aggregate reports' own verdict — messages whose SPF and DKIM both failed to align, beside every message the reports named. Non-zero means a tightened policy would drop mail, and that failure is silent: the symptom is a reset link that never arrives. This is the evidence the decision to move _dmarc to p=reject waits on. See check-dmarc-alignment.py.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 44 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } },
+        "overrides": [{ "matcher": { "id": "byName", "options": "messages" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }] }]
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_dmarc_messages_both_fail", "instant": true, "legendFormat": "would be dropped", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_dmarc_messages", "instant": true, "legendFormat": "messages", "refId": "B" }
       ]
     }
   ],

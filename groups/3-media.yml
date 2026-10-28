@@ -474,12 +474,29 @@ services:
   # FLARESOLVERR - Cloudflare Bypass
   # Registered as an indexer proxy in Prowlarr
   # from Settings > Indexers (manual, one-time).
+  #
+  # The proxy's Request Timeout is 180 s, not Prowlarr's 60 s default: this
+  # service now solves one request at a time (see below), so a queued caller has
+  # to be given room to wait rather than fail while the worker is busy.
   ###############################################
 
   flaresolverr:   # from monarch
     <<: *common-keys
     container_name: flaresolverr
+    # Caps this service so a pile-up of headless Chromium instances can only
+    # OOM-kill itself, not the rest of the 8 GiB monarch cgroup (62 of 89
+    # kernel OOM kills in one boot were in this scope). See
+    # fleet-snapshot-2026-10-27.md on i1.
+    mem_limit: 2g
     image: ghcr.io/flaresolverr/flaresolverr:latest
+    # waitress (the server FlareSolverr switched to for FlareSolverr#680) runs
+    # four worker threads, and every /v1 request starts its own headless
+    # Chromium, so four solves could be live at once inside the 8 GiB monarch
+    # cgroup. sitecustomize.py pins waitress to one worker: solves queue behind
+    # each other instead of piling up. Loaded through PYTHONPATH, so no upstream
+    # file is patched and image updates stay safe.
+    volumes:
+      - /docker/appdata/flaresolverr/sitecustomize.py:/patch/sitecustomize.py:ro
     ports:
       - 8191:8191
     environment:
@@ -487,6 +504,7 @@ services:
       PGID: 1000
       TZ: ${TZ:-America/New_York}
       LOG_LEVEL: info
+      PYTHONPATH: /patch
 
   ###############################################
   # AUTOBRR - Indexer Automation
