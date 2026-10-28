@@ -221,6 +221,13 @@ services:
       # the 'groups' scope) is admitted alongside the email allowlist.
       AUTHENTIK_ALLOWED_GROUPS: "${AUTHENTIK_ALLOWED_GROUPS:-}"
       AUTHENTIK_ORGANIZATION_PROVIDER_ID: "${AUTHENTIK_ORGANIZATION_PROVIDER_ID:-}"
+      # Dograh's hosted model service is not used: this stack runs its own models
+      # (OmniRoute, Piper, Speaches), its own Asterisk/ARI telephony and its own
+      # service keys. Upstream still defaults MPS_API_URL to
+      # https://services.dograh.com and calls it on the first authenticated
+      # request of a new organization; the local discard port keeps that call on
+      # this host and fails instantly if anything ever reaches it.
+      MPS_API_URL: "${MPS_API_URL:-http://127.0.0.1:9}"
 
       # Host-mode URLs for the bridge services
       DATABASE_URL: "postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@127.0.0.1:5432/postgres"
@@ -483,13 +490,12 @@ services:
     mem_limit: 2g
     memswap_limit: 2g
     environment:
-      # Piper is the voice. Kokoro is retired (behind the `kokoro` profile) and
-      # is only registered when listed here — with `piper` alone the shim does
-      # not advertise or serve a Kokoro engine at all. To A/B, start the profile
-      # and set this to `kokoro,piper` **and** give the shim a Kokoro upstream it
-      # can resolve (see TTS_SHIM_KOKORO_URL below): a registered engine whose
-      # upstream is unreachable used to answer 200 with an empty body, which is
-      # worse than the 503 an unlisted engine gives.
+      # Which engines exist. An engine left out is neither advertised nor
+      # selectable — a request naming it gets a 503 rather than another engine's
+      # audio, which is what makes an A/B test honest. `.env` decides: this host
+      # serves Kokoro `af_heart` (`kokoro,piper`, Kokoro the default) and can
+      # fall back to Piper with one edit; the standalone default stays `piper`
+      # because it is the engine that holds real time on a small CPU box.
       TTS_SHIM_ENGINES: "${TTS_SHIM_ENGINES:-piper}"
       TTS_SHIM_DEFAULT_ENGINE: "${TTS_SHIM_DEFAULT_ENGINE:-piper}"
       # Only read when `kokoro` is in TTS_SHIM_ENGINES (see scripts/install-onnx-kokoro.sh).
@@ -505,6 +511,9 @@ services:
       # pair it with TTS_SHIM_KOKORO_URL=http://speaches:8000 (and that model has
       # to be installed there: an empty /v1/models is not an upstream).
       TTS_SHIM_KOKORO_MODEL: "${TTS_SHIM_KOKORO_MODEL:-kokoro}"
+      # Voice when the request sends none (or a Piper-style name the Kokoro
+      # upstream would reject). af_heart is Kokoro v1.0's own default voice.
+      TTS_SHIM_KOKORO_VOICE: "${TTS_SHIM_KOKORO_VOICE:-af_heart}"
       TTS_SHIM_PIPER_VOICE: "${TTS_SHIM_PIPER_VOICE:-}"
       TTS_SHIM_CACHE_ENABLED: "${TTS_SHIM_CACHE_ENABLED:-true}"
       TTS_SHIM_CACHE_MAX_BYTES: "${TTS_SHIM_CACHE_MAX_BYTES:-536870912}"
@@ -2099,7 +2108,15 @@ volumes:
   probe-bin:
   postgres_data:
   redis_data:
+  # The media store: interview recordings and transcripts, which the edge serves
+  # from /voice-audio. External with a fixed name so `docker compose down -v`
+  # cannot delete it — this volume predates the compose project and carries no
+  # labels ("volume \"capstone_minio-data\" already exists but was not created by
+  # Docker Compose"), so as a plain key compose would consider it its own and
+  # remove it along with the recordings. Same pattern as the pbx-* volumes below.
   minio-data:
+    name: capstone_minio-data
+    external: true
   # The gateway's own volume lives with the gateway now — `innotel-gateway_omniroute-data`
   # on i1 `.71`, declared by `ips/extensions/llm/docker-compose.host.yml`. This name
   # still exists on the host that ran the gateway before 2026-09-28 (`.46` keeps its

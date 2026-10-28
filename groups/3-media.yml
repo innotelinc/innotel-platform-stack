@@ -485,8 +485,7 @@ services:
     container_name: flaresolverr
     # Caps this service so a pile-up of headless Chromium instances can only
     # OOM-kill itself, not the rest of the 8 GiB monarch cgroup (62 of 89
-    # kernel OOM kills in one boot were in this scope). See
-    # fleet-snapshot-2026-10-27.md on i1.
+    # kernel OOM kills in one boot were in this scope).
     mem_limit: 2g
     image: ghcr.io/flaresolverr/flaresolverr:latest
     # waitress (the server FlareSolverr switched to for FlareSolverr#680) runs
@@ -496,7 +495,7 @@ services:
     # each other instead of piling up. Loaded through PYTHONPATH, so no upstream
     # file is patched and image updates stay safe.
     volumes:
-      - /docker/appdata/flaresolverr/sitecustomize.py:/patch/sitecustomize.py:ro
+      - ../../3-media/monarch/flaresolverr/sitecustomize.py:/patch/sitecustomize.py:ro
     ports:
       - 8191:8191
     environment:
