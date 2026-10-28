@@ -15,6 +15,30 @@ evening pass moved the edge services back onto i1, right-sized i1's CPU caps, an
 put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
 
+## Changes applied 2026-10-28
+
+- **`i2` was rebuilt, and every pool this page named on it is gone.** The host now
+  carries two pools: `default` (a `dir` pool on the 47 G root filesystem, holding
+  nothing) and `fast` (one 298 G zpool — 215 G allocated, 82.9 G free, `ONLINE` — which
+  holds every container on the host, `capstone` and `atheniq` among them). `main-pool`,
+  `tank` and `docker` no longer exist there at all, so the `default`/`docker` profile
+  repoint recorded in the 2026-10-01 pass is superseded: a new container gets `fast`.
+  `scripts/check-estate-inventory.py` asserts exactly `{default, fast}` for `i2` and
+  fails on any other pool, and its fixtures follow the same change; the 2026-10-01
+  narrative below is history, not current state.
+- **`monarch`'s FlareSolverr is capped at 2 GiB and now solves one request at a time.**
+  Every `/v1` call starts its own headless Chromium and the server (waitress since
+  FlareSolverr#680) runs four worker threads, so four Chromium trees could be live at
+  once inside the 8 GiB `monarch` cgroup; the kernel then reaped whichever Chromium it
+  found, and 62 of the 89 OOM kills in one boot were in that scope. The fix lives in the
+  **monarch** repo, not in the generated group file: `flaresolverr/sitecustomize.py`
+  pins `waitress.serve` to one worker and is mounted read-only at
+  `/patch/sitecustomize.py` with `PYTHONPATH=/patch`, so no upstream file is patched and
+  image updates stay safe. Prowlarr's FlareSolverr proxy carries a 180 s request timeout
+  to cover the queue that serialising creates. Verified on `i1`: `mem=2147483648`, the
+  container's python process holds two threads (main + one worker) instead of five, and
+  a live `POST /v1` returns `200 OK`.
+
 ## Changes applied 2026-10-27
 
 - **The LMS left the estate, and the cutover was an NPM upstream change, not a DNS
