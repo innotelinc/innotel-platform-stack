@@ -7,9 +7,10 @@ The placement page said "three Incus hosts" and listed none of i2's storage beyo
 `tank`. Both were wrong: a fourth host, `i4` (`.54`), was reachable and trusted by the
 other three, and i2 had grown a second, 465 GiB pool (`main-pool`) that its `default`
 and `docker` profiles point at — onto which the containers were spread across two
-pools, half on each. That split has since been reconciled the way the profiles already
-pointed: the four remaining containers moved to `main-pool` and `tank` was retired, so
-i2 has one pool again. Neither the host nor the pool had been hidden — `incus remote
+pools, half on each. That split has since been reconciled and then rebuilt again: on
+2026-10-28 i2 carries `default` (46 GiB, empty) and `fast` (291 GiB, which holds every
+container), and `main-pool`, `tank` and `docker` are all gone. Neither the host nor the
+pool had been hidden — `incus remote
 list` and `incus storage list` name them on any host — but nothing compared them
 against what the estate believes it has, so a host or a pool could appear and the docs
 would keep describing the estate that used to exist.
@@ -70,7 +71,7 @@ NAME_OF_ADDRESS: dict[str, str] = {address: name for name, address in ADDRESS_OF
 #: name → the storage pools that host is allowed to have. A pool not listed is a failure.
 POOLS: dict[str, set[str]] = {
     "i1": {"incus"},
-    "i2": {"main-pool"},
+    "i2": {"default", "fast"},
     "i3": {"tank"},
     "i4": {"default", "tank"},
 }

@@ -264,7 +264,7 @@ KNOWN_REMOTES = [I1, I2, I3, I4]
 
 
 def _inventory_rules(pools=None, remotes=None) -> dict:
-    pools = pools or {"i1": ["incus"], "i2": ["main-pool"], "i3": ["tank"], "i4": ["default", "tank"]}
+    pools = pools or {"i1": ["incus"], "i2": ["default", "fast"], "i3": ["tank"], "i4": ["default", "tank"]}
     remotes = remotes or {host: list(KNOWN_REMOTES) for host in INVENTORY_HOSTS}
     rules = {}
     for host, target in INVENTORY_HOSTS.items():
@@ -292,7 +292,7 @@ class InventoryLiveCase(LiveCase):
 
     def test_an_unknown_pool_fails_the_run(self):
         chk = _load("check-estate-inventory")
-        pools = {"i1": ["incus"], "i2": ["main-pool", "scratch"], "i3": ["tank"], "i4": ["default", "tank"]}
+        pools = {"i1": ["incus"], "i2": ["default", "fast", "scratch"], "i3": ["tank"], "i4": ["default", "tank"]}
         code, _ = self.run_check(chk, INVENTORY_HOSTS, _inventory_rules(pools=pools))
         self.assertEqual(code, 1)
 
