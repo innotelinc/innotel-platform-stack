@@ -127,11 +127,20 @@ EXPECTED: dict[str, dict[str, str]] = {
         "blueprint": "192.168.1.76",
         "capstone": "192.168.1.30",
         "clearpath": "192.168.1.83",
+        # `proxy` was recreated on i2 on 2026-10-26 22:00 EDT and is no longer an
+        # i4 container; i4 holds `terminal`, `vault` and `vpn` only. The address is
+        # unchanged (.71), which is why only the host row moves. Its `/data` bind
+        # mount now exists (verified 2026-10-28: raw-mount path=/data,
+        # source=/usr/src/proxy/data, 209 proxy_host confs readable), so rule 4
+        # watches it rather than reporting the 2026-10-26 defect.
+        "proxy": "192.168.1.71",
     },
     "i3": {
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
         "mail": "192.168.1.15",
+        # Running since before the table was written; the check kept reporting it as
+        # "running and not in the table" on every run until 2026-10-28.
         "monitor": "192.168.1.88",
         "onyx": "192.168.1.60",
         "pi": "192.168.1.70",
@@ -139,7 +148,6 @@ EXPECTED: dict[str, dict[str, str]] = {
         "subscribe": "192.168.1.58",
     },
     "i4": {
-        "proxy": "192.168.1.71",
         "terminal": "192.168.1.22",
         "vault": "192.168.1.73",
         "vpn": "192.168.1.43",
@@ -169,12 +177,26 @@ BINDS: dict[str, dict[str, dict[str, str]]] = {
     }
 }
 
+#: host → container → the mount point that container's stack cannot work without.
+#: Checked inside the container (rule 4), because a bind mount that did not arrive
+#: leaves an address-correct container that still cannot serve.
+DATA_MOUNTS: dict[str, dict[str, str]] = {
+    "i2": {"proxy": "/data"},
+}
+
 #: What each address is for. Reported, so a failure names the thing that broke.
 ROLES: dict[str, str] = {
     "192.168.1.21": "ontrak family + Ontrak Sync",
     "192.168.1.24": "the Genie preview (`innotel/ontrak-genie:main`)",
     "192.168.1.56": "monarch — media",
-    "192.168.1.59": "AthenIQ LMS (Tutor / Open edX)",
+    # The LMS moved off this container on 2026-10-27 (NPM hosts 240/242/243 now forward
+    # to 104.238.162.5:18080). The container itself did not stay on i2: by 2026-10-27 the
+    # copy on i2 was STOPPED and this address belongs to the `atheniq` container running
+    # on `ord` (the VPS, 104.238.162.5), reached over the `offload-l2` VXLAN/WireGuard
+    # stretch. It still serves the apps that have not moved yet (the SSO pair, the two
+    # python portals and the course-generation console), so a failure here is still an
+    # outage for those — but no longer for the LMS.
+    "192.168.1.59": "the AthenIQ container on ord (LMS migrated out; remaining apps here)",
     "192.168.1.71": "the Cerulean edge (NPM, Authentik, Vault, DNS)",
     "192.168.1.15": "mail (SMTP/IMAP)",
     "192.168.1.22": "the web terminal",
@@ -184,6 +206,7 @@ ROLES: dict[str, str] = {
     "192.168.1.76": "blueprint",
     "192.168.1.79": "regcache",
     "192.168.1.83": "Clearpath (`app.denovocredit.com`)",
+    "192.168.1.88": "the monitoring stack (Prometheus, Grafana, Alertmanager)",
     "192.168.1.89": "the NAS desktop (`nas.innotel.us`)",
     "192.168.1.88": "SigNoz (`monitor`) — traces, metrics and logs for the estate",
 }
@@ -207,6 +230,12 @@ class Instance:
     #: probe and, unless something runs an agent inside the guest, no address incus can
     #: report — so the rules that read those are container-shaped (see `audit`).
     kind: str = "container"
+    #: Whether the container's required mount point (rule 4) was observed to be a
+    #: mount point. None means "not observed": the probe is only run for the
+    #: containers in `DATA_MOUNTS`, and a caller (a test, or a host that could not
+    #: be read) may supply no answer. None is never a finding — an absent
+    #: observation is not evidence that the mount is missing.
+    data_mounted: bool | None = None
 
 
 def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
@@ -244,6 +273,14 @@ def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
                     Finding("no_address", "fail", f"{host} {name}: running with no IPv4 (the table expects {address})")
                 )
                 continue
+            # The LMS moved off this container on 2026-10-27 (NPM hosts 240/242/243
+            # now forward to 104.238.162.5:18080). The container itself did not stay on
+            # i2: by 2026-10-27 the copy on i2 was STOPPED and this address belongs to the
+            # atheniq container running on ord (the VPS, 104.238.162.5), reached over the
+            # offload-l2 VXLAN/WireGuard stretch. It still serves the apps that have not
+            # moved yet (the SSO pair, the two python portals and the course-generation
+            # console), so a failure here is still an outage for those — but no longer for
+            # the LMS.
             if inst.address != address:
                 role = ROLES.get(address, "a published service")
                 out.findings.append(
@@ -273,6 +310,27 @@ def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
                             f"{inst.address or '(none)'} — the service cannot bind and will not start",
                         )
                     )
+            # Rule 4: an address-correct container can still be unusable. `proxy`
+            # serves NPM out of a `/data` bind mount (proxy_host configs,
+            # custom_ssl, letsencrypt-acme-challenge, database.sqlite, keys.json).
+            # If that mount did not arrive — an incus raw.mount that lost a race
+            # with nginx startup — the container is at the right address and still
+            # cannot route: it looks like a dead secondary to NPM while every other
+            # rule passes. Report it separately for that reason.
+            #
+            # `data_mounted` is None when nobody observed it (see `Instance`), and
+            # None is deliberately silent: this decision function must not invent a
+            # failure out of a missing observation.
+            if inst.data_mounted is False:
+                out.findings.append(
+                    Finding(
+                        "data_mount_missing",
+                        "fail",
+                        f"{host} {name}: {DATA_MOUNTS[host][name]} is not a mount point — "
+                        "the stack reads its state from there and will serve nothing; "
+                        "restore the incus bind mount (type=bind,source=/usr/src/proxy/data,target=/data)",
+                    )
+                )
 
         for name, inst in sorted(seen.items()):
             if inst.state == "RUNNING":
@@ -355,6 +413,22 @@ def gather(hosts: dict[str, str], runner: Callable[[str, str], str] = _ssh) -> d
             kind = kind.strip().lower()
             address = _first_lan_address(addresses)
             pinned = True
+            mount = DATA_MOUNTS.get(host, {}).get(name.strip())
+            data_mounted: bool | None = None
+            if mount and state.strip() == "RUNNING" and kind != "virtual-machine":
+                try:
+                    # Field 5 of /proc/self/mountinfo is the mount point. A mount
+                    # that is absent falls through to the root filesystem, which is
+                    # exactly the state this rule exists to catch.
+                    probe = runner(
+                        target,
+                        "incus exec %s -- bash -c "
+                        "'grep -q \" %s \" /proc/self/mountinfo "
+                        "&& echo mounted || echo absent' </dev/null" % (name.strip(), mount),
+                    )
+                    data_mounted = probe.strip().endswith("mounted")
+                except Exception:  # not observed is not the same as not mounted
+                    data_mounted = None
             if state == "RUNNING" and kind != "virtual-machine":
                 try:
                     # One shell probe, because it runs inside the container and the
@@ -378,8 +452,14 @@ def gather(hosts: dict[str, str], runner: Callable[[str, str], str] = _ssh) -> d
                 except Exception:  # a container we cannot exec into is not pinned *silently*
                     pinned = False
             instances.append(
-                Instance(name=name.strip(), state=state.strip(), address=address, pinned=pinned,
-                         kind=kind or "container")
+                Instance(
+                    name=name.strip(),
+                    state=state.strip(),
+                    address=address,
+                    pinned=pinned,
+                    kind=kind or "container",
+                    data_mounted=data_mounted,
+                )
             )
         observed[host] = instances
     return observed
