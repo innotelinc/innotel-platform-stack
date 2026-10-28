@@ -1,0 +1,16 @@
+[Unit]
+Description=Memory headroom guard (warns early, cancels a runaway build)
+Documentation=https://github.com/innotel/platform-stack/scripts/memguard.py
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/memguard.py
+# Restart=always would mask a syntax error as a crash loop; on-failure keeps a
+# clean exit meaningful while still surviving a stray SIGTERM.
+Restart=on-failure
+RestartSec=10
+EnvironmentFile=-/etc/default/memguard
+
+[Install]
+WantedBy=multi-user.target
