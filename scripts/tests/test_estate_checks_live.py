@@ -131,19 +131,22 @@ ADDRESS_ROWS = {
          ("regcache", "192.168.1.79"), ("rizzaura", "192.168.1.62"),
          ("www", "192.168.1.80")],
     I2: [("atheniq", "192.168.1.59"), ("blueprint", "192.168.1.76"),
-         ("capstone", "192.168.1.30"), ("clearpath", "192.168.1.83")],
+         ("capstone", "192.168.1.30"), ("clearpath", "192.168.1.83"),
+         # proxy was recreated here on 2026-10-26 and kept the edge address.
+         ("proxy", "192.168.1.71")],
     I3: [("distro", "192.168.1.61"), ("magnate", "192.168.1.57"), ("mail", "192.168.1.15"),
          ("monitor", "192.168.1.88"), ("onyx", "192.168.1.60"), ("pi", "192.168.1.70"),
          ("signara", "192.168.1.44"), ("subscribe", "192.168.1.58")],
-    # The edge and its three satellites live on i4; the media/business containers stay on
-    # i1. The addresses travel with the pinned rootfs, so only the host key changes when a
-    # container moves — which is why the rows here are read off the hosts, not remembered.
-    I4: [("proxy", "192.168.1.71"), ("terminal", "192.168.1.22"),
+    # i4 holds three satellites; the edge container itself moved to i2 and the
+    # media/business containers stay on i1. The addresses travel with the pinned rootfs,
+    # so only the host key changes when a container moves — which is why the rows here are
+    # read off the hosts, not remembered.
+    I4: [("terminal", "192.168.1.22"),
          ("vault", "192.168.1.73"), ("vpn", "192.168.1.43")],
 }
 
 
-def _address_rules(moved: tuple[str, str] | None = None) -> dict:
+def _address_rules(moved: tuple[str, str] | None = None, mount: str = "mounted\n") -> dict:
     rules = {}
     for host, rows in ADDRESS_ROWS.items():
         listing = []
@@ -151,7 +154,15 @@ def _address_rules(moved: tuple[str, str] | None = None) -> dict:
             if moved and moved == (host, name):
                 address = "192.168.1.20"  # the 2026-10-01 renumber
             listing.append(f'{name},CONTAINER,RUNNING,"{address} (eth0)"')
-        rules[host] = {"answers": [["nts4", _csv(listing)], ["incus exec", "static\n"]]}
+        rules[host] = {
+            "answers": [
+                ["nts4", _csv(listing)],
+                # Rule 4's probe; the stub answers the first keyword it finds, so this
+                # has to precede the generic `incus exec` rule.
+                ["/proc/self/mountinfo", mount],
+                ["incus exec", "static\n"],
+            ]
+        }
     return rules
 
 
@@ -161,6 +172,14 @@ class AddressLiveCase(LiveCase):
         code, prom = self.run_check(chk, chk.HOSTS, _address_rules())
         self.assertEqual(code, 0)
         self.assertIn('innotel_estate_check_last_status{check="container_address"} 1', self.text(prom))
+
+    def test_a_proxy_whose_data_mount_vanished_fails_the_run(self):
+        # Right address, unreadable state: NPM serves nothing while every address rule
+        # passes. One finding is what turns that into a failure.
+        chk = _load("check-container-addresses")
+        code, prom = self.run_check(chk, chk.HOSTS, _address_rules(mount="absent\n"))
+        self.assertEqual(code, 1, "an unmounted /data must fail the check, not pass it")
+        self.assertIn('innotel_estate_check_last_status{check="container_address"} 0', self.text(prom))
 
     def test_a_renumbered_container_fails_the_run_and_reaches_the_textfile(self):
         chk = _load("check-container-addresses")

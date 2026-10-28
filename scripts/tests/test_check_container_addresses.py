@@ -135,6 +135,30 @@ class AddressCase(unittest.TestCase):
         self.assertTrue(result.ok, "a stale table is not a broken address")
         self.assertEqual([f.code for f in result.findings if f.level == "warn"], ["unexpected"])
 
+    def test_a_proxy_without_its_data_mount_is_a_failure(self):
+        # Right address, still useless: NPM reads proxy_host, custom_ssl and
+        # database.sqlite from /data, so an unmounted /data serves nothing.
+        result = chk.audit(
+            estate({("i2", "proxy"): dict(state="RUNNING", address="192.168.1.71", data_mounted=False)})
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual([f.code for f in result.failures], ["data_mount_missing"])
+        self.assertIn("/data", result.failures[0].message)
+
+    def test_a_proxy_with_its_data_mount_is_not_a_finding(self):
+        result = chk.audit(
+            estate({("i2", "proxy"): dict(state="RUNNING", address="192.168.1.71", data_mounted=True)})
+        )
+        self.assertTrue(result.ok, [f.message for f in result.failures])
+        self.assertEqual([f for f in result.findings if "data" in f.code], [])
+
+    def test_an_unobserved_mount_is_not_reported_as_missing(self):
+        # The decision function is handed data, not a host: no observation must not
+        # become a failure, or every caller that supplies none would fail.
+        result = chk.audit(estate())
+        self.assertTrue(result.ok, [f.message for f in result.failures])
+        self.assertEqual([f for f in result.findings if f.code == "data_mount_missing"], [])
+
     def test_a_running_container_without_an_address_is_a_failure(self):
         result = chk.audit(estate({("i1", "www"): dict(state="RUNNING", address=None)}))
         self.assertFalse(result.ok)

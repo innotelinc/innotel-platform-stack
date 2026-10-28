@@ -1035,3 +1035,21 @@ placement (finding 7).
   §*Changes applied 2026-10-15* surfaced by wiring the receiver. Install `dig` on the
   edge, or take the served records from a resolver the check can reach, so this is a
   pass or a real failure rather than an unreadable check.
+
+### Changes applied 2026-10-28
+
+- **`proxy` is an `i2` container, not an `i4` one.** It was recreated on `i2` on
+  2026-10-26 22:00 EDT and kept `.71`, because the address is pinned inside the
+  rootfs. `i4` now holds `terminal`, `vault` and `vpn`. The check asserted the old
+  host, so it failed on a container that was exactly where it should be.
+- **The `/data` rule observes instead of guessing.** The unfinished version read
+  `/var/lib/incus/storage-pools/tank/containers/proxy/rootfs/proc/1/mountinfo` on
+  whatever machine ran the check — `tank` is `i4`'s pool while the container uses
+  `fast` on `i2` — and warned whenever that path was absent, so every run carried a
+  finding it could not have known. Rule 4 is now a per-host probe of
+  `/proc/self/mountinfo` inside the container, carried on `Instance.data_mounted`.
+  An unobserved mount is silent, because no observation is not evidence that the
+  mount is missing; an observed-absent mount fails as `data_mount_missing`, since an
+  address-correct proxy that cannot read its proxy_host configs serves nothing while
+  every address rule passes. Verified against the live container: `/data` is a mount
+  point (`raw-mount path=/data source=/usr/src/proxy/data`, 209 proxy_host confs).

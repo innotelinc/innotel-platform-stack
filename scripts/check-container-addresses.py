@@ -127,6 +127,10 @@ EXPECTED: dict[str, dict[str, str]] = {
         "blueprint": "192.168.1.76",
         "capstone": "192.168.1.30",
         "clearpath": "192.168.1.83",
+        # `proxy` was recreated on i2 on 2026-10-26 22:00 EDT and kept .71, because
+        # the address is pinned inside the rootfs; i4 holds `terminal`, `vault` and
+        # `vpn`. The check asserted the old host until 2026-10-28.
+        "proxy": "192.168.1.71",
     },
     "i3": {
         "distro": "192.168.1.61",
@@ -139,7 +143,6 @@ EXPECTED: dict[str, dict[str, str]] = {
         "subscribe": "192.168.1.58",
     },
     "i4": {
-        "proxy": "192.168.1.71",
         "terminal": "192.168.1.22",
         "vault": "192.168.1.73",
         "vpn": "192.168.1.43",
@@ -167,6 +170,13 @@ BINDS: dict[str, dict[str, dict[str, str]]] = {
             "ONTRAK_WEB_BIND": "192.168.1.21",
         }
     }
+}
+
+#: host → container → the mount point that container's stack cannot work without.
+#: Probed inside the container (rule 4): a bind mount that did not arrive leaves an
+#: address-correct container that still serves nothing.
+DATA_MOUNTS: dict[str, dict[str, str]] = {
+    "i2": {"proxy": "/data"},
 }
 
 #: What each address is for. Reported, so a failure names the thing that broke.
@@ -207,6 +217,10 @@ class Instance:
     #: probe and, unless something runs an agent inside the guest, no address incus can
     #: report — so the rules that read those are container-shaped (see `audit`).
     kind: str = "container"
+    #: Whether this container's required mount point was observed to be a mount point.
+    #: None means "not observed" — only `DATA_MOUNTS` entries are probed, and a caller
+    #: that supplies no answer must not be read as "the mount is missing".
+    data_mounted: bool | None = None
 
 
 def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
@@ -273,6 +287,25 @@ def audit(observed: dict[str, Iterable[Instance]]) -> Audit:
                             f"{inst.address or '(none)'} — the service cannot bind and will not start",
                         )
                     )
+            # Rule 4: an address-correct container can still be unusable. `proxy` serves
+            # NPM out of a `/data` bind mount (proxy_host configs, custom_ssl,
+            # database.sqlite, keys.json). A mount that did not arrive leaves every rule
+            # above passing while NPM reads nothing at all.
+            #
+            # `data_mounted` is None when nobody observed it (see `Instance`), and None is
+            # silently a pass: this decision must not invent a failure out of a missing
+            # observation.
+            if name in DATA_MOUNTS.get(host, {}) and inst.data_mounted is False:
+                out.findings.append(
+                    Finding(
+                        "data_mount_missing",
+                        "fail",
+                        f"{host} {name}: {DATA_MOUNTS[host][name]} is not a mount point — the "
+                        "stack reads its proxy_host configs and TLS state from there and will "
+                        "serve nothing; restore the incus bind mount "
+                        "(type=bind,source=/usr/src/proxy/data,target=/data)",
+                    )
+                )
 
         for name, inst in sorted(seen.items()):
             if inst.state == "RUNNING":
@@ -377,9 +410,24 @@ def gather(hosts: dict[str, str], runner: Callable[[str, str], str] = _ssh) -> d
                     pinned = "static" in probe
                 except Exception:  # a container we cannot exec into is not pinned *silently*
                     pinned = False
+            mount = DATA_MOUNTS.get(host, {}).get(name.strip())
+            data_mounted: bool | None = None
+            if mount and state.strip() == "RUNNING" and kind != "virtual-machine":
+                try:
+                    # Field 5 of /proc/self/mountinfo is the mount point. An absent mount
+                    # falls through to the root filesystem — exactly the state rule 4 catches.
+                    probe = runner(
+                        target,
+                        "incus exec %s -- bash -c "
+                        "'grep -q \" %s \" /proc/self/mountinfo "
+                        "&& echo mounted || echo absent' </dev/null" % (name.strip(), mount),
+                    )
+                    data_mounted = probe.strip().endswith("mounted")
+                except Exception:  # unobserved is not the same as absent
+                    data_mounted = None
             instances.append(
                 Instance(name=name.strip(), state=state.strip(), address=address, pinned=pinned,
-                         kind=kind or "container")
+                         kind=kind or "container", data_mounted=data_mounted)
             )
         observed[host] = instances
     return observed
