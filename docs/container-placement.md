@@ -764,7 +764,7 @@ that table is a bug in one of them.
 | i1 | `ontrak` | `.21` | Ontrak family stack + Ontrak Sync | 1.50 GiB (2.13 GiB) | 2 |
 | i1 | `regcache` | `.79` | Docker registry mirror (`registry:2`) | 107 MiB (384 MiB) | 2 |
 | i1 | `rizzaura` | `.62` | Rizz Aura (5 svc) | 208 MiB (512 MiB) | 2 |
-| i1 | `www` | `.80` | public website (+ `tun0`) | 552 MiB (1 GiB) | 4 |
+| i1 | `www` | ~~`.80`~~ | **retired 2026-10-29** — the public landing page moved to `ord-atheniq` (`104.238.162.5:8086`); stopped since 2026-10-28 with an empty volume | — | — |
 | i2 | `atheniq` | `.59` | AthenIQ LMS (Tutor / Open edX) | 3.61 GiB (5.25 GiB) | 6 |
 | i2 | `blueprint` | `.76` | DayZero app server (`dayzero.service`) | 84 MiB (512 MiB) | 2 |
 | i2 | `capstone` | `.30` | Zeus / capstone telephony | 4.34 GiB (uncapped) | 2 |
@@ -1185,3 +1185,12 @@ placement (finding 7).
   own `login_refresh` installs a fresh token. Verified signed in with an expired token:
   `/catalog/` renders the catalogue and `/dashboard` the learner home, both with no
   error page and no 405.
+- **`www` (`.80`) left the address table.** `check-address-latency.py` had been failing
+  on it since its host's shutdown on 2026-10-28: the container is stopped, its rootfs
+  volume is empty, and nothing dials `.80` any more — the public landing page is served
+  from `ord-atheniq` (`104.238.162.5:8086`), which is what the edge's
+  `innotel.us www.innotel.us` vhost targets, and `www.innotel.us` itself is a `CNAME` to
+  the apex. A row here is a claim that *something dials this address*, so the row is
+  gone rather than the address being made to answer; the empty container is left in
+  place for whoever decides to delete it. The table's row in §*The estate as it should
+  be* is struck through for the same reason, so the next reader does not add it back.

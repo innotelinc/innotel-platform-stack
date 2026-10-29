@@ -136,7 +136,10 @@ class AddressCase(unittest.TestCase):
         self.assertEqual([f.code for f in result.findings if f.level == "warn"], ["unexpected"])
 
     def test_a_running_container_without_an_address_is_a_failure(self):
-        result = chk.audit(estate({("i1", "www"): dict(state="RUNNING", address=None)}))
+        # `atlas`, not a name the table dropped: an override for a container no longer in
+        # `EXPECTED` appends an *extra* instance, which this check reports as unexpected
+        # rather than as a missing address. `www` was that row until 2026-10-29.
+        result = chk.audit(estate({("i1", "atlas"): dict(state="RUNNING", address=None)}))
         self.assertFalse(result.ok)
         self.assertEqual([f.code for f in result.failures], ["no_address"])
 

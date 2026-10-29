@@ -128,8 +128,7 @@ ADDRESS_ROWS = {
     I1: [("atlas", "192.168.1.90"), ("auvik", "192.168.1.72"), ("genesis", "192.168.1.66"),
          ("genie-preview", "192.168.1.24"), ("monarch", "192.168.1.56"),
          ("nas", "192.168.1.89"), ("ontrak", "192.168.1.21"),
-         ("regcache", "192.168.1.79"), ("rizzaura", "192.168.1.62"),
-         ("www", "192.168.1.80")],
+         ("regcache", "192.168.1.79"), ("rizzaura", "192.168.1.62")],
     I2: [("atheniq", "192.168.1.59"), ("blueprint", "192.168.1.76"),
          ("capstone", "192.168.1.30"), ("clearpath", "192.168.1.83"),
          # proxy was recreated here on 2026-10-26 and keeps the edge address.

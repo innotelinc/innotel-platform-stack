@@ -104,6 +104,15 @@ CHECK = "container_address"
 #: its alerts are *delivered* rather than only configured (the probe reads a mail log on
 #: a host the server has left, and the check exits 2 instead of reporting).
 #: `acme` (`.49`) was retired off i1 on 2026-10-02 and is no longer an address to watch.
+#: `www` (`.80`) was retired on 2026-10-29: the public landing page it was named for is
+#: served from `ord-atheniq` (`104.238.162.5:8086`, the target of the edge's
+#: `innotel.us www.innotel.us` vhost), the container has been stopped since its host was
+#: shut down on 2026-10-28 00:42, its rootfs volume is empty and its `boot.autostart` is
+#: false — so nothing dials `.80` and nothing would answer if something did. Keeping the
+#: row made `check-address-latency.py` fail on an address no A record or vhost names,
+#: which is a false alarm in the loud direction: the check is supposed to report a dark
+#: address *someone dials*. The container itself is still there, empty; deleting it is a
+#: separate decision and no check depends on it.
 #: `monitor` (`.88`, SigNoz) joined on 2026-10-26: it was created on `i3` on 2026-10-25 and
 #: was the estate's last running container no row named, so every run of this check warned
 #: about a container that was behaving. It is static in its own netplan
@@ -120,7 +129,6 @@ EXPECTED: dict[str, dict[str, str]] = {
         "ontrak": "192.168.1.21",
         "regcache": "192.168.1.79",
         "rizzaura": "192.168.1.62",
-        "www": "192.168.1.80",
     },
     "i2": {
         "atheniq": "192.168.1.59",
