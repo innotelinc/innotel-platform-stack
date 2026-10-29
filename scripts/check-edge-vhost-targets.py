@@ -35,6 +35,15 @@ WHAT IT CHECKS
      refused, times out, or answers: three facts, and only the first two are failures.
      Port 9 is the discard port and is where the estate *parks* a name it has retired
      (`ai.lms.innotel.us` is parked there on purpose) — reported as PARKED, not dead.
+  3. DECLARED DEVELOPMENT — a target named in `scripts/edge-vhost-dev.tsv` may be dark
+     and is reported as DEV-OFF with the reason that file gives. The dev box
+     (`192.168.1.93`) is a VMware guest on someone's desktop and is off whenever that
+     desktop is; three public names (the telno TLD family, `telno.services` through its
+     reverse tunnel, `fax-staging.lab.innotel.us`) point at it, so without this the check
+     failed every night the desktop was asleep — and a check that cries about a machine
+     nobody expects to be up is a check that gets switched off. The declaration is a file
+     with a reason per line, not a pattern: a *new* dead target fails on its first run, and
+     an address only gets this treatment by being written down beside its justification.
 
 Run it on the edge host (`proxy`), where `/data/nginx` and the target addresses are real:
 
@@ -72,6 +81,9 @@ except ImportError:  # a bare copy still has to run: --prom is then simply unava
 CHECK = "edge_vhost_targets"
 DEFAULT_CONFIG_DIR = Path("/data/nginx")
 DEFAULT_EXPECT = SCRIPT_DIR / "edge-vhost-targets.tsv"
+#: Targets allowed to be dark, with the reason (see rule 3). Beside this file when
+#: installed; absent means nothing is allowed to be dark.
+DEFAULT_DEV = SCRIPT_DIR / "edge-vhost-dev.tsv"
 
 #: The discard port. Parking a name here retires it: the target is meant not to answer.
 PARKED_PORT = 9
@@ -161,6 +173,26 @@ def load_declaration(path: Path) -> list[Declared]:
     return declared
 
 
+def load_development(path: Path | None) -> dict[str, str]:
+    """Read `target<TAB>reason` lines into {target: reason}; a missing file allows nothing.
+
+    `target` is the `host:port` a vhost names, because that is the thing that is off — a
+    whole address would let a new service on the dev box inherit an old justification.
+    """
+    allowed: dict[str, str] = {}
+    if path is None or not path.is_file():
+        return allowed
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        if len(fields) < 2 or not fields[1].strip():
+            raise ValueError(f"{path}: expected target<TAB>reason, got: {line!r}")
+        allowed[fields[0].strip()] = fields[1].strip()
+    return allowed
+
+
 def drift(vhosts: list[Vhost], declared: list[Declared]) -> list[tuple[Declared, Vhost | None]]:
     """Declarations whose live target is different (or whose vhost is gone)."""
     out = []
@@ -198,8 +230,10 @@ def check(
     apply: bool = False,
     timeout: float = 2.0,
     probe=answers,
+    dev: dict[str, str] | None = None,
 ) -> tuple[int, list[dict]]:
     """Run both halves. Returns (exit code, findings) so a test can read the verdict."""
+    dev = dev or {}
     vhosts = load_vhosts(config_dir)
     if not vhosts:
         return 2, []
@@ -230,6 +264,11 @@ def check(
                              "domains": list(vhost.domains), "state": "parked", "ok": True})
             continue
         alive = probe(vhost.host, vhost.port, timeout)
+        if not alive and vhost.target in dev:
+            findings.append({"check": "liveness", "target": vhost.target,
+                             "domains": list(vhost.domains), "state": "development",
+                             "reason": dev[vhost.target], "ok": True})
+            continue
         findings.append({"check": "liveness", "target": vhost.target,
                          "domains": list(vhost.domains),
                          "state": "answers" if alive else "dead", "ok": alive})
@@ -255,6 +294,11 @@ def to_audit(findings: list[dict]) -> "Audit":
             audit.findings.append(Finding(
                 code="parked", level="note",
                 message=f"{f['target']} is parked ({','.join(f['domains'][:1])})"))
+        elif f["state"] == "development":
+            audit.findings.append(Finding(
+                code="development_target", level="note",
+                message=(f"{f['target']} is off as declared — "
+                         f"{','.join(f['domains'][:3]) or '?'}: {f['reason']}")))
     return audit
 
 
@@ -267,11 +311,14 @@ def report(findings: list[dict]) -> str:
             lines.append(f"{verdict:8} {f['domain']:34} wants {f['want']:22} has {got}")
         else:
             domains = ",".join(f["domains"])[:60]
-            lines.append(f"{f['state'].upper():8} {f['target']:22} {domains}")
+            label = "DEV-OFF" if f["state"] == "development" else f["state"].upper()
+            lines.append(f"{label:8} {f['target']:22} {domains}")
     dead = sum(1 for f in findings if f["check"] == "liveness" and not f["ok"])
     drifted = sum(1 for f in findings if f["check"] == "drift" and not f["ok"])
+    dev_off = sum(1 for f in findings if f.get("state") == "development")
     lines.append("")
-    lines.append(f"{len(findings)} finding(s): {drifted} drift, {dead} dead target(s)")
+    tail = f", {dev_off} declared development target(s) off" if dev_off else ""
+    lines.append(f"{len(findings)} finding(s): {drifted} drift, {dead} dead target(s){tail}")
     return "\n".join(lines)
 
 
@@ -282,6 +329,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="declaration to hold the config to ('' to skip drifting)")
     parser.add_argument("--apply", action="store_true",
                         help="rewrite 'set $server'/'set $port' to the declaration")
+    parser.add_argument("--dev", type=Path, default=DEFAULT_DEV,
+                        help="targets allowed to be dark, with their reasons ('' for none)")
     parser.add_argument("--timeout", type=float, default=2.0)
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here")
     parser.add_argument("--json", action="store_true")
@@ -292,7 +341,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no declaration at {expect} — nothing to hold the config to", file=sys.stderr)
         expect = None
 
-    code, findings = check(args.config_dir, expect, args.apply, args.timeout)
+    dev = load_development(args.dev if str(args.dev) not in ("", "none") else None)
+    code, findings = check(args.config_dir, expect, args.apply, args.timeout, dev=dev)
     if args.prom:
         if not HAVE_TELEMETRY:
             print("check-edge-vhost-targets: --prom needs estate_check.py beside this file",

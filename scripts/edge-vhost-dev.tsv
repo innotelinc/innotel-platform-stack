@@ -1,0 +1,19 @@
+# Targets that may be dark, with the reason — `check-edge-vhost-targets.py` reports a
+# dead target listed here as DEV-OFF (a note) instead of a failure.
+#
+# target<TAB>reason
+#
+# The point of the file is that it is short and each line has to justify itself. Rule 2
+# is that a dead target fails: a vhost pointing at a closed port is a 502 nobody sees in
+# a config diff. These four are the exception, and they are one exception — the estate's
+# development box, `192.168.1.93`, a VMware guest on a desktop (`RECOVERY-net-bridge.md`
+# §"Development host"), which is off whenever that desktop is. Read the list before adding
+# to it: a *production* name that points at the dev box belongs here only if its being off
+# is the normal state, not if it means someone forgot to start a service.
+#
+# The telno TLD family and the fax staging app run on the guest itself; `telno.services`
+# reaches it through a reverse tunnel that ends on the edge, so that target is dead for
+# the same reason and disappears with it.
+192.168.1.93:3997	dev box off — fax staging (fax-staging.lab.innotel.us)
+192.168.1.93:8080	dev box off — the telno TLD family (telno.digital, telno.mobi, …)
+172.18.0.1:18080	dev box off — the reverse tunnel telno.services is served through

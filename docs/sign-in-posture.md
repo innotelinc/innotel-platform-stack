@@ -282,6 +282,17 @@ Both are checked now instead of remembered:
 `scripts/edge-vhost-targets.tsv` pins the target of the two admin doors. Everything
 else about them stays manual; that line does not.
 
+One target is allowed to be dark, and it says so in a file:
+`scripts/edge-vhost-dev.tsv`. The development box — `192.168.1.93`, a VMware guest on a
+desktop (`RECOVERY-net-bridge.md` §*Development host*) — carries the telno TLD family,
+the `telno.services` names through a reverse tunnel, and the fax staging app, and it is
+off whenever that desktop is. Without the declaration the check failed on every night
+the desktop slept, about three public names nobody was serving *by design*; with it they
+read `DEV-OFF` and a note, and a **new** dead target still fails on its first run,
+because the file names exact `host:port` pairs with a reason each — a second service on
+the dev box does not inherit the first one's excuse. The distinction the check draws is
+between a target the estate expects to answer and one it expects to be asleep.
+
 ---
 
 ## 2. First-party apps — all Authentik-only

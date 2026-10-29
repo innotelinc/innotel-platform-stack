@@ -67,6 +67,11 @@ class Temp:
         path.write_text(body)
         return path
 
+    def dev(self, rows: list[tuple[str, str]]) -> Path:
+        path = Path(self.dir.name) / "dev.tsv"
+        path.write_text("# target\treason\n" + "".join(f"{t}\t{r}\n" for t, r in rows))
+        return path
+
     def close(self):
         self.dir.cleanup()
 
@@ -154,6 +159,56 @@ class LivenessTest(unittest.TestCase):
             temp.close()
         self.assertEqual(code, 0)
         self.assertEqual(seen, [("192.168.1.56", 8080)])
+
+    def test_a_declared_development_target_may_be_dark(self):
+        # `192.168.1.93` is a VMware guest on a desktop; the telno TLD family and the fax
+        # staging app point at it, so every night the desktop sleeps the check failed.
+        temp = Temp({"1.conf": ("telno.digital", ("192.168.1.93", 8080))})
+        try:
+            dev = targets.load_development(temp.dev([("192.168.1.93:8080", "dev box off")]))
+            code, findings = targets.check(temp.config_dir, None, probe=lambda *a: False, dev=dev)
+            audit = targets.to_audit(findings)
+        finally:
+            temp.close()
+        self.assertEqual(code, 0, findings)
+        self.assertEqual(findings[0]["state"], "development")
+        self.assertEqual(audit.failures, [])
+        self.assertEqual([f.code for f in audit.findings], ["development_target"])
+        self.assertEqual(audit.findings[0].level, "note")
+        self.assertIn("dev box off", audit.findings[0].message)
+
+    def test_a_dead_target_that_is_not_declared_still_fails(self):
+        # The declaration is a file with reasons, not a blanket "dev addresses are fine":
+        # a target absent from it fails on its first run, and only its own `host:port` is
+        # allowed to be dark — a second service on the dev box does not inherit the excuse.
+        temp = Temp({
+            "1.conf": ("telno.digital", ("192.168.1.93", 8080)),
+            "2.conf": ("new.telno.digital", ("192.168.1.93", 9000)),
+        })
+        try:
+            dev = targets.load_development(temp.dev([("192.168.1.93:8080", "dev box off")]))
+            code, findings = targets.check(temp.config_dir, None, probe=lambda *a: False, dev=dev)
+        finally:
+            temp.close()
+        self.assertEqual(code, 1)
+        states = {f["target"]: f["state"] for f in findings}
+        self.assertEqual(states, {"192.168.1.93:8080": "development",
+                                  "192.168.1.93:9000": "dead"})
+
+    def test_a_development_target_that_answers_is_not_special(self):
+        temp = Temp({"1.conf": ("telno.digital", ("192.168.1.93", 8080))})
+        try:
+            dev = targets.load_development(temp.dev([("192.168.1.93:8080", "dev box off")]))
+            code, findings = targets.check(
+                temp.config_dir, None, probe=lambda *a: True, dev=dev)
+        finally:
+            temp.close()
+        self.assertEqual(code, 0)
+        self.assertEqual(findings[0]["state"], "answers")
+
+    def test_no_development_file_allows_nothing(self):
+        with tempfile.TemporaryDirectory() as empty:
+            self.assertEqual(targets.load_development(Path(empty) / "missing.tsv"), {})
 
     def test_no_proxy_hosts_is_exit_two_not_success(self):
         with tempfile.TemporaryDirectory() as empty:
