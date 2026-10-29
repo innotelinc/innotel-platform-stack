@@ -1170,6 +1170,14 @@ placement (finding 7).
   where no account receives it. The check now reaches IMAP and answers “no report in
   the last 7 day(s)” — which is the truth until receivers send, and the state that
   becomes a real alignment verdict on its own.
+  **The path was proved, not assumed (2026-10-29).** A message sent through Stalwart's
+  own submission port to `dmarc@innotel.us` arrived in the `postmaster@atheniq.courses`
+  INBOX — the mailbox and the folder `check-dmarc-alignment.py` reads (`INBOX`, by
+  `SINCE`) — so receivers have somewhere to deliver to and the check will see it. The
+  probe message was deleted afterwards. The mailbox has `INBOX`, `Junk Mail`, `Drafts`,
+  `Sent Items` and `Deleted Items`; `Junk Mail` is empty, so nothing has been mis-filed
+  yet — if a report ever lands there instead, the check reads nothing and says so as
+  “no report”, which is the one shape of silence to watch for.
 - **The inventory check on the edge was an old copy.** `check-estate-inventory.py` had
   been fixed in this repo for i2's rebuilt pools (`default` + `fast`, `main-pool` gone)
   but the edge still ran the version that expected `main-pool`, so it reported two
@@ -1194,3 +1202,12 @@ placement (finding 7).
   gone rather than the address being made to answer; the empty container is left in
   place for whoever decides to delete it. The table's row in §*The estate as it should
   be* is struck through for the same reason, so the next reader does not add it back.
+- **A note is now visible, not just true — 2026-10-29.** Every check could state a note
+  (`parked`, `alias-not-a-mail-domain`, `development_target`, `stopped`) and only the
+  terminal saw it, so the dashboard's “0 failures” could not tell a run that noticed
+  three things from one that noticed nothing. `scripts/estate_check.py` publishes
+  `innotel_estate_check_notes` with one `innotel_estate_check_note{check,code,detail}`
+  series per note, and the dashboard gained both the column and a *What the checks
+  noticed* table. Verified end to end: the edge's textfiles produce 11 note series in
+  Prometheus (three declared-off dev targets, two parked names, the mail record notes,
+  `atheniq` stopped on i2) and Grafana serves the panel reading them.
