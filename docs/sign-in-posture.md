@@ -274,6 +274,16 @@ config diff:
     in the running container — the s6 `prepare` step re-renders that file from its
     template on every start.
 
+> **What the edge actually runs is not what `groups/1-primary.yml` says.** The pin
+> is `innotel/npm-edge:2.16.1`, the last image built from source, because
+> `1-primary/npm` is no longer checked out anywhere; the container on the host is a
+> **locally built `2.16.2`** — 2.16.1 plus the `$realip_remote_addr` template change.
+> The group file is generated from the member repos and cannot carry a local-build
+> note, so it belongs here: **a rebuild from source must bring the template change
+> with it**, and `check-edge-sso-door.py` fails the moment it does not. The version
+> the host runs and the tag the repo pins are two different facts until that image is
+> built from a checkout again.
+
 Both are checked now instead of remembered:
 
     ./scripts/check-edge-vhost-targets.py   # pinned targets + every target answers

@@ -204,8 +204,8 @@ services:
       # an unmounted pool says so instead of writing to the directory underneath.
       #
       # The mounts are kept by /usr/local/sbin/onyx-pool-mounts (from
-      # `scripts/onyx-pool-mounts` here) on a one-minute timer. Its probes are
-      # bounded on purpose: `mountpoint` and `df` block on a stale NFS handle, and
+      # `platform-stack/scripts/onyx-pool-mounts`) on a one-minute timer. Its probes
+      # are bounded on purpose: `mountpoint` and `df` block on a stale NFS handle, and
       # an unbounded probe once mounted a fresh copy on top of the stale one every
       # minute — 32 769 entries under /srv/onyx-pool on 2026-10-29, which hung every
       # `df` on the host and took the load average to ~80 on two vCPUs.

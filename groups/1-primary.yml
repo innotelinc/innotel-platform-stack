@@ -342,14 +342,6 @@ services:
     # the Authentik forward-auth sign-in (`backend/lib/sso.js`), which the
     # upstream image does not have. NPM is no longer a second user directory:
     # the admin UI signs in with the identity the edge already authenticated.
-    # 2026-10-29: the edge host runs a LOCALLY BUILT `2.16.2` — 2.16.1 plus the admin
-    # vhost's peer map reading `$realip_remote_addr` instead of `$remote_addr` (the
-    # realip module had rewritten the latter from `X-Real-IP`, so the edge refused its
-    # own SSO gateway and every sign-in died after Authentik had authenticated it).
-    # That layer was built on the host because `1-primary/npm` is not checked out
-    # anywhere any more; the pin below is the last image that exists from source.
-    # **A rebuild from source must carry the same template change first** —
-    # `scripts/check-edge-sso-door.py` fails the moment it does not.
     image: innotel/npm-edge:2.16.1
     build:
       context: ../../1-primary/npm
