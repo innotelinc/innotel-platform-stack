@@ -35,6 +35,11 @@ WHAT IT CHECKS
      refused, times out, or answers: three facts, and only the first two are failures.
      Port 9 is the discard port and is where the estate *parks* a name it has retired
      (`ai.lms.innotel.us` is parked there on purpose) — reported as PARKED, not dead.
+     A vhost whose server block answers `return 3xx` before any `location` is reported
+     the same way: retiring a name by redirecting it leaves the old `set $port` behind,
+     pointing at the service that was switched off. That is a redirect that works, not
+     a dead door — and five of them (the media hostnames after the Gizmo merge) were
+     turning this check red for exactly that reason.
   3. DECLARED DEVELOPMENT — a target named in `scripts/edge-vhost-dev.tsv` may be dark
      and is reported as DEV-OFF with the reason that file gives. The dev box
      (`192.168.1.93`) is a VMware guest on someone's desktop and is off whenever that
@@ -91,6 +96,11 @@ PARKED_PORT = 9
 SERVER_RE = re.compile(r"^\s*set\s+\$server\s+\"([^\"]*)\";", re.M)
 PORT_RE = re.compile(r"^\s*set\s+\$port\s+(\d+);", re.M)
 NAME_RE = re.compile(r"^\s*server_name\s+([^;]+);", re.M)
+#: A 3xx `return` at *server* level — NPM writes it unindented, and anything
+#: deeper is inside a `location` — fires
+#: before any `location`, so the target named above it is never proxied to. Retiring a
+#: name by redirecting it leaves exactly this — a live door and a dead `set $port`.
+RETURN_RE = re.compile(r"^[ \t]{0,2}return\s+3\d\d\b", re.M)
 
 
 @dataclass(frozen=True)
@@ -101,6 +111,7 @@ class Vhost:
     domains: tuple[str, ...]
     host: str
     port: int
+    redirects: bool = False
 
     @property
     def name(self) -> str:
@@ -141,7 +152,8 @@ def parse_vhost(path: Path) -> Vhost | None:
     if not (server and port and names):
         return None
     domains = tuple(names.group(1).split())
-    return Vhost(path=path, domains=domains, host=server.group(1), port=int(port.group(1)))
+    return Vhost(path=path, domains=domains, host=server.group(1), port=int(port.group(1)),
+                 redirects=bool(RETURN_RE.search(text)))
 
 
 def load_vhosts(config_dir: Path) -> list[Vhost]:
@@ -263,6 +275,12 @@ def check(
             findings.append({"check": "liveness", "target": vhost.target,
                              "domains": list(vhost.domains), "state": "parked", "ok": True})
             continue
+        if vhost.redirects:
+            # The name answers with a 3xx before anything is proxied, so the target is
+            # unused rather than broken — the same shape as a parked name.
+            findings.append({"check": "liveness", "target": vhost.target,
+                             "domains": list(vhost.domains), "state": "redirected", "ok": True})
+            continue
         alive = probe(vhost.host, vhost.port, timeout)
         if not alive and vhost.target in dev:
             findings.append({"check": "liveness", "target": vhost.target,
@@ -294,6 +312,11 @@ def to_audit(findings: list[dict]) -> "Audit":
             audit.findings.append(Finding(
                 code="parked", level="note",
                 message=f"{f['target']} is parked ({','.join(f['domains'][:1])})"))
+        elif f["state"] == "redirected":
+            audit.findings.append(Finding(
+                code="redirected", level="note",
+                message=(f"{','.join(f['domains'][:1])} redirects, so {f['target']} "
+                         "is unused")))
         elif f["state"] == "development":
             audit.findings.append(Finding(
                 code="development_target", level="note",
