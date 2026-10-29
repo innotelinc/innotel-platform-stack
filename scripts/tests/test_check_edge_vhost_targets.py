@@ -142,6 +142,45 @@ class LivenessTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(findings[0]["state"], "parked")
 
+    def test_a_redirected_name_is_not_a_dead_door(self):
+        # Retiring a media hostname left `set $port` pointing at a container that was
+        # stopped, with a server-level `return 301` in front of it: the door works, the
+        # target is unused, and calling that dead turned the whole check red.
+        temp = Temp({"1.conf": ("movies.innotel.us", ("192.168.1.56", 14001))})
+        conf = temp.config_dir / "proxy_host" / "1.conf"
+        conf.write_text(conf.read_text().replace(
+            "  listen 80;",
+            "  listen 80;\n\n  return 301 https://media.innotel.us$request_uri;"))
+        probed = []
+
+        def probe(host, port, timeout=2.0):
+            probed.append((host, port))
+            return False
+
+        try:
+            code, findings = targets.check(temp.config_dir, None, probe=probe)
+        finally:
+            temp.close()
+        self.assertEqual(code, 0)
+        self.assertEqual(findings[0]["state"], "redirected")
+        self.assertEqual(probed, [], "a redirected vhost's target is never dialled")
+        self.assertEqual(targets.to_audit(findings).failures, [])
+
+    def test_a_redirect_inside_a_location_still_needs_its_target(self):
+        # Only a server-level return fires before the location tree; a `return` nested
+        # in one path leaves every other path proxied, so the target still matters.
+        temp = Temp({"1.conf": ("mixed.innotel.us", ("192.168.1.56", 9001))})
+        conf = temp.config_dir / "proxy_host" / "1.conf"
+        conf.write_text(conf.read_text().replace(
+            "    include conf.d/include/proxy.conf;",
+            "    return 301 https://elsewhere.innotel.us;"))
+        try:
+            code, findings = targets.check(temp.config_dir, None, probe=lambda *a: False)
+        finally:
+            temp.close()
+        self.assertEqual(code, 1)
+        self.assertEqual(findings[0]["state"], "dead")
+
     def test_each_target_is_probed_once_across_vhosts(self):
         temp = Temp({
             "1.conf": ("a.innotel.us", ("192.168.1.56", 8080)),
