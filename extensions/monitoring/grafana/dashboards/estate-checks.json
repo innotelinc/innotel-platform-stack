@@ -1,6 +1,8 @@
 {
-  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), whether the alert receiver actually delivers mail, and whether the mail domains' SPF/DKIM/DMARC records resolve in the public zone plus, for the outbound half, whether the SMTP chain sends at all (check-mail-relay.py shows up in the per-check panels beside them). The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Traffic — what was delivered, bounced, queued, authenticated and blocked in the last day — is the other dashboard, `mail.json`, built from `check-mail-traffic.py`'s counts. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
-  "annotations": { "list": [] },
+  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), whether the alert receiver actually delivers mail, and whether the mail domains' SPF/DKIM/DMARC records resolve in the public zone plus, for the outbound half, whether the SMTP chain sends at all (check-mail-relay.py shows up in the per-check panels beside them). The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Traffic \u2014 what was delivered, bounced, queued, authenticated and blocked in the last day \u2014 is the other dashboard, `mail.json`, built from `check-mail-traffic.py`'s counts. Provisioned read-only from this repo \u2014 see provisioning/dashboards/dashboards.yml.",
+  "annotations": {
+    "list": []
+  },
   "editable": false,
   "graphTooltip": 1,
   "links": [],
@@ -10,22 +12,70 @@
       "type": "stat",
       "title": "Every check green",
       "description": "1 only when every estate check ran and found nothing. A check that could not reach a host publishes 0, so this is red for an unreachable host as well as a bad finding.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 5, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 5,
+        "x": 0,
+        "y": 0
+      },
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "NOT GREEN", "color": "red" }, "1": { "text": "GREEN", "color": "green" } } }
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NOT GREEN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "GREEN",
+                  "color": "green"
+                }
+              }
+            }
           ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
-          "color": { "mode": "thresholds" }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
         },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "textMode": "auto" },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "editorMode": "code",
           "expr": "min(innotel_estate_check_last_status)",
           "instant": true,
@@ -38,20 +88,56 @@
       "id": 2,
       "type": "stat",
       "title": "Checks reporting",
-      "description": "How many checks have a series at all — one per ExecStart line in systemd/estate-checks.service, held in step by scripts/tests/test_estate_dashboard.py. Fewer than expected means a textfile is missing, which is the silence `EstateCheckAbsent` exists to catch.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 4, "x": 5, "y": 0 },
+      "description": "How many checks have a series at all \u2014 one per ExecStart line in systemd/estate-checks.service, held in step by scripts/tests/test_estate_dashboard.py. Fewer than expected means a textfile is missing, which is the silence `EstateCheckAbsent` exists to catch.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 5,
+        "y": 0
+      },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 16 }] },
-          "color": { "mode": "thresholds" }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 17
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
         },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "editorMode": "code",
           "expr": "count(innotel_estate_check_last_run_timestamp)",
           "instant": true,
@@ -64,43 +150,186 @@
       "id": 3,
       "type": "table",
       "title": "Status, failures, warnings and notes by check",
-      "description": "One row per check. `status` is 1 only for a clean run; `failures` and `warnings` are what it found; `notes` is what it stated and did not fail on — a parked name, a dev target the estate declares is asleep, a mail name that is a CNAME — so a green row still says what was noticed.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 7, "x": 9, "y": 0 },
-      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "filterable": true }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 2 }] } }, "overrides": [] },
-      "options": { "showHeader": true },
+      "description": "One row per check. `status` is 1 only for a clean run; `failures` and `warnings` are what it found; `notes` is what it stated and did not fail on \u2014 a parked name, a dev target the estate declares is asleep, a mail name that is a CNAME \u2014 so a green row still says what was noticed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 7,
+        "x": 9,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_last_status", "instant": true, "format": "table", "legendFormat": "status", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_failures", "instant": true, "format": "table", "legendFormat": "failures", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_warnings", "instant": true, "format": "table", "legendFormat": "warnings", "refId": "C" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_notes", "instant": true, "format": "table", "legendFormat": "notes", "refId": "D" }
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_last_status",
+          "instant": true,
+          "format": "table",
+          "legendFormat": "status",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_failures",
+          "instant": true,
+          "format": "table",
+          "legendFormat": "failures",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_warnings",
+          "instant": true,
+          "format": "table",
+          "legendFormat": "warnings",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_notes",
+          "instant": true,
+          "format": "table",
+          "legendFormat": "notes",
+          "refId": "D"
+        }
       ],
       "transformations": [
-        { "id": "merge", "options": {} },
-        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "check": "check" } } }
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "check": "check"
+            }
+          }
+        }
       ]
     },
     {
       "id": 9,
       "type": "stat",
       "title": "Alert receiver delivered",
-      "description": "1 only when the probe alert injected through the estate's Alertmanager was seen delivered by the mail server. A receiver that is configured but silenced publishes 0 here while every other panel stays green — the state check-alert-delivery.py exists to make visible.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "description": "1 only when the probe alert injected through the estate's Alertmanager was seen delivered by the mail server. A receiver that is configured but silenced publishes 0 here while every other panel stays green \u2014 the state check-alert-delivery.py exists to make visible.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "SILENT", "color": "red" }, "1": { "text": "DELIVERED", "color": "green" } } }
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "SILENT",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "DELIVERED",
+                  "color": "green"
+                }
+              }
+            }
           ],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
-          "color": { "mode": "thresholds" }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
         },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "textMode": "auto" },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "editorMode": "code",
           "expr": "innotel_estate_check_alert_delivered",
           "instant": true,
@@ -113,13 +342,64 @@
       "id": 4,
       "type": "timeseries",
       "title": "Failures and warnings over time",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
-      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_failures", "legendFormat": "{{check}} failures", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_warnings", "legendFormat": "{{check}} warnings", "refId": "B" }
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_failures",
+          "legendFormat": "{{check}} failures",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_warnings",
+          "legendFormat": "{{check}} warnings",
+          "refId": "B"
+        }
       ]
     },
     {
@@ -127,21 +407,61 @@
       "type": "stat",
       "title": "Slowest address now",
       "description": "The worst median ICMP round-trip across every dialled address. ~7 ms is healthy; hundreds of ms is a radio holding frames (see systemd/wifi-powersave-off.service).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 5, "x": 12, "y": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 12,
+        "y": 6
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
           "decimals": 1,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 200 }, { "color": "red", "value": 1000 }] },
-          "color": { "mode": "thresholds" }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 200
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
         },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true }, "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "editorMode": "code",
           "expr": "innotel_estate_check_address_latency_ms",
           "instant": true,
@@ -154,21 +474,50 @@
       "id": 6,
       "type": "timeseries",
       "title": "Address latency (median ICMP)",
-      "description": "Every address the estate dials — hosts and containers. A step up here, across the board, is the WiFi power-save regression; a step up for one address is that address.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "description": "Every address the estate dials \u2014 hosts and containers. A step up here, across the board, is the WiFi power-save regression; a step up for one address is that address.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
           "min": 0,
-          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 0, "showPoints": "never" }
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "fillOpacity": 0,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "editorMode": "code",
           "expr": "innotel_estate_check_address_latency_ms",
           "legendFormat": "{{name}} ({{kind}})",
@@ -181,22 +530,67 @@
       "type": "timeseries",
       "title": "Root filesystem used",
       "description": "Each host's root filesystem, from check-host-disk.py. 80 % is the warning line and 90 % the failure line; i3 has the least room.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 30 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
           "min": 0,
           "max": 100,
-          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 0, "showPoints": "never" },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 80 }, { "color": "red", "value": 90 }] }
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "fillOpacity": 0,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "editorMode": "code",
           "expr": "innotel_estate_check_host_disk_percent",
           "legendFormat": "{{host}} {{mount}}",
@@ -209,13 +603,49 @@
       "type": "timeseries",
       "title": "Time since a clean run",
       "description": "How long since each check last ran and found nothing. Flat and rising with no reset is EstateCheckStale.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 22 },
-      "fieldConfig": { "defaults": { "unit": "s", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "linear", "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "fillOpacity": 0,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "editorMode": "code",
           "expr": "time() - innotel_estate_check_last_success_timestamp",
           "legendFormat": "{{check}}",
@@ -227,64 +657,312 @@
       "id": 10,
       "type": "stat",
       "title": "Mail auth records",
-      "description": "How many of the mail domains' SPF/DKIM/DMARC records resolved in the zone the public reads, out of how many must. A drop here is a record that stopped resolving — for example a rotation Stalwart generated but, because the public zone refuses its TSIG updates, never published. See check-mail-auth.py.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 38 },
+      "description": "How many of the mail domains' SPF/DKIM/DMARC records resolved in the zone the public reads, out of how many must. A drop here is a record that stopped resolving \u2014 for example a rotation Stalwart generated but, because the public zone refuses its TSIG updates, never published. See check-mail-auth.py.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
       "fieldConfig": {
-        "defaults": { "unit": "short", "min": 0, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }] } },
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              }
+            ]
+          }
+        },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_auth_records_ok", "instant": true, "legendFormat": "resolved", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_auth_records_expected", "instant": true, "legendFormat": "expected", "refId": "B" }
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_mail_auth_records_ok",
+          "instant": true,
+          "legendFormat": "resolved",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_mail_auth_records_expected",
+          "instant": true,
+          "legendFormat": "expected",
+          "refId": "B"
+        }
       ]
     },
     {
       "id": 11,
       "type": "stat",
       "title": "DMARC: messages p=reject would drop",
-      "description": "The DMARC aggregate reports' own verdict — messages whose SPF and DKIM both failed to align, beside every message the reports named and the number of reports read. Non-zero would-be-dropped means a tightened policy would lose mail, and that failure is silent: the symptom is a reset link that never arrives. `reports read 0` is the other state — nothing has been reported on yet (the rua is new) or the reporting path is broken, and the check's note says which. See check-dmarc-alignment.py.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 44 },
-      "fieldConfig": {
-        "defaults": { "unit": "short", "min": 0, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } },
-        "overrides": [{ "matcher": { "id": "byName", "options": "messages" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }] }, { "matcher": { "id": "byName", "options": "reports read" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }] }]
+      "description": "The DMARC aggregate reports' own verdict \u2014 messages whose SPF and DKIM both failed to align, beside every message the reports named and the number of reports read. Non-zero would-be-dropped means a tightened policy would lose mail, and that failure is silent: the symptom is a reset link that never arrives. `reports read 0` is the other state \u2014 nothing has been reported on yet (the rua is new) or the reporting path is broken, and the check's note says which. See check-dmarc-alignment.py.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "messages"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "reports read"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_dmarc_messages_both_fail", "instant": true, "legendFormat": "would be dropped", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_dmarc_messages", "instant": true, "legendFormat": "messages", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_dmarc_reports", "instant": true, "legendFormat": "reports read", "refId": "C" }
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_dmarc_messages_both_fail",
+          "instant": true,
+          "legendFormat": "would be dropped",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_dmarc_messages",
+          "instant": true,
+          "legendFormat": "messages",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_dmarc_reports",
+          "instant": true,
+          "legendFormat": "reports read",
+          "refId": "C"
+        }
       ]
     },
     {
       "id": 12,
       "type": "table",
       "title": "What the checks noticed",
-      "description": "The notes, one row each, with the reason the check wrote. They are true and they are not failures — the dev box is off, a name is parked, a mail name is a CNAME — so a green run that noticed three things and a run that noticed nothing used to read the same on this page. `scripts/estate_check.py` publishes each one as its own series.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 50 },
-      "fieldConfig": {
-        "defaults": { "color": { "mode": "fixed", "fixedColor": "text" }, "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "filterable": true }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } },
-        "overrides": [{ "matcher": { "id": "byName", "options": "detail" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "auto", "wrapText": true } }] }]
+      "description": "The notes, one row each, with the reason the check wrote. They are true and they are not failures \u2014 the dev box is off, a name is parked, a mail name is a CNAME \u2014 so a green run that noticed three things and a run that noticed nothing used to read the same on this page. `scripts/estate_check.py` publishes each one as its own series.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       },
-      "options": { "showHeader": true, "cellHeight": "sm" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "detail"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto",
+                  "wrapText": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_note", "instant": true, "format": "table", "legendFormat": "__auto", "refId": "A" }
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_note",
+          "instant": true,
+          "format": "table",
+          "legendFormat": "__auto",
+          "refId": "A"
+        }
       ],
       "transformations": [
-        { "id": "merge", "options": {} },
-        { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true }, "renameByName": { "check": "check", "code": "code", "detail": "what it noticed" } } },
-        { "id": "sortBy", "options": { "sort": [{ "field": "check", "desc": false }] } }
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "check": "check",
+              "code": "code",
+              "detail": "what it noticed"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "check",
+                "desc": false
+              }
+            ]
+          }
+        }
       ]
     }
   ],
   "refresh": "1m",
   "schemaVersion": 39,
-  "tags": ["innotel", "estate", "checks"],
-  "templating": { "list": [] },
-  "time": { "from": "now-24h", "to": "now" },
+  "tags": [
+    "innotel",
+    "estate",
+    "checks"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Estate checks",
