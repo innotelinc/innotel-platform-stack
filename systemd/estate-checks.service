@@ -78,6 +78,14 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-dmarc-alignment.py 
 # TCP-connects every target; the discard port is reported as parked, not dead.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-targets.py --config-dir /usr/src/proxy/data/nginx --expect /opt/innotel/estate-checks/edge-vhost-targets.tsv --prom ${TEXTFILE_DIR}/estate-check-edge-vhost-targets.prom
 
+# The media estate's two remaining doors, from the outside: `media.innotel.us` has to
+# answer 302 to Authentik (a 200 means the single sign-in has fallen off the front of
+# Gizmo) and `tv.innotel.us` has to answer with Jellyfin's web client plus the Gizmo
+# splash. The watch door is deliberately not a redirect — TV and native clients cannot
+# complete a browser OIDC flow — so nothing else in the estate would notice it going
+# dark, and a dead door there means a title plays nowhere.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-media-doors.py --prom ${TEXTFILE_DIR}/estate-check-media-doors.prom
+
 # And that the door still opens for the people it is for: drives
 # `POST /api/tokens/sso` inside the edge container as the gateway's hop, where a
 # learner in the required group has to get a token and an identity outside it — or
