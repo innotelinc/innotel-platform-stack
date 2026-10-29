@@ -1030,6 +1030,20 @@ placement (finding 7).
   with `dig` against `.71` and the public resolver. The parent domain's own DKIM keys
   (Stalwart had generated them but never published them) are live too, so mail sent
   as `@innotel.us` verifies.
+  **Corrected 2026-10-29 — `signara.innotel.us` is not a mail domain any more.** It is
+  a `CNAME` to `innotel.us`, it is absent from Stalwart's `x:Domain` set, and nothing
+  sends as it: Alertmanager authenticates as `alertmanager@innotel.us` and only
+  *announces* `signara.innotel.us` in `EHLO`. A `CNAME` cannot carry the `TXT` an SPF
+  needs, and the name inherits `innotel.us`'s `p=reject` DMARC as an organisational
+  subdomain, so there is nothing of its own left to publish. `check-mail-auth.py` now
+  states that as a note instead of failing on records that cannot exist — and its
+  selector table was corrected at the same time: it still named `v1-*-20260901`, two
+  rotations behind, so it had been failing on retired selectors while saying nothing
+  about the live ones. The table now names what Stalwart's `x:DkimSignature/get`
+  reports with `stage: active` (`v1-*-20261010` for `innotel.us`), which is the only
+  honest answer to "what must the public zone serve". Read it before editing:
+  the live set is one JMAP call away, and a stale table fails loudly in the wrong
+  direction. Re-proved 2026-10-29: `4/4 records resolved`, exit 0.
   Three operational facts, all learned the hard way:
   - **Stalwart publishes its DKIM records to Technitium itself now — 2026-10-03.** It
     used to do a TSIG dynamic update at `192.168.1.80` (the older BIND copy of the
@@ -1108,12 +1122,10 @@ placement (finding 7).
   stays quiet. Verified 2026-10-26: the rule group loads (`health=ok`), `promtool test
   rules rules/tests/omniroute-selfheal.test.yml` passes on the mounted copy, and the
   labelled series (`provider`, `connection`) reaches Prometheus through node-exporter.
-- **`check-mail-auth.py` cannot run on the edge.** It needs `dig`, which is not
-  installed there, so it exits 2 (a host it needs could not be read) and the estate has
-  no `dig`-based proof of its SPF/DKIM/DMARC records — the finding that
-  §*Changes applied 2026-10-15* surfaced by wiring the receiver. Install `dig` on the
-  edge, or take the served records from a resolver the check can reach, so this is a
-  pass or a real failure rather than an unreadable check.
+- ~~**`check-mail-auth.py` cannot run on the edge.**~~ **Closed 2026-10-29:** `dig` is
+  present on the edge again and the check reads the authoritative zone from there
+  (`4/4 records resolved`, exit 0). The real defect it had been hiding was its own
+  selector table, not a missing binary — see §*Changes applied 2026-10-29*.
 
 ### Changes applied 2026-10-28
 
@@ -1134,3 +1146,42 @@ placement (finding 7).
   its state is exactly the failure that looks healthy everywhere else.
 - **`monitor` (`.88`) joined the table.** It had been running on `i3` the whole time
   and every run spent a warning on it.
+
+### Changes applied 2026-10-29
+
+- **`mail_auth` was failing on a table, not on the zone.** The check named the DKIM
+  selectors Stalwart had generated in September; Stalwart had rotated twice since, and
+  every one of the four selectors the check looked for was retired or had never existed
+  (`signara.innotel.us`, see §*The signing domain's mail is authenticated now*). The
+  zone already served the live keys. The table now names what `x:DkimSignature/get`
+  reports with `stage: active` — `v1-*-20261010` for `innotel.us` — and a name that is a
+  web alias is a **note**, not a missing record. Re-proved: `4/4 records resolved`,
+  `last_status 1`.
+- **The DMARC reports have a mailbox that can be read — 2026-10-29.** The
+  `postmaster@atheniq.courses` account (the report mailbox, `rua` for
+  `atheniq.courses`) had no credential at all, which is why `check-dmarc-alignment.py`
+  could only ever exit 2. Accounts on these domains take their passwords from an
+  external directory, so the credential is an **app password** on the account
+  (`x:AppPassword`, IMAP read permissions, described “estate-checks DMARC reader (i2
+  proxy)”), and it is held where the unit reads it: `DMARC_USER` / `DMARC_PASSWORD` in
+  `/etc/innotel/estate-checks.env` (0640) on the edge. `dmarc@innotel.us` was added as
+  an alias on the same mailbox and `_dmarc.innotel.us` now points its `rua` there — the
+  old address (`dmarc-6ac2…@mail.innotel.us`) was on the mail server's own hostname,
+  where no account receives it. The check now reaches IMAP and answers “no report in
+  the last 7 day(s)” — which is the truth until receivers send, and the state that
+  becomes a real alignment verdict on its own.
+- **The inventory check on the edge was an old copy.** `check-estate-inventory.py` had
+  been fixed in this repo for i2's rebuilt pools (`default` + `fast`, `main-pool` gone)
+  but the edge still ran the version that expected `main-pool`, so it reported two
+  failures and a warning against the host as it is. Deployed; `0 failure(s)`.
+- **An expired JWT no longer strands every MFE page.** With a stale
+  `edx-jwt-cookie-header-payload` the app's public config call is answered **401** by
+  the LMS, the app then posts its own page (`POST /catalog/` → **405**), and the error
+  boundary's *Try again* repeats it — `/catalog/` and `/dashboard` both showed
+  “An unexpected error occurred” with no way out but clearing cookies. The MFE shells
+  now drop an expired, unparsable or unsigned token before the app boots
+  (`atheniq-work/scripts/patch-mfe-stale-jwt.py`, also called from
+  `deploy-mfe-brand.sh`), so the config call is anonymous, the app initialises, and its
+  own `login_refresh` installs a fresh token. Verified signed in with an expired token:
+  `/catalog/` renders the catalogue and `/dashboard` the learner home, both with no
+  error page and no 405.
