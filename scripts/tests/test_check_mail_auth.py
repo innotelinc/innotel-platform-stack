@@ -151,6 +151,24 @@ class CollectCase(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertLess(ok, total)
 
+    def test_an_alias_is_a_note_and_not_a_record(self):
+        """A CNAME web name must not inflate the ok/expected series the panel shows."""
+        present = {
+            "innotel.us": ["v=spf1 mx -all"],
+            "_dmarc.innotel.us": ["v=DMARC1; p=reject"],
+        }
+        result, ok, total = mail.collect(
+            {"innotel.us": {"dkim": []}},
+            "192.168.1.71", self._lookup(present),
+            aliases={"signara.innotel.us": "innotel.us"},
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual((ok, total), (2, 2), "the alias is stated, not counted as a record")
+        alias = [f for f in result.findings if f.code == "alias-not-a-mail-domain"]
+        self.assertEqual(len(alias), 1)
+        self.assertEqual(alias[0].level, "note")
+        self.assertIn("CNAME", alias[0].message)
+
     def test_a_refused_query_raises_dns_unreadable(self):
         def lookup(name, server):
             raise mail.DnsUnreadable(server, "REFUSED")
@@ -179,15 +197,19 @@ class MainCase(unittest.TestCase):
         return code, body
 
     def test_a_clean_domain_exits_zero_and_publishes_status_one(self):
-        code, body = self._run({
-            "innotel.us": ["v=spf1 mx -all"],
-            "_dmarc.innotel.us": ["v=DMARC1; p=reject"],
-            "v1-ed25519-20260901._domainkey.innotel.us": ["v=DKIM1; p=abc"],
-            "v1-rsa-20260901._domainkey.innotel.us": ["v=DKIM1; p=def"],
-        })
+        # Built from the table itself: `main` reads `DOMAINS`, so a rotation that edits
+        # the table must not need this fixture edited too — but a rotation that forgets
+        # the zone still fails, because the keys below are what the zone answered.
+        present = {"innotel.us": ["v=spf1 mx -all"], "_dmarc.innotel.us": ["v=DMARC1; p=reject"]}
+        for selector in mail.DOMAINS["innotel.us"]["dkim"]:
+            present[f"{selector}._domainkey.innotel.us"] = ["v=DKIM1; p=abc"]
+        code, body = self._run(present)
         self.assertEqual(code, 0)
         self.assertIn('innotel_estate_check_last_status{check="mail_auth"} 1', body)
-        self.assertIn('innotel_estate_check_mail_auth_records_expected{check="mail_auth"} 4', body)
+        expected = 2 + len(mail.DOMAINS["innotel.us"]["dkim"])
+        self.assertIn(
+            f'innotel_estate_check_mail_auth_records_expected{{check="mail_auth"}} {expected}', body
+        )
 
     def test_a_missing_record_exits_one_and_publishes_status_zero(self):
         code, body = self._run({"innotel.us": ["v=spf1 mx -all"]})

@@ -40,6 +40,16 @@ well as to the zone, and that edit is the record of what the public zone must se
 which is the only place the estate can catch Stalwart's publish gap until its TSIG
 update is accepted.
 
+It must name the selector Stalwart is **signing with now**, not the one a record was
+last edited for. Read them from the mail server rather than from memory:
+
+    x:DkimSignature/get  →  selector + stage, per domain   (stage `active` signs)
+
+On 2026-10-29 this table still named `v1-*-20260901`, retired a rotation earlier, so the
+check failed four times over records that were never needed — and the *live* selectors
+went unmentioned. A stale table is a false alarm in the loud direction and a blind spot
+in the quiet one; the mail server is the authority for which selectors are live.
+
 Usage:
     ./scripts/check-mail-auth.py
     ./scripts/check-mail-auth.py --server 192.168.1.71 --prom /path/to/textfile
@@ -71,16 +81,25 @@ CHECK = "mail_auth"
 #: reads, authoritative only for the nameservers themselves).
 AUTHORITATIVE = "192.168.1.71"
 
-#: What each mail domain must serve. The DKIM selectors are the ones Stalwart generated
-#: and that were published by hand; a rotation adds its new selector to the zone **and**
-#: to this table, which is the point at which a missing record becomes visible.
+#: What each mail domain must serve. The DKIM selectors are the ones Stalwart is
+#: **signing with now** (`stage: active` in `x:DkimSignature/get`, read 2026-10-29); a
+#: rotation adds its new selector to the zone **and** to this table, which is the point
+#: at which a missing record becomes visible. A retired selector is left out: its
+#: mailbox no longer exists, and keeping it here only re-reports its own removal.
 DOMAINS: dict[str, dict[str, object]] = {
     "innotel.us": {
-        "dkim": ["v1-ed25519-20260901", "v1-rsa-20260901"],
+        "dkim": ["v1-ed25519-20261010", "v1-rsa-20261010"],
     },
-    "signara.innotel.us": {
-        "dkim": ["v1-ed25519-20261003", "v1-rsa-20261003"],
-    },
+}
+
+#: Names that are **not** mail domains, kept here so the next reader does not add them
+#: back. `signara.innotel.us` was a Stalwart domain with its own SPF/DKIM/DMARC on
+#: 2026-10-03 (see `docs/container-placement.md`); by 2026-10-29 it is a `CNAME` to
+#: `innotel.us` and no Stalwart domain at all. A CNAME cannot carry the TXT records SPF
+#: needs, and the name inherits the parent's `p=reject` DMARC as an organisational
+#: subdomain, so there is nothing of its own left to publish.
+ALIASES: dict[str, str] = {
+    "signara.innotel.us": "innotel.us",
 }
 
 #: A TXT answer is one or more quoted character-strings that decode to one value; a
@@ -200,11 +219,26 @@ def mail_series(ok_records: int, total_records: int) -> str:
     return "\n".join(lines)
 
 
-def collect(domains: dict[str, dict[str, object]], server: str, lookup=None) -> tuple[Audit, int, int]:
+def alias_finding(name: str, target: str) -> Finding:
+    """A name that is a web alias, not a mail domain — stated, never counted as okay."""
+    return Finding(
+        "alias-not-a-mail-domain",
+        "note",
+        f"{name} is a CNAME to {target}: it is a web name with no mail of its own — "
+        "no SPF or DKIM can be published beside a CNAME, and its DMARC is the "
+        "organisational domain's. Mail claiming an address there does not align; "
+        f"give it its own account and records before using it as a From domain",
+    )
+
+
+def collect(
+    domains: dict[str, dict[str, object]], server: str, lookup=None, aliases: dict[str, str] | None = None
+) -> tuple[Audit, int, int]:
     """Run every query and fold the answers into one `Audit` plus its ok/total counts.
 
     `lookup` is resolved at call time (not bound as a default) so a test can replace
-    `query_txt` without the network.
+    `query_txt` without the network. `aliases` adds a note per web alias; it defaults
+    to empty because `main` passes `ALIASES` and a test passes only what it means.
     """
     lookup = lookup or query_txt
     records: list[tuple[str, str, str | None]] = []
@@ -216,11 +250,17 @@ def collect(domains: dict[str, dict[str, object]], server: str, lookup=None) -> 
         records.append((domain, "dmarc", _dmarc(dmarc_texts)))
         for selector in spec.get("dkim", []):  # type: ignore[union-attr]
             detail.findings.append(evaluate(domain, selector, lambda name: lookup(name, server)))
+    for name, target in (aliases or {}).items():
+        detail.findings.append(alias_finding(name, target))
 
     result = audit(records)
     result.findings.extend(detail.findings)
-    ok = len([f for f in result.findings if f.level == "note"])
-    return result, ok, len(result.findings)
+    # The alias notes are not records the zone must serve, so they are stated but kept
+    # out of the ok/expected series — a panel that said "5/5 records" for four records
+    # and one CNAME would overstate what was verified.
+    stated = len(aliases or {})
+    ok = len([f for f in result.findings if f.level == "note"]) - stated
+    return result, ok, len(result.findings) - stated
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -248,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        result, ok, total = collect(domains, args.server)
+        result, ok, total = collect(domains, args.server, aliases=ALIASES)
     except DnsUnreadable as error:
         print(f"check-mail-auth: {error}", file=sys.stderr)
         emit(None, ran=False)
