@@ -63,8 +63,8 @@
     {
       "id": 3,
       "type": "table",
-      "title": "Status, failures and warnings by check",
-      "description": "One row per check. `status` is 1 only for a clean run; `failures` and `warnings` are what it found.",
+      "title": "Status, failures, warnings and notes by check",
+      "description": "One row per check. `status` is 1 only for a clean run; `failures` and `warnings` are what it found; `notes` is what it stated and did not fail on — a parked name, a dev target the estate declares is asleep, a mail name that is a CNAME — so a green row still says what was noticed.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 6, "w": 7, "x": 9, "y": 0 },
       "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "filterable": true }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 2 }] } }, "overrides": [] },
@@ -72,7 +72,8 @@
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_last_status", "instant": true, "format": "table", "legendFormat": "status", "refId": "A" },
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_failures", "instant": true, "format": "table", "legendFormat": "failures", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_warnings", "instant": true, "format": "table", "legendFormat": "warnings", "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_warnings", "instant": true, "format": "table", "legendFormat": "warnings", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_notes", "instant": true, "format": "table", "legendFormat": "notes", "refId": "D" }
       ],
       "transformations": [
         { "id": "merge", "options": {} },
@@ -254,6 +255,27 @@
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_dmarc_messages_both_fail", "instant": true, "legendFormat": "would be dropped", "refId": "A" },
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_dmarc_messages", "instant": true, "legendFormat": "messages", "refId": "B" }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "What the checks noticed",
+      "description": "The notes, one row each, with the reason the check wrote. They are true and they are not failures — the dev box is off, a name is parked, a mail name is a CNAME — so a green run that noticed three things and a run that noticed nothing used to read the same on this page. `scripts/estate_check.py` publishes each one as its own series.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 50 },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "text" }, "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "filterable": true }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } },
+        "overrides": [{ "matcher": { "id": "byName", "options": "detail" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "auto", "wrapText": true } }] }]
+      },
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_note", "instant": true, "format": "table", "legendFormat": "__auto", "refId": "A" }
+      ],
+      "transformations": [
+        { "id": "merge", "options": {} },
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true }, "renameByName": { "check": "check", "code": "code", "detail": "what it noticed" } } },
+        { "id": "sortBy", "options": { "sort": [{ "field": "check", "desc": false }] } }
       ]
     }
   ],

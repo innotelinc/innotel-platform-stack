@@ -15,6 +15,18 @@ say which check fired:
     innotel_estate_check_last_success_timestamp{check="…"}   advanced only on a clean run
     innotel_estate_check_failures{check="…"}                 things that do not hold
     innotel_estate_check_warnings{check="…"}                 things worth a look
+    innotel_estate_check_notes{check="…"}                    stated, not failures (see below)
+    innotel_estate_check_note{check="…",code="…",detail="…"}   one series per note, so it can be read
+
+A **note** is a finding the check makes and does not fail on — an address that is parked
+on purpose, a mail alias that is a CNAME instead of a mail domain, a vhost target the
+estate declares is asleep. They were the one part of a run that reached the terminal and
+nowhere else, so the dashboard could say "0 failures" without saying *what was noticed*,
+and the `DEV-OFF`/`alias`/`parked` cases read as silence. Each note is published as its
+own series with its code and its message, because a count alone is not something anybody
+can act on; `detail` carries the message with quotes and backslashes escaped for the
+textfile format. Cardinality is bounded by the notes a check actually writes (single
+digits), which is why a label is a fair place for the text.
 
 `last_status` is 1 only when the check ran AND found nothing, so a check that could
 not reach a host reads as a failure rather than as silence — the 2026-10-01 outage
@@ -53,6 +65,11 @@ class Audit:
     @property
     def warnings(self) -> list[Finding]:
         return [f for f in self.findings if f.level == "warn"]
+
+    @property
+    def notes(self) -> list[Finding]:
+        """Stated findings: true, worth reading, not a failure."""
+        return [f for f in self.findings if f.level == "note"]
 
     @property
     def ok(self) -> bool:
@@ -152,6 +169,11 @@ def _prior_metric(path: str, name: str) -> float | None:
     return None
 
 
+def _label(value: str) -> str:
+    """Escape a label value the way the textfile format requires (\\, ", newline)."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
 def prometheus_text(
     check: str,
     result: Audit | None,
@@ -170,6 +192,7 @@ def prometheus_text(
     ok = bool(ran_ok and result is not None and result.ok)
     failures = len(result.failures) if result is not None else None
     warnings = len(result.warnings) if result is not None else None
+    notes = len(result.notes) if result is not None else None
     success = now if ok else prior_success
     selector = f'{{check="{check}"}}'
 
@@ -189,7 +212,20 @@ def prometheus_text(
             f"# HELP {METRIC}_warnings Things the check found worth a look",
             f"# TYPE {METRIC}_warnings gauge",
             f"{METRIC}_warnings{selector} {warnings}",
+            f"# HELP {METRIC}_notes Things the check stated and did not fail on",
+            f"# TYPE {METRIC}_notes gauge",
+            f"{METRIC}_notes{selector} {notes}",
         ]
+        if result is not None and result.notes:
+            lines += [
+                f"# HELP {METRIC}_note One series per note, with the reason in `detail`",
+                f"# TYPE {METRIC}_note gauge",
+            ]
+            lines += [
+                f'{METRIC}_note{{check="{check}",code="{_label(note.code)}",'
+                f'detail="{_label(note.message)}"}} 1'
+                for note in result.notes
+            ]
     if success is not None:
         lines += [
             f"# HELP {METRIC}_last_success_timestamp When the check last ran and found nothing wrong",

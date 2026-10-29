@@ -79,6 +79,19 @@ class DashboardCase(unittest.TestCase):
         # so this has to be visible before the policy moves, not after.
         self.assertIn("innotel_estate_check_dmarc_messages_both_fail", self.raw)
 
+    def test_it_shows_what_a_green_check_noticed(self):
+        # A note is true and is not a failure, so it reaches no alert — which is why it has
+        # to reach the page. Before 2026-10-29 the notes went to the terminal only, and a
+        # green row that had noticed three things read exactly like one that had noticed
+        # nothing.
+        self.assertIn("innotel_estate_check_note", self.raw)
+        self.assertIn("innotel_estate_check_notes", self.raw)
+        panel = next(p for p in self.doc["panels"] if p["title"] == "What the checks noticed")
+        self.assertEqual([t["expr"] for t in panel["targets"]], ["innotel_estate_check_note"])
+        row = next(p for p in self.doc["panels"]
+                   if p["title"] == "Status, failures, warnings and notes by check")
+        self.assertIn("innotel_estate_check_notes", [t["expr"] for t in row["targets"]])
+
     def test_the_reporting_threshold_matches_the_checks_the_unit_runs(self):
         # "Checks reporting" goes green at a number, and that number is how many checks
         # should be publishing — which is what the unit decides, one ExecStart line each.
