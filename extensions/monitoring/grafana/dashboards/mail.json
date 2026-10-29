@@ -1,0 +1,306 @@
+{
+  "__comment": "The mail server's traffic, as a dashboard — the questions `check-mail-relay` and `check-mail-auth` cannot answer because they are about configuration rather than volume: how much was delivered, what bounced, who authenticated and from where, what was ingested as spam, and how much of the estate's inbound traffic was scanners. Every number is a count over a window recomputed from Stalwart's own log by scripts/check-mail-traffic.py (v0.16 has no Prometheus endpoint, so the log is the measurement); freshness therefore follows the estate-checks timer, not a live scrape. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
+  "annotations": { "list": [] },
+  "editable": false,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Delivered, last 24 h",
+      "description": "Messages Stalwart finished delivering in the window, whichever queue they left on. The number that used to be a guess.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "sum(innotel_estate_check_mail_delivered)", "instant": true, "legendFormat": "delivered", "refId": "A" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Delivery failures, last 24 h",
+      "description": "Delivery attempts that failed, by kind. `permanent` is a bounce — a real message that never arrived, and the one failure no DNS or route check can see. Red at any value: a single bounce is worth a look, because it is always addressed to somebody. Reads 0 rather than \"no data\" when nothing failed, so a quiet day and a missing measurement cannot be confused.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "sum(innotel_estate_check_mail_delivery_failed) or vector(0)", "instant": true, "legendFormat": "failed", "refId": "A" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Accepted for delivery",
+      "description": "Messages handed to the queue in the window, split by how they arrived: authenticated submission (the estate's own senders) or inbound from outside. A number here with deliveries at zero is the silent outage — mail accepted and never sent.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "none" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "sum(innotel_estate_check_mail_queued)", "instant": true, "legendFormat": "queued", "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Authentication failures",
+      "description": "Failed logins across every listener — submission, IMAP, the management port. Some are expected (an expired console token); a jump is somebody guessing passwords or a client stuck on a stale credential.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 20 }, { "color": "red", "value": 100 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "sum(innotel_estate_check_mail_auth{result=\"failure\"})", "instant": true, "legendFormat": "auth failures", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Blocked connections",
+      "description": "Connections refused because the source address is on Stalwart's ban list, plus addresses banned for scanning in the window. This is the internet knocking: it should never be zero for long, and a spike is worth knowing about before it shows up as load.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "none" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_blocked_ips", "instant": true, "legendFormat": "blocked", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_scan_bans", "instant": true, "legendFormat": "banned", "refId": "B" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Mail checks clean",
+      "description": "Every mail-side estate check at once: the traffic reader, the outbound chain, the published SPF/DKIM/DMARC records, and DMARC alignment. 1 only when all four ran and found nothing — a check that could not reach the mail server reads as 0, which is the state that used to be silence.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [{ "type": "value", "options": { "0": { "text": "NOT CLEAN", "color": "red" }, "1": { "text": "CLEAN", "color": "green" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "min(innotel_estate_check_last_status{check=~\"mail_traffic|mail_relay|mail_auth|dmarc_alignment\"})", "instant": true, "legendFormat": "mail checks", "refId": "A" }
+      ]
+    },
+
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Time since a delivery",
+      "description": "Age of the newest delivered message in the window. Hours is normal on a quiet day; days means the queue is not moving and nothing has been sent that reached anyone.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 86400 }, { "color": "red", "value": 259200 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "clamp_min(time() - innotel_estate_check_mail_last_delivery_timestamp, 0)", "instant": true, "legendFormat": "since delivery", "refId": "A" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Time since a failed login",
+      "description": "Age of the newest authentication error. Together with the failure count this tells a burst (old) from an attempt happening now.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 5 },
+      "fieldConfig": { "defaults": { "unit": "s", "color": { "mode": "none" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "clamp_min(time() - innotel_estate_check_mail_last_auth_failure_timestamp, 0)", "instant": true, "legendFormat": "since failed login", "refId": "A" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Log lines measured",
+      "description": "How many mail-log lines the window contained. Zero with no delivered count is a server that is not writing its log — the reader is fine and there is nothing to read, which is a different problem from a quiet mailbox.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 5 },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "none" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_lines", "instant": true, "legendFormat": "lines", "refId": "A" }
+      ]
+    },
+
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Delivered, by queue",
+      "description": "Rolling 24-hour deliveries, split by where they went: `local` is a mailbox on this server, `remote` left the estate through the relay. The pair is the shape of the estate's mail: mostly local alerts, a little outbound customer mail.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_delivered", "legendFormat": "{{ queue }}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Delivery outcomes",
+      "description": "Delivered against failed, with failures by kind. A line that flattens while `permanent` climbs is a relay rejecting mail it used to accept — the failure mode that reaches the sender as silence.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "showPoints": "never" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "delivered" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byRegexp", "options": "failed: .*" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "sum(innotel_estate_check_mail_delivered)", "legendFormat": "delivered", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_delivery_failed", "legendFormat": "failed: {{ reason }}", "refId": "B" }
+      ]
+    },
+
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Authentication, by listener and result",
+      "description": "Who is signing in, where. `submission` is the estate's own mailers, `imaps`/`pop3s` are people and devices reading mail, `http` is the management console (where an expired token reads as an error). A listener nobody uses is a door worth closing.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_auth", "legendFormat": "{{ listener }} · {{ result }}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "bargauge",
+      "title": "Top sender domains",
+      "description": "Volume by the domain mail was sent from, top ten and `other`. Senders the estate recognises (`innotel.us`, `atheniq.courses`) beside a long tail of outside domains is normal; a single unknown domain at the top is the shape of a compromised account or a list that has been scraped.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 17 },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "continuous-GrYlRd" }, "min": 0 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "displayMode": "basic", "orientation": "horizontal", "showUnfilled": true, "valueMode": "color" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "topk(10, innotel_estate_check_mail_sender_domain)", "instant": true, "legendFormat": "{{ domain }}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "bargauge",
+      "title": "Top recipient domains",
+      "description": "Volume by where mail was addressed. Mostly `innotel.us` (the estate writing to itself) with a thin outbound edge; if the outbound share disappears, this is where it shows first.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 17 },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "continuous-GrYlRd" }, "min": 0 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "displayMode": "basic", "orientation": "horizontal", "showUnfilled": true, "valueMode": "color" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "topk(10, innotel_estate_check_mail_recipient_domain)", "instant": true, "legendFormat": "{{ domain }}", "refId": "A" }
+      ]
+    },
+
+    {
+      "id": 15,
+      "type": "table",
+      "title": "What went into a mailbox",
+      "description": "Messages Stalwart filed, by classification. `spam` is what the scanner caught, `ham` what it let through; a jump in spam with no jump in blocked connections means the filter is doing the work instead of the ban list.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 25 },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "filterable": true }, "unit": "short" }, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_ingested", "instant": true, "format": "table", "legendFormat": "{{ result }}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Refused and rate-limited",
+      "description": "The four ways a message is turned away: no such mailbox, relay refused (an unauthenticated sender trying to send off-estate), rate limit, and a scan ban. `mailbox_missing` climbing is a mailer sending to an address that does not exist — the same shape as the dead `mailto:` links the website carried.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 25 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_mailbox_missing", "legendFormat": "no such mailbox", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_relay_refused", "legendFormat": "relay refused", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_rate_limited", "legendFormat": "rate limited", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_mail_scan_bans", "legendFormat": "scan bans", "refId": "D" }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "table",
+      "title": "What the mail checks noticed",
+      "description": "One row per mail-side check: whether it ran clean, what it failed on, and what it noticed and did not fail on. A green row with notes is a row that looked at something — which is the difference between \"nothing wrong\" and \"nothing examined\".",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 25 },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "filterable": true }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 2 }] } }, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_last_status{check=~\"mail_traffic|mail_relay|mail_auth|dmarc_alignment\"}", "instant": true, "format": "table", "legendFormat": "status", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_failures{check=~\"mail_traffic|mail_relay|mail_auth|dmarc_alignment\"}", "instant": true, "format": "table", "legendFormat": "failures", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_warnings{check=~\"mail_traffic|mail_relay|mail_auth|dmarc_alignment\"}", "instant": true, "format": "table", "legendFormat": "warnings", "refId": "C" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_note{check=~\"mail_traffic|mail_relay|mail_auth|dmarc_alignment\"}", "instant": true, "format": "table", "legendFormat": "notes", "refId": "D" }
+      ],
+      "transformations": [
+        { "id": "merge", "options": {} },
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "check": "check" } } }
+      ]
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["innotel", "mail", "estate-checks"],
+  "templating": { "list": [] },
+  "time": { "from": "now-7d", "to": "now" },
+  "timezone": "browser",
+  "title": "Mail — traffic, delivery and authentication",
+  "uid": "innotel-mail",
+  "version": 1,
+  "weekStart": ""
+}

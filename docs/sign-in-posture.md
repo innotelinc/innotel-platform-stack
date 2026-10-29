@@ -353,6 +353,64 @@ flagged:
   is down. Pasted-token sign-in is no longer the *intended* door, only the
   recovery one.
 
+### Stalwart's console is its own IdP, and has to be told a URL that reaches it
+
+`mail`'s console (`/admin`, `/account`) is served by Stalwart, which is also the
+OAuth provider for that console: the SPA reads `oauth-client-id` from its own
+`<meta>`, fetches `/.well-known/oauth-authorization-server` from its origin, and
+navigates to the **absolute** `authorization_endpoint` it finds there. Stalwart
+builds that document from `STALWART_PUBLIC_URL` — unset until 2026-10-29, so it
+fell back to the mail hostname, `https://mail.innotel.us`.
+
+That name does not reach Stalwart. NPM host `95.conf` sends `mail.innotel.us` to
+`192.168.1.15:3000`, the Bulwark webmail; Stalwart listens on `:8080`. Every
+sign-in therefore left for a host running a different application, which
+answered with its own `/en/login` page — the form accepted the password and the
+browser simply landed in the webmail, no code ever coming back.
+
+Closed 2026-10-29 in two moves, because the first one only proved the diagnosis.
+Setting `STALWART_PUBLIC_URL` at all — to `http://192.168.1.15:8080`, the address
+the estate's own clients dial — made the console complete sign-in on the origin
+the browser is already on. That is a plain-HTTP admin login, so the console then
+moved to the name that was always meant to carry it: NPM host 221 already sent
+`admin.mail.innotel.us` to `192.168.1.15:8080` with a valid Let's Encrypt
+certificate (`CN=admin.mail.innotel.us`, to 2027-01-10) and `ssl_forced`. It now
+carries `access_list_id: 0` (API `PUT /api/nginx/proxy-hosts/221`; the list
+itself is untouched and still guards `app.onyx.innotel.us`), and
+`/etc/stalwart/stalwart.env` (0640; pre-change copy at `.bak-20261029`) reads
+`STALWART_PUBLIC_URL=https://admin.mail.innotel.us`, applied with
+`systemctl restart stalwart`.
+
+Verified end to end at `https://admin.mail.innotel.us/account/login` with a
+verified certificate and no basic-auth challenge: shell 200 →
+`authorization_endpoint` on that same origin → `POST /api/auth` `authenticated`
+→ `/auth/token` bearer → `GET /jmap/session` 200 as `admin@innotel.us`.
+`check-mail-relay.py` still exit 0, all eight listeners up, no errors in the
+Stalwart log since the restart, and `mail.innotel.us` / `webmail.innotel.us`
+still serving the webmail. The LAN address works too: it serves the portal and
+hands sign-in off to the certificate-bearing name.
+
+Two things here that read as bugs and are not:
+
+* **The account name is the full address.** `admin` returns
+  `{"type":"failure"}` — which the page renders as "Invalid username or
+  password" — while `admin@innotel.us` returns `authenticated` with the same
+  credential. The estate's own checks use the address for exactly this reason.
+* **The console cannot live behind `auth_basic`.** A browser sends exactly one
+  `Authorization` header: the SPA's API calls carry `Authorization: Bearer`, and
+  nginx answers those with 401 before Stalwart sees the request. That is why the
+  access list had to come off this vhost rather than merely being kept in front
+  of `:8080`. The console is now protected by Stalwart's own sign-in alone — an
+  Admin account over a verified certificate, behind Stalwart's rate limiter — so
+  if the LAN-only posture matters more than remote access, the equivalent
+  control is an nginx `allow`/`deny` on the vhost, which leaves the header
+  alone.
+
+The `x:Application` row for the web UI still carries `oauthClientId: null`, so
+the meta stays empty and the portal authorizes as an anonymous public client
+with PKCE. That is Stalwart's own default and the flow completes on it; it is
+noted here because the empty `<meta>` looks like the fault and is not.
+
 ---
 
 ## 3. Third-party apps

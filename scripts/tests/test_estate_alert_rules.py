@@ -47,6 +47,8 @@ CHECK_SCRIPTS = [
     "check-edge-vhost-targets",
     "check-edge-sso-door",
     "check-mount-stacks",
+    # The mail server's traffic, which is the only source the mail dashboard has.
+    "check-mail-traffic",
 ]
 
 

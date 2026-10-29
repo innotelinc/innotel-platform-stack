@@ -95,3 +95,13 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --
 # container — a container's mountpoints are not paths on its host — and bounds every
 # probe at five seconds.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mount-stacks.py --prom ${TEXTFILE_DIR}/estate-check-mount-stacks.prom
+
+# And what the mail server actually *did* in the last day. Everything above asks
+# whether a thing is configured; this reads Stalwart's own log for the traffic —
+# delivered, bounced, queued, who authenticated, what was blocked — because no
+# other check can answer "how much mail moved" and the Grafana mail dashboard has
+# no other source (Stalwart v0.16 exposes no Prometheus endpoint). The container is
+# found by asking each host what it runs, so the mail server moving host does not
+# take this check with it. It publishes its counts as `innotel_estate_check_mail_*`
+# beside the shared contract; the panels are dashboard `mail.json`.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-traffic.py --prom ${TEXTFILE_DIR}/estate-check-mail-traffic.prom

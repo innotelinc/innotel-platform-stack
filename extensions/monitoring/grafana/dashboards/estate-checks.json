@@ -1,5 +1,5 @@
 {
-  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), whether the alert receiver actually delivers mail, and whether the mail domains' SPF/DKIM/DMARC records resolve in the public zone plus, for the outbound half, whether the SMTP chain sends at all (check-mail-relay.py shows up in the per-check panels beside them). The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
+  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), whether the alert receiver actually delivers mail, and whether the mail domains' SPF/DKIM/DMARC records resolve in the public zone plus, for the outbound half, whether the SMTP chain sends at all (check-mail-relay.py shows up in the per-check panels beside them). The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Traffic — what was delivered, bounced, queued, authenticated and blocked in the last day — is the other dashboard, `mail.json`, built from `check-mail-traffic.py`'s counts. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
   "annotations": { "list": [] },
   "editable": false,
   "graphTooltip": 1,
@@ -43,7 +43,7 @@
       "gridPos": { "h": 6, "w": 4, "x": 5, "y": 0 },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 15 }] },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 16 }] },
           "color": { "mode": "thresholds" }
         },
         "overrides": []

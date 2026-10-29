@@ -182,12 +182,23 @@ Three things differ from the mesh variant, all three deliberately:
   which is what both files did until 2026-10-15
   (`docs/container-placement.md` §*Changes applied 2026-10-15*).
 - **There is no OTLP collector**, because neither stack emits OTel yet.
-- **The dashboard belongs to this variant.**
+- **The dashboards belong to this variant.**
   `grafana/dashboards/host-overview.json` reads node-exporter metrics, so only
   this compose mounts `grafana/dashboards`; the mesh variant mounts
   `grafana/provisioning/datasources` alone. Both share the pinned datasource uid
   (`prometheus`) that every provisioned panel references by uid rather than by
   name.
+
+  Two of the provisioned dashboards are the estate's own rather than the host's:
+  `estate-checks.json` (the host checks, one panel per question they answer) and
+  `mail.json` (mail traffic — delivered, bounced, queued, who authenticated, what
+  was blocked). The mail one has no scrape behind it: Stalwart v0.16 exposes no
+  Prometheus endpoint and its `x:Metrics/get` answers for account storage only, so
+  `scripts/check-mail-traffic.py` reads the server's own log over ssh and publishes
+  the counts as `innotel_estate_check_mail_*` beside the shared check contract.
+  That makes its numbers as fresh as `estate-checks.timer` (30 minutes), not as a
+  live scrape — read the "log lines measured" panel before reading a zero as an
+  outage.
 
 ## Single-Server Mode
 
