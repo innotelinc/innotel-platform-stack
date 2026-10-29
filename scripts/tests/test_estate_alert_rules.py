@@ -41,6 +41,12 @@ CHECK_SCRIPTS = [
     "check-authentik-privilege",
     "check-sso-callbacks",
     "check-dmarc-alignment",
+    # The edge's own two invariant checks and the mount table. They were added to the
+    # timer on 2026-10-29 without branches here, which is exactly the silence this test
+    # exists to catch: a textfile that stops arriving would have alerted on nothing.
+    "check-edge-vhost-targets",
+    "check-edge-sso-door",
+    "check-mount-stacks",
 ]
 
 

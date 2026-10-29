@@ -161,6 +161,15 @@ services:
     image: distro-control-plane:local
     container_name: distro-control-plane
     restart: unless-stopped
+    # An init in front of the app, because the app is the container's PID 1 and its
+    # own healthcheck is a child of PID 1. Node reaps the processes it spawns, not
+    # the ones `docker exec` creates, so a healthcheck killed at its 5s timeout stays
+    # in the process table as a zombie. On 2026-10-29 the pools went stale underneath
+    # the control plane, every probe timed out, and 2 376 dead children accumulated
+    # over six hours — which starved the container until `/health` answered nothing,
+    # the door at admin.distro.innotel.us answered 000, and the failure looked like
+    # an application bug rather than a reaping one. `init` makes that impossible.
+    init: true
     env_file: ../../5-dev/distro/.env
     environment:
       # Gateway address is resolved at runtime: GATEWAY_DASHBOARD_URL /
@@ -193,6 +202,13 @@ services:
       # `rslave` so a remount on the host reaches the container. The pools are
       # folders under it, and the storage adapter still checks the mount table:
       # an unmounted pool says so instead of writing to the directory underneath.
+      #
+      # The mounts are kept by /usr/local/sbin/onyx-pool-mounts (from
+      # `scripts/onyx-pool-mounts` here) on a one-minute timer. Its probes are
+      # bounded on purpose: `mountpoint` and `df` block on a stale NFS handle, and
+      # an unbounded probe once mounted a fresh copy on top of the stale one every
+      # minute — 32 769 entries under /srv/onyx-pool on 2026-10-29, which hung every
+      # `df` on the host and took the load average to ~80 on two vCPUs.
       - /srv/onyx-pool:/data/pools:rslave
     extra_hosts:
       # Lets CONTROL_ALERT_WEBHOOK_URL point at a receiver on the host, e.g.

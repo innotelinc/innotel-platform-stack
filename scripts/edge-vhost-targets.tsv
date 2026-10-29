@@ -1,0 +1,15 @@
+# Vhost targets the estate pins — `check-edge-vhost-targets.py` holds the running edge
+# to this file and fails when a vhost names a target that is not declared here.
+#
+# Only vhosts whose target is a *contract* belong here. A normal proxy host points at a
+# service that moves with its container and its UI entry is the truth; these two exist
+# because the admin UI has no other way in: both doors terminate the Authentik sign-in
+# at the SSO gateway (`cerulean-npm-sso`), and after the gateway left the edge's network
+# namespace they still pointed at the edge's own loopback, which answered 502.
+#
+# The second column is an address, never a name: the gateway is one container on the
+# `npm-gate` network, and the edge's peer map trusts exactly that address.
+#
+# domain<TAB>host<TAB>port<TAB>note
+admin.monarch.innotel.us	172.31.42.10	4180	Admin UI door on Monarch's name — SSO gateway
+proxy.innotel.us	172.31.42.10	4180	Admin UI door on the proxy's name — SSO gateway

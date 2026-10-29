@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Keep Distro's Onyx shares mounted without operator action. Installed as
+# /usr/local/sbin/onyx-pool-mounts in the `distro` container, run by
+# `onyx-pool-mounts.timer` every minute so a replugged or rebooted Onyx is picked
+# up, and a dead NFS mount is replaced instead of being reported as mounted
+# forever.
+#
+# Every probe here is bounded. `mountpoint` and `df` both BLOCK on a stale NFS
+# handle (uninterruptible mount walk), and an unbounded probe turned this timer
+# into a mount storm: each run found the target "not mounted" (the probe was still
+# spinning), mounted a fresh copy on top of the stale one, and left the probe
+# behind. 32 769 entries accumulated under /srv/onyx-pool on 2026-10-29, which in
+# turn made every `df` on the host hang, took the host's load average to ~80 on two
+# vCPUs, and left the control plane's health probe timing out — that is why
+# admin.distro.innotel.us answered nothing for hours. A timeout on the probe, and
+# refusing to mount over an entry it could not clear, is what stops a recurrence.
+#
+# The stale handles themselves came from the server: `nfs-ganesha` on onyx was
+# restarted at 00:24 on 2026-10-28, and every mount made before that restart kept
+# the old handles. `stat -f` on such a mount never returns, which is the reason no
+# unbounded probe belongs in this script.
+set -uo pipefail
+
+STATE=/run/onyx-pool-main.dev
+PROBE_TIMEOUT=5
+UMOUNT_TIMEOUT=10
+log() { echo "$(date -Is) $*"; }
+
+# Is the target in the mount table at all? Cheaper and safer than `mountpoint`,
+# which walks the target and blocks on a stale handle.
+mounted() { grep -q " $1 " /proc/mounts; }
+
+# How many times is the target mounted? Anything above one is a stack this timer
+# created earlier, and every extra copy makes the next probe slower.
+depth() { grep -c " $1 " /proc/mounts || true; }
+
+# Detach every copy of the target, by path, top of the stack first. `-f` is tried
+# before `-l`: a lazy umount leaves the entry in the table while references are
+# held, which is exactly how the next run convinced itself the target was free.
+clear_mount() {
+  local target=$1 i
+  for i in $(seq 1 8); do
+    mounted "$target" || return 0
+    timeout "$UMOUNT_TIMEOUT" umount -f "$target" 2>/dev/null \
+      || timeout "$UMOUNT_TIMEOUT" umount -l "$target" 2>/dev/null \
+      || true
+    mounted "$target" || return 0
+    sleep 1
+  done
+  mounted "$target" && return 1
+  return 0
+}
+
+ensure_nfs() {
+  local target=$1
+  mkdir -p "$target" 2>/dev/null || true
+  if mounted "$target"; then
+    if timeout "$PROBE_TIMEOUT" stat -f "$target" >/dev/null 2>&1; then
+      local d
+      d=$(depth "$target")
+      if [ "$d" -le 1 ]; then
+        return 0
+      fi
+      log "$target is mounted $d times; collapsing the stack"
+      if ! clear_mount "$target"; then
+        log "$target: could not clear the stacked mounts; not mounting again"
+        return 1
+      fi
+    else
+      log "$target is stale; remounting"
+      if ! clear_mount "$target"; then
+        log "$target: stale mount could not be cleared; not mounting again"
+        return 1
+      fi
+    fi
+  fi
+  timeout 45 mount "$target" || { log "mount $target failed"; return 1; }
+  return 0
+}
+
+remounted=0
+if ensure_nfs /srv/onyx-pool/main-pool; then
+  dev=$(timeout "$PROBE_TIMEOUT" stat -c %d /srv/onyx-pool/main-pool 2>/dev/null || echo none)
+  if [ "$dev" != "$(cat "$STATE" 2>/dev/null)" ]; then
+    echo "$dev" > "$STATE"
+    remounted=1
+  fi
+fi
+
+ensure_nfs /srv/onyx-pool/onyx-data || true
+
+# sdc is the same export as main-pool; re-create it when the share behind it was
+# remounted.
+if [ "$remounted" = 1 ] || ! mounted /srv/onyx-pool/sdc; then
+  clear_mount /srv/onyx-pool/sdc || log "bind /srv/onyx-pool/sdc: stale mount could not be cleared"
+  timeout 20 mount /srv/onyx-pool/sdc 2>/dev/null || log "bind /srv/onyx-pool/sdc failed"
+fi

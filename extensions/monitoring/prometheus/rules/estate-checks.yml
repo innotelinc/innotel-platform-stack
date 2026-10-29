@@ -12,7 +12,9 @@
 # `check-group-compose-freshness.py` (`group_compose_freshness`) and
 # `check-authentik-privilege.py` (`authentik_privilege`) — the one about who can
 # administer the directory — and `check-sso-callbacks.py` (`sso_callback`), the one
-# about a sign-in gate's answer fitting the proxy in front of it — run by
+# about a sign-in gate's answer fitting the proxy in front of it — and the edge's own
+# two, `check-edge-vhost-targets.py` (`edge_vhost_targets`) and `check-edge-sso-door.py`
+# (`edge_sso_door`), and `check-mount-stacks.py` (`mount_stack`) — run by
 # `systemd/estate-checks.{service,timer}` on the Cerulean edge, which writes each into
 # node-exporter's textfile directory.
 #
@@ -48,6 +50,12 @@
 # rebuild starts from behind — and CI only compares them when *this* repo changes, while
 # the inputs live in the member repos. It takes both sides from the remote (~15 s of
 # shallow clones), so the answer is about the branches, never about a working copy.
+# `mount_stack` is the one about a number rather than a verdict: 32 769 NFS mount entries
+# accumulated under `/srv/onyx-pool` on 2026-10-29, each mounted on top of a stale handle
+# after ganesha restarted, until every `df` on i3 blocked and `admin.distro.innotel.us`
+# answered nothing. A second entry for one target is the early warning, and nothing else in
+# the estate reports it; `stale` is the outage, and the probe is bounded because an
+# unbounded one joins the queue it is looking for.
 #
 # Every rule but one keys on a series, so it can only speak about a check whose
 # textfile reached node-exporter. `EstateCheckAbsent` is the exception: it fires when a
@@ -90,6 +98,9 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="authentik_privilege"}), "check", "authentik_privilege", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="sso_callback"}), "check", "sso_callback", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="dmarc_alignment"}), "check", "dmarc_alignment", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="edge_vhost_targets"}), "check", "edge_vhost_targets", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="edge_sso_door"}), "check", "edge_sso_door", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="mount_stack"}), "check", "mount_stack", "check", ".*")
         for: 30m
         labels:
           severity: critical

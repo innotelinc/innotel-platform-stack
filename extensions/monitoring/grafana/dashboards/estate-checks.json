@@ -43,7 +43,7 @@
       "gridPos": { "h": 6, "w": 4, "x": 5, "y": 0 },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 12 }] },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 15 }] },
           "color": { "mode": "thresholds" }
         },
         "overrides": []

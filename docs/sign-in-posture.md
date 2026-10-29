@@ -203,7 +203,16 @@ host's *own* empty docker0 and every gateway exits on
 | `grafana.capstone.innotel.us` | `grafana-sso` | `14012` | `http://grafana:3000` | `innotel-app-gateway` |
 | `workflow.capstone.innotel.us` | `workflow-sso` | `14013` | `http://workflow-studio:8090` | `innotel-app-gateway` |
 | `pbx.capstone`, `pbx.innotel.us`, `pbx.zeus`, `fax.zeus` | `pbx-sso` | `14014` | `http://192.168.1.30:8083` (FreePBX) | `innotel-app-gateway` |
+| `fax.pbx.services` | `pbx-sso` | `14014` | `http://192.168.1.30:8083` (FreePBX — `/fax/` serves AvantFAX) | `innotel-app-gateway` |
 | `dns.internal.innotel.us` | `technitium-sso` | `14015` | `http://192.168.1.71:5380` | `innotel-app-gateway` |
+
+> **`fax.pbx.services` was pointed at `.30:14015` until 2026-10-29** — a port no
+> gateway has ever listened on, in the row below this one's neighbour. The name
+> answered 502 for as long as the PBX has run on Capstone, and nothing noticed
+> because this table did not name it: the door had no owner to be checked against.
+> It is `pbx-sso` like the other PBX names (its Authentik redirect already carries
+> `redirect_uri=https://fax.pbx.services/oauth2/callback`), so the vhost now names
+> `192.168.1.30:14014` and `check-edge-vhost-targets.py` reports it answering.
 
 Host ports are *per host*, and `14010`–`14013` are now used twice: they are
 Capstone's app gateways on `.30` and the four media gateways above on `.56`. The
@@ -240,6 +249,38 @@ name. Both are outside `MONARCH_DOMAIN` / `NPM_BASE_DOMAIN`, so no
 pointed at a gateway like everything else, and re-pointing them is a manual
 step — the redirect URIs they use (`https://req.innotel.us/oauth2/callback`)
 are registered on the `monarch-media` provider.
+
+#### What that manual step has to get right (2026-10-29)
+
+Two failures came out of "manual", on the same day, and neither is visible in a
+config diff:
+
+  * `admin.monarch.innotel.us` still forwarded to `127.0.0.1:4180` — left over
+    from when `cerulean-npm-sso` shared the edge's network namespace. It runs as
+    a neighbour now (`npm-gate`, `172.31.42.10`), so nothing listened on the
+    edge's loopback and the door answered **502**, while `proxy.innotel.us` one
+    row away answered 302 and looked healthy. A loopback target is only a target
+    while the service shares the namespace; nginx reports nothing when it does
+    not, it proxies into a closed port.
+  * the edge's peer map read `$remote_addr`, which the realip module had already
+    rewritten from `X-Real-IP` — and the door's `proxy.conf` sets that header to
+    the **browser's** address. Every request through the gateway therefore looked
+    like it came from `73.68.203.71`, the map said "no", and every sign-in ended
+    on the admin UI's "open the edge hostname" screen after Authentik had already
+    authenticated the browser. The map has to read `$realip_remote_addr`, the
+    address nginx actually saw: forging `X-Real-IP` then only makes a caller look
+    *less* trusted, never more. The fix belongs in the image
+    (`1-primary/npm/docker/rootfs/etc/nginx/conf.d/production.conf.template`), not
+    in the running container — the s6 `prepare` step re-renders that file from its
+    template on every start.
+
+Both are checked now instead of remembered:
+
+    ./scripts/check-edge-vhost-targets.py   # pinned targets + every target answers
+    ./scripts/check-edge-sso-door.py        # a learner gets a token; outsiders and forgeries do not
+
+`scripts/edge-vhost-targets.tsv` pins the target of the two admin doors. Everything
+else about them stays manual; that line does not.
 
 ---
 

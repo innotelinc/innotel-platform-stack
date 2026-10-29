@@ -65,3 +65,30 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --
 # above (the `rua` mailbox); the check has no default credential and must never carry
 # one. No reports in the window is exit 2, never a quiet pass.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-dmarc-alignment.py --prom ${TEXTFILE_DIR}/estate-check-dmarc-alignment.prom
+
+# The edge's own two ways of losing a door without saying so (2026-10-29): a proxy
+# host left pointing at a target that stopped existing (a loopback target from
+# before the SSO gateway moved into its own network namespace — 502 on
+# `admin.monarch.innotel.us` while the door beside it looked healthy), and a proxy
+# host that drifted off the target `scripts/edge-vhost-targets.tsv` pins. Reads the
+# generated blocks where the edge keeps them (the `proxy` container's volume) and
+# TCP-connects every target; the discard port is reported as parked, not dead.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-targets.py --config-dir /usr/src/proxy/data/nginx --expect /opt/innotel/estate-checks/edge-vhost-targets.tsv --prom ${TEXTFILE_DIR}/estate-check-edge-vhost-targets.prom
+
+# And that the door still opens for the people it is for: drives
+# `POST /api/tokens/sso` inside the edge container as the gateway's hop, where a
+# learner in the required group has to get a token and an identity outside it — or
+# one forged at the published admin port — has to be refused. The 2026-10-29
+# sign-in outage was a peer map reading `$remote_addr` after realip had rewritten
+# it; every case here still said 403, and nothing was watching.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --prom ${TEXTFILE_DIR}/estate-check-edge-sso-door.prom
+
+# And that no NFS share has been mounted twice or gone stale. On 2026-10-29
+# `/srv/onyx-pool` in `distro` held 32 769 entries: ganesha restarted, every handle
+# went stale, `mountpoint` blocks on a stale handle instead of failing, and the
+# minute timer therefore mounted another copy on top each run until every `df` on i3
+# queued behind the probes and the control plane's health probe could not be
+# answered. It reads each host and then each running container *inside* the
+# container — a container's mountpoints are not paths on its host — and bounds every
+# probe at five seconds.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mount-stacks.py --prom ${TEXTFILE_DIR}/estate-check-mount-stacks.prom
