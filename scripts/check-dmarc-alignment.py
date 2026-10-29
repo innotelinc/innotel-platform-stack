@@ -48,17 +48,26 @@ THE RULES
    include and is worth seeing before the policy tightens.
 3. A report's own `policy_published` is read back: a `p=none` domain is a warning,
    because nothing is enforced and the reports are the only evidence there is.
-4. No reports at all in the window is **exit 2**, never a quiet pass — the check
-   could not answer, and "could not answer" is the state that let the decision go
-   unmade.
+4. No reports at all in the window is **not the same failure** as a broken mailbox, and
+   conflating them is what made this check permanently red: for the first days after a
+   `rua` is published there is nothing to read yet, because a receiver only reports on
+   mail it has actually seen. Silence inside `--grace-days` of `--wired` is a **note**
+   (exit 0: nothing has been sent yet, the first report is expected); silence *after* it
+   is a **failure** (exit 1), because then the reporting path itself is broken — the
+   `rua` is wrong, mail to it does not reach the mailbox, or a filter files the reports
+   somewhere the check does not read. A mailbox that cannot be read is still exit 2,
+   and so is a `--reports-dir` with nothing in it: those are "could not answer".
 
 Usage:
     DMARC_USER=… DMARC_PASSWORD=… ./scripts/check-dmarc-alignment.py
     ./scripts/check-dmarc-alignment.py --reports-dir /var/tmp/dmarc --prom /path/to/textfile
     ./scripts/check-dmarc-alignment.py --domains atheniq.courses --threshold 5 --days 30
+    ./scripts/check-dmarc-alignment.py --wired 2026-11-01 --grace-days 5   # a new rua
 
-Exit codes: 0 = every stream aligns, 1 = at least one does not, 2 = the reports
-could not be read (no mailbox, no reports, no usable report).
+Exit codes: 0 = every stream aligns (or the rua is too new to have been reported on),
+1 = at least one stream does not align, or the rua is old enough that silence means a
+broken reporting path, 2 = the reports could not be read (no credential, unreadable
+mailbox, a report that does not parse, an empty `--reports-dir`).
 """
 from __future__ import annotations
 
@@ -101,6 +110,17 @@ WINDOW_DAYS = 7
 #: and the first run against a real mailbox should show everything, not a filtered
 #: view that makes the decision look safer than it is.
 THRESHOLD = 1
+
+#: The day the report mailbox and the `rua` records went live (2026-10-29 —
+#: `postmaster@atheniq.courses` with an app password, `dmarc@innotel.us` aliased to it).
+#: It only bounds the "nothing has been sent yet" case; a report that exists is read
+#: whatever this says.
+RUA_WIRED = date(2026, 10, 29)
+
+#: Days of silence after `RUA_WIRED` that mean "no mail has been reported on yet" rather
+#: than "the reporting path is broken". Receivers send daily, so three days is three
+#: missed chances; past that, silence is the failure and not a wait.
+GRACE_DAYS = 3
 
 #: A report is XML; a receiver may send it raw, gzipped, or zipped (usually zipped).
 _REPORT_SUFFIXES = (".xml", ".zip", ".gz", ".xml.gz")
@@ -314,12 +334,53 @@ def evaluate(streams: list[Stream], policies: dict[str, dict[str, str]], thresho
     return out
 
 
-def alignment_series(streams: list[Stream]) -> str:
-    """The numbers behind the verdict, so the panel shows volume and not only a colour."""
+def no_reports_finding(
+    wired: date, grace: int, window: int, today: date | None = None
+) -> tuple[Finding, bool]:
+    """What silence means: waiting for the first report, or a reporting path that is broken.
+
+    Returns the finding and whether it is a failure. The distinction is the whole point:
+    a `rua` published yesterday has nothing to report on yet, and calling that "could not
+    answer" keeps the estate red for a reason nobody can act on — while the same silence
+    a week later is exactly the failure worth paging for.
+    """
+    today = today or date.today()
+    age = (today - wired).days
+    if age <= grace:
+        return (
+            Finding(
+                "awaiting-first-report",
+                "note",
+                f"no DMARC report in the last {window} day(s): the rua has only been "
+                f"published since {wired:%Y-%m-%d} ({age} day(s) ago) and a receiver reports "
+                f"only on mail it has seen, so the first report is expected within "
+                f"{grace} day(s). There is nothing to answer with yet",
+            ),
+            False,
+        )
+    return (
+        Finding(
+            "no-reports",
+            "fail",
+            f"no DMARC report in the last {window} day(s) although the rua has been published "
+            f"since {wired:%Y-%m-%d} ({age} day(s)) — the reporting path is broken, not quiet: "
+            f"check the rua on _dmarc.<domain>, that mail to it reaches the mailbox, and that "
+            f"a filter is not filing reports outside INBOX",
+        ),
+        True,
+    )
+
+
+def alignment_series(streams: list[Stream], reports: int | None = None) -> str:
+    """The numbers behind the verdict, so the panel shows volume and not only a colour.
+
+    `reports` is how many aggregate reports were read, which is what separates "0 messages
+    would be dropped" from "nothing has been reported on yet" on a panel that otherwise
+    shows the same two zeros.
+    """
     total = sum(s.messages for s in streams)
     dropped = sum(s.both_fail for s in streams)
-    return "\n".join(
-        [
+    lines = [
             f"# HELP {METRIC}_dmarc_messages Messages named in the window's reports",
             f"# TYPE {METRIC}_dmarc_messages gauge",
             f'{METRIC}_dmarc_messages{{check="{CHECK}"}} {total}',
@@ -330,7 +391,13 @@ def alignment_series(streams: list[Stream]) -> str:
             f"# TYPE {METRIC}_dmarc_streams gauge",
             f'{METRIC}_dmarc_streams{{check="{CHECK}"}} {len(streams)}',
         ]
-    )
+    if reports is not None:
+        lines += [
+            f"# HELP {METRIC}_dmarc_reports Aggregate reports read in the window",
+            f"# TYPE {METRIC}_dmarc_reports gauge",
+            f'{METRIC}_dmarc_reports{{check="{CHECK}"}} {reports}',
+        ]
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------------------
@@ -429,16 +496,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--threshold", type=int, default=THRESHOLD, help=f"messages lost before it is a failure (default {THRESHOLD})")
     parser.add_argument("--domains", help="comma-separated domains to speak about (default: the estate's)")
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here for the alerts")
+    parser.add_argument(
+        "--wired", type=date.fromisoformat, default=RUA_WIRED,
+        help=f"the day the rua was published, YYYY-MM-DD (default {RUA_WIRED:%Y-%m-%d})",
+    )
+    parser.add_argument(
+        "--grace-days", type=int, default=GRACE_DAYS,
+        help=f"days of silence after --wired that are waiting, not failing (default {GRACE_DAYS})",
+    )
     args = parser.parse_args(argv)
 
     domains = tuple(d.strip() for d in args.domains.split(",") if d.strip()) if args.domains else DOMAINS
     streams: list[Stream] = []
+    reports = 0
 
     def emit(result: Audit | None, ran: bool) -> None:
         if not args.prom:
             return
         try:
-            write_prom(args.prom, CHECK, result, ran, extra=alignment_series(streams))
+            write_prom(args.prom, CHECK, result, ran, extra=alignment_series(streams, reports))
         except OSError as error:
             print(f"check-dmarc-alignment: could not write {args.prom}: {error}", file=sys.stderr)
 
@@ -456,7 +532,20 @@ def main(argv: list[str] | None = None) -> int:
                 )
             payloads = fetch_from_mailbox(args.host, args.port, user, password, args.days, domains)
         if not payloads:
-            raise ReportsUnreadable(f"no DMARC report in the last {args.days} day(s) — nothing to answer with")
+            if args.reports_dir:
+                # A directory someone pointed at is a question about an archive: nothing in
+                # it means the archive is empty, which is not a state the rua explains.
+                raise ReportsUnreadable(f"no DMARC report in the last {args.days} day(s) — nothing to answer with")
+            finding, broken = no_reports_finding(args.wired, args.grace_days, args.days)
+            result = Audit(findings=[finding])
+            emit(result, ran=True)
+            print(f"{finding.level.upper():4} {finding.message}")
+            print(
+                f"\ncheck-dmarc-alignment: {1 if broken else 0} failure(s), 0 stream(s), "
+                f"0 report(s) read — "
+                + ("the reporting path is broken" if broken else "waiting for the first report")
+            )
+            return 1 if broken else 0
         folded, policies, skipped = fold(payloads, domains)
     except ReportsUnreadable as error:
         print(f"check-dmarc-alignment: {error}", file=sys.stderr)
@@ -468,6 +557,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     streams = list(folded.values())
+    reports = len(payloads)
     result = evaluate(streams, policies, args.threshold)
     result.findings.extend(skipped.findings)
     emit(result, ran=True)

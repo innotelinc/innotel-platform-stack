@@ -1167,9 +1167,10 @@ placement (finding 7).
   `/etc/innotel/estate-checks.env` (0640) on the edge. `dmarc@innotel.us` was added as
   an alias on the same mailbox and `_dmarc.innotel.us` now points its `rua` there — the
   old address (`dmarc-6ac2…@mail.innotel.us`) was on the mail server's own hostname,
-  where no account receives it. The check now reaches IMAP and answers “no report in
-  the last 7 day(s)” — which is the truth until receivers send, and the state that
-  becomes a real alignment verdict on its own.
+  where no account receives it. The check now reaches IMAP and says what it can: for
+  its first days it reads “no report yet — the rua has only been published since
+  2026-10-29”, which is a **note** and not a failure (see the bullet below), and it
+  becomes a real alignment verdict the moment a receiver sends.
   **The path was proved, not assumed (2026-10-29).** A message sent through Stalwart's
   own submission port to `dmarc@innotel.us` arrived in the `postmaster@atheniq.courses`
   INBOX — the mailbox and the folder `check-dmarc-alignment.py` reads (`INBOX`, by
@@ -1211,3 +1212,16 @@ placement (finding 7).
   noticed* table. Verified end to end: the edge's textfiles produce 11 note series in
   Prometheus (three declared-off dev targets, two parked names, the mail record notes,
   `atheniq` stopped on i2) and Grafana serves the panel reading them.
+- **Silence in the DMARC reports is read by age, not as a blanket “could not answer” —
+  2026-10-29.** The check treated *no reports* as `ReportsUnreadable` (exit 2), which was
+  right about a mailbox it cannot open and wrong about a `rua` published today: a receiver
+  reports only on mail it has seen, so there is nothing to read yet, and the estate sat
+  red for a reason nobody could act on. It now takes `--wired` (default `2026-10-29`, the
+  day the mailbox and the `rua` records went live) and `--grace-days` (default 3): silence
+  inside that window is a note — *awaiting-first-report* — and silence after it is a
+  **failure**, because by then the reporting path itself is broken (the `rua`, the alias,
+  or a filter filing reports outside `INBOX`). A mailbox that cannot be read, a report
+  that does not parse and an empty `--reports-dir` are all still exit 2. The panel gained
+  `dmarc_reports` so “0 reports read” is distinguishable from “0 messages dropped”, which
+  are two very different greens. Live: `dmarc_alignment` publishes 1 with the note, and
+  the estate is **15/15** for the first time.

@@ -63,7 +63,10 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --
 # not align — the evidence behind tightening `_dmarc` to `p=reject`, which fails
 # silently when it is wrong. DMARC_USER/DMARC_PASSWORD come from the EnvironmentFile
 # above (the `rua` mailbox); the check has no default credential and must never carry
-# one. No reports in the window is exit 2, never a quiet pass.
+# one. Silence is read by age, not as a blanket "could not answer": within three days
+# of the `rua` being published (--wired, default 2026-10-29) there is nothing to report
+# on yet and it is a note, and after that it is a failure — the reporting path, not the
+# policy, is what breaks that way. An unreadable mailbox is exit 2 either way.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-dmarc-alignment.py --prom ${TEXTFILE_DIR}/estate-check-dmarc-alignment.prom
 
 # The edge's own two ways of losing a door without saying so (2026-10-29): a proxy

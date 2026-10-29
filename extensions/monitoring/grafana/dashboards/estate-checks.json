@@ -244,17 +244,18 @@
       "id": 11,
       "type": "stat",
       "title": "DMARC: messages p=reject would drop",
-      "description": "The DMARC aggregate reports' own verdict — messages whose SPF and DKIM both failed to align, beside every message the reports named. Non-zero means a tightened policy would drop mail, and that failure is silent: the symptom is a reset link that never arrives. This is the evidence the decision to move _dmarc to p=reject waits on. See check-dmarc-alignment.py.",
+      "description": "The DMARC aggregate reports' own verdict — messages whose SPF and DKIM both failed to align, beside every message the reports named and the number of reports read. Non-zero would-be-dropped means a tightened policy would lose mail, and that failure is silent: the symptom is a reset link that never arrives. `reports read 0` is the other state — nothing has been reported on yet (the rua is new) or the reporting path is broken, and the check's note says which. See check-dmarc-alignment.py.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 6, "w": 24, "x": 0, "y": 44 },
       "fieldConfig": {
         "defaults": { "unit": "short", "min": 0, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } },
-        "overrides": [{ "matcher": { "id": "byName", "options": "messages" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }] }]
+        "overrides": [{ "matcher": { "id": "byName", "options": "messages" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }] }, { "matcher": { "id": "byName", "options": "reports read" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }] }]
       },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_dmarc_messages_both_fail", "instant": true, "legendFormat": "would be dropped", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_dmarc_messages", "instant": true, "legendFormat": "messages", "refId": "B" }
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_dmarc_messages", "instant": true, "legendFormat": "messages", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "editorMode": "code", "expr": "innotel_estate_check_dmarc_reports", "instant": true, "legendFormat": "reports read", "refId": "C" }
       ]
     },
     {

@@ -264,6 +264,76 @@ class MainCase(unittest.TestCase):
             os.utime(entry, (stale, stale))
         self.assertEqual(dmarc.main(["--reports-dir", str(directory), "--days", "7"]), 2)
 
+    # -- silence: waiting for the first report is not a broken reporting path ----------
+
+    def _mailbox_run(self, wired: str, *extra, today_patch=None):
+        """`main` against a mailbox that has no reports in it — no network.
+
+        The decision this covers only exists on the mailbox path (a `--reports-dir` with
+        nothing in it is a question about an archive, and stays exit 2).
+        """
+        import os
+
+        directory = Path(tempfile.mkdtemp())
+        textfile = directory / "out.prom"
+        old_user, old_password = os.environ.get("DMARC_USER"), os.environ.get("DMARC_PASSWORD")
+        os.environ["DMARC_USER"], os.environ["DMARC_PASSWORD"] = "check@example.invalid", "x"
+        old_fetch = dmarc.fetch_from_mailbox
+        dmarc.fetch_from_mailbox = lambda *a, **k: []
+        try:
+            code = dmarc.main(["--wired", wired, "--prom", str(textfile)] + list(extra))
+        finally:
+            dmarc.fetch_from_mailbox = old_fetch
+            if old_user is None:
+                os.environ.pop("DMARC_USER", None)
+            else:
+                os.environ["DMARC_USER"] = old_user
+            if old_password is None:
+                os.environ.pop("DMARC_PASSWORD", None)
+            else:
+                os.environ["DMARC_PASSWORD"] = old_password
+        return code, textfile.read_text(encoding="utf-8")
+
+    def test_a_fresh_rua_with_no_reports_yet_is_a_note_not_a_failure(self):
+        # The state that made this check permanently red: a rua published today has
+        # nothing to report on, and "could not answer" is not a finding about the estate.
+        code, body = self._mailbox_run(date.today().isoformat(), "--grace-days", "3")
+        self.assertEqual(code, 0)
+        self.assertIn('innotel_estate_check_last_status{check="dmarc_alignment"} 1', body)
+        self.assertIn('innotel_estate_check_failures{check="dmarc_alignment"} 0', body)
+        self.assertIn('innotel_estate_check_notes{check="dmarc_alignment"} 1', body)
+        self.assertIn("awaiting-first-report", body)
+        # And the panel can tell "nothing reported on" from "nothing dropped".
+        self.assertIn('innotel_estate_check_dmarc_reports{check="dmarc_alignment"} 0', body)
+
+    def test_silence_past_the_grace_window_is_a_broken_reporting_path(self):
+        code, body = self._mailbox_run((date.today() - timedelta(days=30)).isoformat())
+        self.assertEqual(code, 1)
+        self.assertIn('innotel_estate_check_last_status{check="dmarc_alignment"} 0', body)
+        self.assertIn('innotel_estate_check_failures{check="dmarc_alignment"} 1', body)
+        # A failure is counted, not narrated: only notes carry their message into the
+        # textfile. The wording is locked on the pure function below.
+        self.assertIn('innotel_estate_check_notes{check="dmarc_alignment"} 0', body)
+        self.assertNotIn("awaiting-first-report", body)
+
+    def test_the_grace_window_is_counted_from_the_day_given(self):
+        # Three days is the default; the day the rua was published is the input, so a
+        # deadline set for a future cutover does not read as a failure today.
+        finding, broken = dmarc.no_reports_finding(
+            wired=date(2026, 10, 29), grace=3, window=7, today=date(2026, 10, 31))
+        self.assertFalse(broken)
+        self.assertEqual(finding.level, "note")
+        finding, broken = dmarc.no_reports_finding(
+            wired=date(2026, 10, 29), grace=3, window=7, today=date(2026, 11, 5))
+        self.assertTrue(broken)
+        self.assertEqual(finding.code, "no-reports")
+        self.assertIn("the reporting path is broken", finding.message)
+        self.assertEqual(finding.level, "fail")
+
+    def test_an_empty_reports_directory_is_still_exit_two(self):
+        # Unchanged on purpose: an archive someone pointed at is not the rua's age.
+        self.assertEqual(dmarc.main(["--reports-dir", str(Path(tempfile.mkdtemp()))]), 2)
+
     def test_it_writes_the_shared_family_and_its_own_series(self):
         directory = self._dir(report(records=(("203.0.113.9", 4, "none", "fail", "fail", "atheniq.courses"),)))
         textfile = directory / "out.prom"
@@ -273,6 +343,7 @@ class MainCase(unittest.TestCase):
         self.assertIn('innotel_estate_check_failures{check="dmarc_alignment"} 1', body)
         self.assertIn("innotel_estate_check_dmarc_messages_both_fail", body)
         self.assertRegex(body, r'innotel_estate_check_dmarc_messages_both_fail\{check="dmarc_alignment"\} 4')
+        self.assertRegex(body, r'innotel_estate_check_dmarc_reports\{check="dmarc_alignment"\} 1')
 
 
 if __name__ == "__main__":  # pragma: no cover
