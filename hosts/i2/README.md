@@ -2,9 +2,10 @@
 
 `i2` (`192.168.1.52`) is the Incus host that carries `capstone` (`.30`, the PBX and
 n8n stack), `atheniq` (moved to `ord-atheniq` on 2026-10-27, so the container here
-is stopped), `proxy` (`.71`: NPM, Authentik, Vault, Technitium, metrics),
-`blueprint` and `clearpath`. Placement and CPU/memory caps live in
-`docs/container-placement.md`.
+is stopped) and `proxy` (`.71`: NPM, Authentik, Vault, Technitium, metrics).
+`blueprint` (`.76`) and `clearpath` (`.83`) moved to `i1` on 2026-10-30; their
+addresses are pinned in their own netplan, so nothing on the wire changed.
+Placement and CPU/memory caps live in `docs/container-placement.md`.
 
 This directory carries the one kernel setting a service on this host explicitly
 asks for, and it is here for the same reason as `hosts/i1`'s: it is a **host**

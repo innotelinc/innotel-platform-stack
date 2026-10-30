@@ -122,6 +122,10 @@ EXPECTED: dict[str, dict[str, str]] = {
     "i1": {
         "atlas": "192.168.1.90",
         "auvik": "192.168.1.72",
+        # Moved from i2 on 2026-10-30 (stopped, copied, started, then deleted there).
+        # Each keeps the address pinned in its own netplan, so only the host key moved.
+        "blueprint": "192.168.1.76",
+        "clearpath": "192.168.1.83",
         "genesis": "192.168.1.66",
         "genie-preview": "192.168.1.24",
         "monarch": "192.168.1.56",
@@ -132,9 +136,7 @@ EXPECTED: dict[str, dict[str, str]] = {
     },
     "i2": {
         "atheniq": "192.168.1.59",
-        "blueprint": "192.168.1.76",
         "capstone": "192.168.1.30",
-        "clearpath": "192.168.1.83",
         # `proxy` was recreated on i2 on 2026-10-26 22:00 EDT and is no longer an
         # i4 container; i4 holds `terminal`, `vault` and `vpn` only. The address is
         # unchanged (.71), which is why only the host row moves. Its `/data` bind
