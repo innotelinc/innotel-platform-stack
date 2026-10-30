@@ -78,6 +78,19 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-dmarc-alignment.py 
 # TCP-connects every target; the discard port is reported as parked, not dead.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-targets.py --config-dir /usr/src/proxy/data/nginx --expect /opt/innotel/estate-checks/edge-vhost-targets.tsv --prom ${TEXTFILE_DIR}/estate-check-edge-vhost-targets.prom
 
+# And the other way a door is lost without a word (2026-10-30): NPM's own record of a
+# host and the file it wrote are two copies of one fact, and neither write direction
+# held. Twenty-five rows were deleted and their files stayed behind, still proxying into
+# ports that no longer answered; parking `resend.innotel.us` set the row to port 9 while
+# `220.conf` kept 8099. `check-edge-vhost-targets` saw the dead targets but not the
+# cause — a door NPM cannot see. This compares the API's host list against every
+# generated `.conf` and fails on an orphan file, a missing file, a target that differs
+# between the two, and a disabled host whose file still serves. The row side is the API
+# rather than `database.sqlite` because this NPM is MySQL-backed; NPM_ADMIN_EMAIL /
+# NPM_ADMIN_PASSWORD come from the EnvironmentFile above (there is no default
+# credential and it must never carry one), and a missing one is exit 2, not a pass.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-npm-config-drift.py --api http://192.168.1.71:81 --data-dir /usr/src/proxy/data --prom ${TEXTFILE_DIR}/estate-check-npm-config-drift.prom
+
 # The media estate's two remaining doors, from the outside: `media.innotel.us` has to
 # answer 302 to Authentik (a 200 means the single sign-in has fallen off the front of
 # Gizmo) and `tv.innotel.us` has to answer with Jellyfin's web client plus the Gizmo
