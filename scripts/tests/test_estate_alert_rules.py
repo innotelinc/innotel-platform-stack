@@ -49,6 +49,9 @@ CHECK_SCRIPTS = [
     "check-mount-stacks",
     # The mail server's traffic, which is the only source the mail dashboard has.
     "check-mail-traffic",
+    # NPM's host list against the vhost files it wrote: a deleted row whose file still
+    # proxies, and a row whose port no longer matches the file nginx serves.
+    "check-npm-config-drift",
 ]
 
 
