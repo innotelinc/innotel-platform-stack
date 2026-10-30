@@ -590,6 +590,18 @@ The mapping from static rootfs identity to current bind-mount attach status is i
   table gives `signara`. The trap that guard cannot see is in
   §*Open items* (a host that mounts the estate-check rules without running the checks).
 
+### Changes applied 2026-10-30
+
+- **`blueprint` (`.76`) and `clearpath` (`.83`) moved from `i2` to `i1`.** Each was
+  stopped, copied to `i1`'s `incus` zfs pool, started and only then deleted on `i2`.
+  Both keep the address pinned in their own netplan (`/etc/netplan/10-lxc.yaml`,
+  `dhcp4: false`), so nothing on the wire moved: `blueprint`'s proxy device binds
+  `8787` on `i1` now (`.51:8787` answers 200) and `clearpath` still answers `:3000`
+  at `.83` (200 from the edge), which is what NPM host `274`
+  (`app.denovocredit.com`) forwards to. `incus-rebalance/policy.json` keeps
+  `blueprint`'s 512 MiB floor under the new key `i1:blueprint`, and the address
+  fixture in `scripts/tests/test_estate_checks_live.py` lists both rows under `I1`.
+
 ### Changes applied 2026-10-24
 
 - **The address table was reconciled with the hosts, and the last four DHCP leases were
@@ -757,6 +769,8 @@ that table is a bug in one of them.
 |---|---|---|---|---|---|
 | i1 | `atlas` | `.90` | Gitea + convex + postgres + dashboard | 824 MiB (896 MiB) | 2 |
 | i1 | `auvik` | `.72` | Auvik collector (`auviknetworks/collector`) | 188 MiB (512 MiB) | 2 |
+| i1 | `blueprint` | `.76` | DayZero app server (`dayzero.service`) | 81 MiB (512 MiB) | 2 |
+| i1 | `clearpath` | `.83` | Clearpath (`app.denovocredit.com`) | 64 MiB (256 MiB) | 2 |
 | i1 | `genesis` | `.66` | BusinessOps — intake + assisted EIN filing | 196 MiB (512 MiB) | 2 |
 | i1 | `genie-preview` | `.24` | the Genie preview (`innotel/ontrak-genie:main`) | 155 MiB (512 MiB) | 2 |
 | i1 | `monarch` | `.56` | media (Jellyfin etc.) | 4.79 GiB (8 GiB) | 2 |
@@ -766,9 +780,7 @@ that table is a bug in one of them.
 | i1 | `rizzaura` | `.62` | Rizz Aura (5 svc) | 208 MiB (512 MiB) | 2 |
 | i1 | `www` | ~~`.80`~~ | **retired 2026-10-29** — the public landing page moved to `ord-atheniq` (`104.238.162.5:8086`); stopped since 2026-10-28 with an empty volume | — | — |
 | i2 | `atheniq` | `.59` | AthenIQ LMS (Tutor / Open edX) | 3.61 GiB (5.25 GiB) | 6 |
-| i2 | `blueprint` | `.76` | DayZero app server (`dayzero.service`) | 84 MiB (512 MiB) | 2 |
 | i2 | `capstone` | `.30` | Zeus / capstone telephony | 4.34 GiB (uncapped) | 2 |
-| i2 | `clearpath` | `.83` | Clearpath (`app.denovocredit.com`) | 109 MiB (256 MiB) | 2 |
 | i3 | `distro` | `.61` | distro control plane | 204 MiB (1 GiB) | 2 |
 | i3 | `magnate` | `.57` | Magnate | 181 MiB (1 GiB) | 2 |
 | i3 | `mail` | `.15` | mail (SMTP/IMAP) | 438 MiB (4 GiB) | 2 |
