@@ -822,8 +822,14 @@ services:
       SANDBOX_RUNNER_CONTROL_GRPC_ADVERTISE_ADDR: sandbox-runner-1:9091
       SANDBOX_RUNNER_ID: runner-1
       SANDBOX_RUNNER_DOCKER_SANDBOX_IMAGE: ghcr.io/n8n-io/n8n-sandbox-service-sandbox:latest
-      # This kernel images ship with no loadable br_netfilter, so the nested
-      # dockerd can't set bridge netfilter rules; ignore that (harmless here).
+      # Covers only the nested dockerd inside a sandbox, and it is not what makes
+      # the runner start: the runner has its own check for
+      # /proc/sys/net/bridge/bridge-nf-call-iptables and refuses to register
+      # without it, which is why the module is loaded on the host
+      # (platform-stack hosts/i2/). This flag was already set while the runner
+      # restarted 1094 times on that error, so it cannot stand in for the host
+      # setting - it is kept only so a sandbox on a host without the module still
+      # runs.
       DOCKER_IGNORE_BR_NETFILTER_ERROR: "1"
       SANDBOX_RUNNER_REGISTRATION_GRPC_CA_FILE: /tls/runner/ca.crt
       SANDBOX_RUNNER_REGISTRATION_GRPC_CERT_FILE: /tls/runner/grpc-client.crt
