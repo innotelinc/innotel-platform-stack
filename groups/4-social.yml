@@ -420,7 +420,7 @@ services:
       # Cash Shop — Magnate (RevenueOps) owns billing; Rizz Aura holds no
       # Stripe keys. MAGNATE_API_TOKEN must equal Magnate's
       # ENTITLEMENTS_API_TOKEN when Magnate gates its APIs.
-      MAGNATE_PUBLIC_URL: "${MAGNATE_PUBLIC_URL:-https://app.magnate.innotel.us}"
+      MAGNATE_PUBLIC_URL: "${MAGNATE_PUBLIC_URL:-https://magnate.innotel.us}"
       MAGNATE_API_TOKEN: "${MAGNATE_API_TOKEN:-}"
       MAGNATE_FULFILLMENT_SECRET: "${MAGNATE_FULFILLMENT_SECRET:-}"
       # AI achievement recommendations — OmniRoute (OpenAI-compatible LLM API

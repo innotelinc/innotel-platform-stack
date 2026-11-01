@@ -441,7 +441,7 @@ def render(service: str) -> str:
         # sells; every other page asks for its own service.
         SERVICE="" if spec["plansAll"] else service,
         ADDONS=json.dumps(spec["addons"]),
-        MAGNATE_URL="https://app.magnate.innotel.us",
+        MAGNATE_URL="https://magnate.innotel.us",
         PORTAL_URL="https://subscribe.innotel.us",
     )
 
@@ -500,7 +500,7 @@ def render_index() -> str:
         ACCENT="#38bdf8",
         SERVICE="generic",
         ADDONS="[]",
-        MAGNATE_URL="https://app.magnate.innotel.us",
+        MAGNATE_URL="https://magnate.innotel.us",
         PORTAL_URL="https://subscribe.innotel.us",
     )
     # The header link asks "which plans are there?" on a service page, where the
@@ -510,7 +510,7 @@ def render_index() -> str:
     # so it points at the account portal, which is Magnate's.
     page = page.replace(
         '<a class="signin" href="https://subscribe.innotel.us">All Innotel plans</a>',
-        '<a class="signin" href="https://app.magnate.innotel.us/manage">Manage your subscription</a>',
+        '<a class="signin" href="https://magnate.innotel.us/manage">Manage your subscription</a>',
     )
     # The directory replaces the single-service plan grid …
     page = page.replace(
@@ -523,7 +523,7 @@ def render_index() -> str:
     # … served by the directory script, not the one-service plan script.
     start, end = page.index("  <script>"), page.index("  </script>")
     # plain replace, not .format(): the script's JS object literals contain braces
-    script = APEX_SCRIPT.replace("{MAGNATE_URL}", "https://app.magnate.innotel.us")
+    script = APEX_SCRIPT.replace("{MAGNATE_URL}", "https://magnate.innotel.us")
     return INDEX_NOTE + page[:start] + script + page[end + len("  </script>"):]
 
 
