@@ -105,6 +105,41 @@ already there, it is not needed for a public package:
 docker pull ghcr.io/innotelinc/omniroute:3.8.52
 ```
 
+## The gateway's own login stays ON (2026-11-01)
+
+`requireLogin` is **true** on the live gateway, and that is not a preference — it is
+the only thing between the door's service exemptions and the key store. The door
+(`gateway-sso`) deliberately exempts `^/api/keys` so Distro's control plane and
+Magnate's Sage sessions can mint keys: they have no Authentik session to present.
+What makes that safe is OmniRoute's *own* guard, `requireManagementAuth`, which
+refuses every management route without a dashboard session or a manage-scoped key —
+but `requireLogin=false` short-circuits that guard entirely, so the exemption became
+an open door: `GET /api/keys` answered **200 with the masked key list** to any
+unauthenticated caller, and `POST /api/keys` would mint one.
+
+Restore it, from the gateway host (the door answers `/api/settings/*` with the SSO
+page, so this must go straight at the process):
+
+```bash
+incus exec proxy -- curl -s -X POST http://127.0.0.1:20128/api/settings/require-login \
+  -H 'content-type: application/json' -d '{"requireLogin":true}'
+```
+
+Verify — every management path must answer `401 AUTH_001` with no credential, and
+`/v1` must still answer `401` only because it wants a key:
+
+```bash
+for p in /api/keys /api/providers /api/system/version; do
+  curl -s -o /dev/null -w "$p %{http_code}\n" "https://gateway.innotel.us$p"
+done
+```
+
+Both consumers keep working because both sign in first (`POST /api/auth/login` with
+the dashboard password, then reuse the cookie) — see `magnate-work/lib/sage.ts` and
+`distro-work/apps/control-plane/src/gateway.js`. The two remaining door exemptions
+(`GET /api/providers`, `GET /api/system/version`) now need a session too; nothing
+live calls them anonymously.
+
 ## Verify
 
 ```bash
