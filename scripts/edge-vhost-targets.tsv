@@ -13,3 +13,4 @@
 # domain<TAB>host<TAB>port<TAB>note
 admin.monarch.innotel.us	172.31.42.10	4180	Admin UI door on Monarch's name — SSO gateway
 proxy.innotel.us	172.31.42.10	4180	Admin UI door on the proxy's name — SSO gateway
+sage.innotel.tech	192.168.1.94	443	Sage session site — TLS terminated by the container, proxied by the edge
