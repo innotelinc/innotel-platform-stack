@@ -135,6 +135,8 @@
     <a class="tile" data-service="genie" style="--accent: #a78bfa" href="https://subscribe.genie.innotel.us"><span class="mark"></span><b>Genie</b><small>Your own preview subdomain under genie.innotel.us</small></a>
     <a class="tile" data-service="engineer" style="--accent: #0f766e" href="https://subscribe.genie.innotel.us"><span class="mark"></span><b>OnTrak Engineer</b><small>Reverse engineer a shipped build with an agent — $5 a credit</small></a>
     <a class="tile" data-service="g0dm0d3" style="--accent: #b91c1c" href="https://subscribe.genie.innotel.us"><span class="mark"></span><b>Uncensored Godmode</b><small>The agent with the guardrails off — $5 a run</small></a>
+    <a class="tile" data-service="sage" style="--accent: #6366f1" href="https://app.magnate.innotel.us/sage"><span class="mark"></span><b>Sage</b><small>15-minute gateway API sessions — keys minted per session</small></a>
+    <a class="tile" data-service="orion" style="--accent: #38bdf8" href="https://subscribe.orion.innotel.us"><span class="mark"></span><b>Orion</b><small>Your own home-cloud desktop</small></a>
     <a class="tile" data-service="rizzaura" style="--accent: #f472b6" href="https://subscribe.rizzaura.innotel.us"><span class="mark"></span><b>Rizz Aura</b><small>Your community, your rules</small></a>
     <a class="tile" data-service="zapit" style="--accent: #38bdf8" href="https://subscribe.zapit.innotel.us"><span class="mark"></span><b>ZapIt</b><small>Short links, fast</small></a>
     <a class="tile" data-service="cerulean" style="--accent: #3aa0ff" href="https://subscribe.cerulean.innotel.us"><span class="mark"></span><b>Cerulean</b><small>One login for the whole platform</small></a>
@@ -177,15 +179,25 @@
           .then(function (d) {
             var plans = (d && d.plans) || [];
             if (!plans.length) return;
-            var cheapest = plans.reduce(function (min, p) {
-              return min === null || p.priceMonthlyCents < min
-                ? p.priceMonthlyCents
-                : min;
-            }, null);
-            if (cheapest === null) return;
+            // A per-unit plan (Sage's 15-minute sessions) has a monthly figure of
+            // zero, and "from $0/mo" is the worst line on a page whose job is the
+            // price: quote the unit it is actually sold in.
+            var monthly = plans.filter(function (p) { return !p.perUnit && p.priceMonthlyCents > 0; });
+            var lifted = plans.filter(function (p) { return p.perUnit && p.pricePerUnitCents > 0; });
+            var label = null;
+            if (monthly.length) {
+              label = "from $" + money(Math.min.apply(null, monthly.map(function (p) { return p.priceMonthlyCents; }))) + "/mo";
+            }
+            if (!label && lifted.length) {
+              var unit = lifted.reduce(function (min, p) {
+                return p.pricePerUnitCents < min.pricePerUnitCents ? p : min;
+              });
+              label = "from $" + money(unit.pricePerUnitCents) + " per " + (unit.billingUnit || "unit");
+            }
+            if (!label) return;
             var price = document.createElement("em");
             price.className = "from";
-            price.textContent = "from $" + money(cheapest) + "/mo";
+            price.textContent = label;
             tile.appendChild(price);
           })
           .catch(function () {});
