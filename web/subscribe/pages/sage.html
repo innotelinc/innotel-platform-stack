@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Subscribe to Sage — Innotel</title>
+  <meta name="description" content="Sage is sold by the session: one OmniRoute gateway API key, alive for fifteen minutes. Three tiers, billed by Magnate.">
+  <meta property="og:title" content="Subscribe to Sage">
+  <meta property="og:description" content="One gateway API key, fifteen minutes, as many calls as you like inside the window. One account, every service.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%236366f1'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: dark;
+      --accent: #6366f1;
+      --accent-tint: color-mix(in srgb, #6366f1 12%, transparent);
+      --bg: #0b0d10;
+      --surface: #16191f;
+      --border: #262c35;
+      --text: #f4f7fb;
+      --muted: #a8b2bf;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      line-height: 1.6; -webkit-font-smoothing: antialiased;
+      background-image: radial-gradient(900px 480px at 50% -10%, var(--accent-tint), transparent 70%);
+      background-repeat: no-repeat;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+    header { border-bottom: 1px solid var(--border); }
+    .bar { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; }
+    .mark { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); }
+    .signin { color: var(--muted); font-size: 14px; }
+    .signin:hover { color: var(--text); }
+    .hero { text-align: center; padding: 72px 0 40px; }
+    .kicker {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--accent);
+      border: 1px solid color-mix(in srgb, #6366f1 35%, transparent);
+      background: var(--accent-tint);
+      border-radius: 999px; padding: 6px 14px;
+    }
+    h1 { font-size: clamp(32px, 6vw, 52px); line-height: 1.05; margin: 20px 0 12px; letter-spacing: -0.02em; }
+    h1 .accent { color: var(--accent); }
+    .lede { color: var(--muted); max-width: 600px; margin: 0 auto; font-size: 17px; }
+    .how {
+      display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      margin: 40px 0 8px;
+    }
+    .how div {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      padding: 18px 20px; font-size: 14px; color: var(--muted);
+    }
+    .how b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+    .how span.n { color: var(--accent); font-weight: 700; margin-right: 6px; }
+    .plans { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); padding: 24px 0 12px; }
+    .plan {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 24px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .plan.popular { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); position: relative; }
+    .plan .tag {
+      position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+      background: var(--accent); color: #0b0d10; font-size: 11px; font-weight: 700;
+      padding: 2px 12px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .plan h2 { margin: 0; font-size: 18px; }
+    .price { font-size: 34px; font-weight: 700; }
+    .price small { font-size: 14px; color: var(--muted); font-weight: 400; }
+    .plan ul { list-style: none; margin: 0 0 4px; padding: 0; flex: 1; }
+    .plan li { font-size: 14px; color: var(--muted); padding: 3px 0; }
+    .plan li::before { content: "\2713\00a0\00a0"; color: var(--accent); }
+    .cta {
+      display: block; text-align: center; border-radius: 10px; padding: 10px 16px;
+      background: var(--accent); color: #0b0d10; font-weight: 600; font-size: 14px;
+    }
+    .cta:hover { filter: brightness(1.1); color: #0b0d10; }
+    .empty {
+      text-align: center; color: var(--muted); background: var(--surface);
+      border: 1px dashed var(--border); border-radius: 16px; padding: 36px 24px; margin: 24px 0;
+    }
+    .fineprint {
+      display: flex; gap: 12px; align-items: flex-start; max-width: 760px; margin: 28px auto 0;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px 20px;
+      font-size: 13px; color: var(--muted);
+    }
+    .fineprint b { color: var(--text); }
+    code { font-size: 12px; background: #0f1217; border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
+    footer { border-top: 1px solid var(--border); margin-top: 56px; }
+    .foot { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 24px 0; font-size: 13px; color: var(--muted); }
+    .foot a { color: var(--muted); }
+    .foot a:hover { color: var(--text); }
+    .all-services { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap bar">
+      <span class="brand"><span class="mark"></span>Sage</span>
+      <a class="signin" href="https://subscribe.innotel.us">All Innotel plans</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <span class="kicker">Sold by the session</span>
+      <h1>Subscribe to Sage<span class="accent">.</span></h1>
+      <p class="lede">
+        Sage is an API key for the platform's model gateway — one key, alive for fifteen
+        minutes. Inside the window it answers as many calls as you like; when the window
+        closes the key is revoked and the gateway stops answering it.
+      </p>
+    </section>
+
+    <section>
+      <div class="how">
+        <div><b><span class="n">1</span>Pick a session</b>Three tiers, same fifteen minutes — a different model budget for each.</div>
+        <div><b><span class="n">2</span>Pay once</b>A one-time payment, not a subscription. No account, no seat, nothing renews.</div>
+        <div><b><span class="n">3</span>Use the key</b>It appears with a countdown the moment payment confirms, at <code>gateway.innotel.us/v1</code>.</div>
+      </div>
+
+      <div class="plans" id="plans" hidden></div>
+      <div class="empty" id="empty" hidden>
+        <b>Sessions</b> are not priced yet.<br>
+        Open <a href="https://app.magnate.innotel.us/sage">the Sage session page</a> to see what is for sale.
+      </div>
+
+      <div class="fineprint">
+        <span aria-hidden="true">&#8987;</span>
+        <span>
+          <b>Fifteen minutes, then it is gone.</b> A session is one key: use it as many times
+          as you like inside its window, and it is deleted when the window ends — you do not
+          cancel anything and nothing auto-renews. Billed by Magnate, the platform's billing
+          service; prices are read live from the master dashboard.
+        </span>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot">
+      <span>Sage — Powered by Innotel</span>
+      <span class="all-services"><a href="https://subscribe.innotel.us">subscribe.innotel.us</a> · every service, one account</span>
+    </div>
+  </footer>
+
+  <script>
+    // Prices are never baked in: read them live from Magnate, the billing
+    // platform, so the master dashboard is the only place a price is set.
+    (function () {
+      var SERVICE = "sage";
+      // Sage is bought on ITS OWN page, not through /signup: every other plan on
+      // this portal is a subscription, and a session is a one-time payment. That
+      // page is also where the key and its countdown are handed over, so it has
+      // to be the destination rather than a generic checkout.
+      var BUY = "https://app.magnate.innotel.us/sage";
+      var plansEl = document.getElementById("plans");
+      var emptyEl = document.getElementById("empty");
+      function money(cents) {
+        var v = cents / 100;
+        return v % 1 === 0 ? String(v) : v.toFixed(2);
+      }
+      // What a plan costs, in the unit it is sold in. Every Sage plan is
+      // per-session, and its monthly figure is zero — which is not a price.
+      function planPrice(p) {
+        if (p.perUnit && p.pricePerUnitCents) {
+          return { head: "$" + money(p.pricePerUnitCents), unit: " per " + (p.billingUnit || "session") };
+        }
+        return { head: "$" + money(p.priceMonthlyCents), unit: "/month" };
+      }
+      function card(p) {
+        var el = document.createElement("div");
+        el.className = "plan" + (p.highlighted ? " popular" : "");
+        var feats = (p.features || []).map(function (f) {
+          return "<li>" + f.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</li>";
+        }).join("");
+        var priced = planPrice(p);
+        el.innerHTML =
+          (p.highlighted ? '<span class="tag">Most popular</span>' : "") +
+          "<h2>" + p.name.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</h2>" +
+          '<div class="price">' + priced.head + "<small>" + priced.unit + "</small></div>" +
+          (p.description ? '<div style="font-size:13px;color:var(--muted)">' + p.description.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</div>" : "") +
+          "<ul>" + feats + "</ul>" +
+          '<a class="cta" href="' + BUY + '">Start a session</a>';
+        return el;
+      }
+      var MAGNATE = "https://app.magnate.innotel.us";
+      fetch(MAGNATE + "/api/plans?service=" + encodeURIComponent(SERVICE))
+        .then(function (r) { return r.ok ? r.json() : { plans: [] }; })
+        .then(function (d) {
+          var plans = (d && d.plans) || [];
+          if (!plans.length) { emptyEl.hidden = false; return; }
+          plans.forEach(function (p) { plansEl.appendChild(card(p)); });
+          plansEl.hidden = false;
+        })
+        .catch(function () {
+          emptyEl.hidden = false;
+          emptyEl.innerHTML = 'Prices are temporarily unavailable — <a href="' + MAGNATE + '/sage">open the session page</a>.';
+        });
+    })();
+  </script>
+</body>
+</html>
