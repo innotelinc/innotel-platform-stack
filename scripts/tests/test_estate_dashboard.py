@@ -108,6 +108,14 @@ class DashboardCase(unittest.TestCase):
         green = panel["fieldConfig"]["defaults"]["thresholds"]["steps"][-1]["value"]
         self.assertEqual(green, len(checks), f"the unit runs {sorted(checks)}")
 
+    def test_it_shows_the_processes_stuck_for_over_an_hour(self):
+        # The check arrived on 2026-11-02 after an 18-hour `docker exec` took i4 to load 13
+        # with nothing misconfigured, so no other panel could see it. Its series has to be
+        # on the page, or the check's findings live only in a textfile nobody opens.
+        self.assertIn("innotel_estate_stuck_processes", self.raw)
+        panel = next(p for p in self.doc["panels"] if p["title"] == "Stuck processes")
+        self.assertEqual([t["expr"] for t in panel["targets"]], ["innotel_estate_stuck_processes"])
+
     def test_the_rationale_is_written_where_the_next_reader_looks(self):
         # Grafana ignores unknown top-level keys, which is what lets `__comment` carry the
         # "why" beside the JSON rather than in a separate doc nobody opens.
