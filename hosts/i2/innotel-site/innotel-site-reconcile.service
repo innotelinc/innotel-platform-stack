@@ -1,0 +1,10 @@
+[Unit]
+Description=Reconcile the innotel.us site container
+Documentation=file:///usr/src/innotel-deploy/reconcile.sh
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/src/innotel-deploy/reconcile.sh
+TimeoutStartSec=180

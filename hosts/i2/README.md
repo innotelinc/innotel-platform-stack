@@ -19,7 +19,9 @@ parameter that no container can set.
 | `sysctl.d/99-bridge-nf-off.conf` | `/etc/sysctl.d/99-bridge-nf-off.conf` |
 | `fix-br-netfilter.sh` | run in place (`/root/i2-br-netfilter-fix.sh` on the host) |
 | `innotel-site/docker-compose.yml` | `/usr/src/innotel-deploy/docker-compose.yml` on the host, mounted into `proxy` |
+| `innotel-site/reconcile.sh` | `/usr/src/innotel-deploy/reconcile.sh` on the host, mounted into `proxy` |
 | `innotel-site/innotel-site.service` | `/etc/systemd/system/innotel-site.service` inside `proxy` |
+| `innotel-site/innotel-site-reconcile.{service,timer}` | `/etc/systemd/system/` inside `proxy` |
 
 ## Install / re-apply
 
@@ -52,11 +54,26 @@ That only holds if the container is *defined*, not started by hand. It is:
 | content | `/usr/src/innotel-site` on i2, read-only through the Incus `site` device |
 | definition | `/usr/src/innotel-deploy/docker-compose.yml` (this directory) |
 | lifecycle | `innotel-site.service`, `WantedBy=multi-user.target`, enabled |
+| drift repair | `innotel-site-reconcile.timer`, every 2 min from boot |
 
-Recreate it with `systemctl restart innotel-site.service` — that is the supported
-way, and it re-attaches to `proxy_default` by construction. A bare
-`docker run --name innotel-site …` without `--network proxy_default` leaves the
-apex with no name to resolve, which is the failure this exists to prevent.
+`reconcile.sh` is what makes this need no memory on anyone's part. Every two
+minutes it compares the running state to the definition and repairs it: a
+container that is missing (pruned, removed, never created) is created; one that is
+stopped is started; one that has no compose label — i.e. a bare `docker run` — is
+replaced, because its network is whatever that command chose; and one that is
+running but *not* on `proxy_default` is force-recreated, since `up -d` alone will
+not move it. It exits non-zero if the container cannot be brought back, so
+`systemctl list-timers` and the journal show the failure rather than hiding it.
+
+```sh
+systemctl list-timers innotel-site-reconcile.timer
+journalctl -t innotel-site-reconcile -n 20     # what it repaired, if anything
+systemctl start innotel-site-reconcile.service  # run it now
+```
+
+A bare `docker run --name innotel-site …` is therefore recoverable rather than
+fatal, and `systemctl restart innotel-site.service` is a convenience, not a
+requirement.
 
 One ownership detail: host directories mounted into `proxy` must be writable by
 the container's root, i.e. owned by the idmap base (`1000000:1000000`). A directory

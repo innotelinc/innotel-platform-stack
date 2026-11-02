@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically reconcile the innotel.us site container
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=innotel-site-reconcile.service
+
+[Install]
+WantedBy=timers.target
