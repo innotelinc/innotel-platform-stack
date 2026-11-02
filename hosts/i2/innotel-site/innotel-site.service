@@ -1,0 +1,20 @@
+[Unit]
+Description=innotel.us site container (edge)
+Documentation=file:///usr/src/innotel-deploy/docker-compose.yml
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/usr/src/innotel-deploy
+# `up -d` is idempotent and, because the compose file names the network, a
+# recreated container always lands back on proxy_default where NPM resolves it.
+ExecStart=/bin/sh -c 'docker compose up -d 2>/dev/null || docker-compose up -d'
+ExecReload=/bin/sh -c 'docker compose up -d --force-recreate 2>/dev/null || docker-compose up -d --force-recreate'
+ExecStop=/bin/sh -c 'docker compose down 2>/dev/null || docker-compose down'
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

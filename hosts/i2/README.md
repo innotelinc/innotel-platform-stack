@@ -18,6 +18,8 @@ parameter that no container can set.
 | `modules-load.d/br_netfilter.conf` | `/etc/modules-load.d/br_netfilter.conf` |
 | `sysctl.d/99-bridge-nf-off.conf` | `/etc/sysctl.d/99-bridge-nf-off.conf` |
 | `fix-br-netfilter.sh` | run in place (`/root/i2-br-netfilter-fix.sh` on the host) |
+| `innotel-site/docker-compose.yml` | `/usr/src/innotel-deploy/docker-compose.yml` on the host, mounted into `proxy` |
+| `innotel-site/innotel-site.service` | `/etc/systemd/system/innotel-site.service` inside `proxy` |
 
 ## Install / re-apply
 
@@ -35,6 +37,31 @@ and the runner — it is the version to run when the host has to be repaired rat
 than rebuilt, and it never unloads the module. It lives on i2 as
 `/root/i2-br-netfilter-fix.sh`; copy this file over from the repo, do not edit the
 host copy.
+
+## The innotel.us site container
+
+`innotel.us` (and `www.`) is served by the `innotel-site` container on the edge.
+NPM host 88 forwards to **`innotel-site:80`** — a name, not an address, resolved
+through Docker's DNS on `proxy_default`, so the upstream survives the container
+being restarted, re-added, or re-addressed.
+
+That only holds if the container is *defined*, not started by hand. It is:
+
+| Piece | Where |
+|---|---|
+| content | `/usr/src/innotel-site` on i2, read-only through the Incus `site` device |
+| definition | `/usr/src/innotel-deploy/docker-compose.yml` (this directory) |
+| lifecycle | `innotel-site.service`, `WantedBy=multi-user.target`, enabled |
+
+Recreate it with `systemctl restart innotel-site.service` — that is the supported
+way, and it re-attaches to `proxy_default` by construction. A bare
+`docker run --name innotel-site …` without `--network proxy_default` leaves the
+apex with no name to resolve, which is the failure this exists to prevent.
+
+One ownership detail: host directories mounted into `proxy` must be writable by
+the container's root, i.e. owned by the idmap base (`1000000:1000000`). A directory
+created as host `root` is not, and a `tee` into it from inside the container fails
+with `Permission denied`.
 
 ## Why the module is loaded, and why the traversal is off
 
