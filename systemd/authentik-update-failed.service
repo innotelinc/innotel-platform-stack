@@ -1,0 +1,13 @@
+[Unit]
+Description=Report a failed Authentik update
+# Reached through OnFailure= from authentik-update.service, for the failures that
+# unit cannot describe itself: killed, docker gone, start limit hit. A run that
+# reported its own failure stays quiet — the script records it in
+# /var/lib/innotel/authentik-update/last-alert and this checks the timestamp.
+Documentation=https://github.com/innotelinc/cerulean
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/innotel/authentik-update.env
+ExecStart=/opt/innotel/authentik-update/authentik-update-alert.sh authentik-update.service
