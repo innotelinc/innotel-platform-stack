@@ -24,6 +24,8 @@ parameter that no container can set.
 | `innotel-site/innotel-site-reconcile.{service,timer}` | `/etc/systemd/system/` inside `proxy` |
 | `../../scripts/backup-proxy.sh` | run in place on i2 (`/root/backup-proxy.sh`) |
 | `../../scripts/restore-proxy.sh` | run in place on i2 (`/root/restore-proxy.sh`) |
+| `proxy-backup/proxy-backup.service` | `/etc/systemd/system/proxy-backup.service` on i2 (host) |
+| `proxy-backup/proxy-backup.timer` | `/etc/systemd/system/proxy-backup.timer` on i2 (host) |
 
 ## Install / re-apply
 
@@ -102,6 +104,34 @@ Restore points land in `/var/lib/incus/backups/proxy` on this host and in
 `/var/backups/estate/proxy` on i1; the newest three are kept on each. i2 holds a
 root key for i1 for that copy, marked `backup@i2`. Full detail:
 [`docs/proxy-restore.md`](../../docs/proxy-restore.md).
+
+### It runs on a timer
+
+`proxy-backup.timer` writes one every Sunday at 03:30 (+ up to 45 min of jitter),
+`Persistent=true`, so a weekend when i2 was down produces a point at the next boot
+rather than a silent gap. It calls `/root/backup-proxy.sh --keep 3 --offsite
+root@192.168.1.51:/var/backups/estate/proxy`.
+
+```sh
+systemctl list-timers proxy-backup.timer
+journalctl -u proxy-backup.service -n 40
+systemctl start proxy-backup.service      # run it now
+```
+
+The dataset is what bounds it. `/var/lib/incus/backups` is its own ZFS dataset
+(`fast/incus-backups`), separate from the pool root where `proxy` itself lives —
+an exhausted backup dataset cannot starve a container. It had no quota until
+2026-11-02 (`zfs get refquota` was `none`; the 40 G `df` showed was used +
+pool-free), so it now carries `refquota=40G`. At 11 G per point, three points are
+33 G: `--keep 3` fills the quota without exceeding it.
+
+The script secures that room **before** writing, not after. `--keep` is a
+retention policy, and on its own it prunes only once a run has succeeded — the
+moment at which there may be nothing left to write into. So it computes what it
+needs (newest point + 10 % + 2 G, or `--min-free-gib`), gives up the oldest point
+until the space exists, and refuses with a clear error and **nothing written** if
+it still does not fit. A run that fails partway deletes its own partial
+directory, so a broken export does not quietly consume a third of the quota.
 
 ## Why the module is loaded, and why the traversal is off
 

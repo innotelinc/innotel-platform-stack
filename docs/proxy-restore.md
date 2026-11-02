@@ -24,6 +24,7 @@ here is all of it, verified, in one timestamped directory.
 | `data.tar.zst` | `/usr/src/proxy/data` — NPM `nginx/proxy_host/*.conf`, `custom_ssl`, `keys.json`, `database.sqlite`, `access`, `logs` |
 | `deploy.tar.zst` | `/usr/src/innotel-deploy` (compose + units + reconciler) and `/usr/src/innotel-site` (site content) |
 | `units.tar.zst` | `/etc/systemd/system` from inside proxy — the units live in the rootfs, and nobody unpacks 18 G to read one |
+| `manifest.txt` | written last, so its absence means the directory is incomplete |
 | `config.yaml` | `incus config show --expanded`, for a rebuild without the tarball |
 | `inventory.txt` | addresses, `docker ps`, NPM host-conf count, the unit state at capture time |
 | `manifest.txt` | sizes, sha256 of every artifact, and the counts the script checked |
@@ -50,6 +51,40 @@ Offsite matters: the local restore point sits on the `fast` pool, which is where
 the container itself lives. `--offsite` copies it to i1 (`/var/backups/estate/proxy`),
 so a lost pool is not a lost edge. i2 holds a root key for i1 for this, added
 2026-11-02 and marked `backup@i2` in i1's `authorized_keys`.
+
+## Taking one on a schedule
+
+`hosts/i2/proxy-backup/proxy-backup.{service,timer}` run the same command weekly:
+Sunday 03:30 with up to 45 minutes of jitter, `Persistent=true` so a missed
+weekend is caught up at the next boot rather than skipped in silence.
+
+```sh
+systemctl list-timers proxy-backup.timer
+journalctl -u proxy-backup.service -n 40
+```
+
+### Why the rotation is bounded by space, not just by count
+
+`/var/lib/incus/backups` is its own ZFS dataset, `fast/incus-backups` — separate
+from the pool root that holds `proxy`, `capstone` and `atheniq`, so a full backup
+dataset cannot starve a container. It had **no quota** when this was scheduled
+(`zfs get refquota` returned `none`, and the 40 G that `df` printed was just
+used + pool-free), so backups could grow into the pool. It now carries
+`refquota=40G` (`zfs set refquota=40G fast/incus-backups`, 2026-11-02). Each
+point is about 11 G, so three fit in 33 G and a fourth does not.
+
+That makes `--keep 3` necessary but not sufficient. Count-based retention prunes
+after a run has finished, and the run that finds three points already there has
+7 G to write 11 G into. So `backup-proxy.sh` decides space first:
+
+1. It measures what a point costs — the newest point's size + 10 % + 2 G, or an
+explicit `--min-free-gib`.
+2. It frees that by deleting the **oldest** point, logging each one it gives up.
+3. If the space still is not there, it exits with the numbers and writes nothing.
+
+An old restore point is worth less than a failed write on top of it. Failures
+also clean up after themselves: the directory is only complete when `manifest.txt`
+exists, and a run that dies partway removes what it wrote.
 
 ## Restoring
 
@@ -85,6 +120,9 @@ The unit files are inside the rootfs, so the import restores them and their
   directory named `proxy`.
 - **Snapshots.** None are kept. The clone exists only for the duration of the
   export, and the snapshot is deleted once the tarball is written.
+- **Filling the backup dataset.** `fast/incus-backups` is capped at 40 G, and the
+  script refuses to start a write it cannot finish, but a `--keep` above 3 would
+  simply fail every time. Raise the refquota before raising `--keep`.
 - **Point-in-time consistency of `/data`.** Docker is still running while it is
   archived. NPM rewrites `proxy_host/*.conf` on config changes, not continuously,
   so this is a good point in time; it is not a filesystem snapshot.

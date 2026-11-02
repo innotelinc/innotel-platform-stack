@@ -1,0 +1,18 @@
+[Unit]
+Description=proxy restore point (edge backup, local + offsite to i1)
+Documentation=file:///root/backup-proxy.sh
+After=network-online.target incus.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# --keep 3 matches the 40G refquota on fast/incus-backups: three 11G points plus
+# the slack the script requires. The script itself secures space before writing
+# and gives up the oldest point rather than starting an export it cannot finish,
+# so a full dataset shows up as a failed unit, never as a half-written directory.
+ExecStart=/root/backup-proxy.sh --keep 3 --offsite root@192.168.1.51:/var/backups/estate/proxy
+# The export copies 18G and the offsite copy is another 11G over the LAN; both
+# are IO-heavy but must not be killed partway for being slow.
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=idle

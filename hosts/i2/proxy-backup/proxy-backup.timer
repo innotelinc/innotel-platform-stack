@@ -1,0 +1,16 @@
+[Unit]
+Description=Weekly proxy restore point
+
+[Timer]
+# Sunday night, quiet hour for a host whose edge serves the whole estate. The
+# randomised delay keeps it from landing on the same minute as anything else
+# that runs at 03:30, and Persistent=true means a host that was down over the
+# weekend writes its point at the next boot instead of skipping a week silently.
+OnCalendar=Sun 03:30
+RandomizedDelaySec=45min
+AccuracySec=1min
+Persistent=true
+Unit=proxy-backup.service
+
+[Install]
+WantedBy=timers.target
