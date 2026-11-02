@@ -74,7 +74,10 @@ from __future__ import annotations
 import argparse
 import email
 import gzip
+import importlib.util
 import imaplib
+import sys
+import time
 import io
 import os
 import re
@@ -116,6 +119,18 @@ THRESHOLD = 1
 #: It only bounds the "nothing has been sent yet" case; a report that exists is read
 #: whatever this says.
 RUA_WIRED = date(2026, 10, 29)
+
+#: Domains the estate sends as. A receiver emits an aggregate report when it sees mail
+#: claiming to be from one of its domains; a recipient outside this list is what creates
+#: that mail. It is the difference between a quiet domain and a broken reporting path.
+INTERNAL_DOMAINS = (
+    "innotel.us", "innotel.tech", "innotel.site", "atheniq.courses",
+    "atheniq.institute", "atheniq.online", "ontrak.technology", "rizzaura.net",
+    "loomix.art", "loomix.lol", "telno.services", "telno.directory", "telno.digital",
+    "telno.mobi", "pbx.it.com", "pbx.services", "pbx.technology", "denovocredit.com",
+    "denovo.credit", "innovative.tel", "orion.locker", "num.directory",
+    "number.directory",
+)
 
 #: Days of silence after `RUA_WIRED` that mean "no mail has been reported on yet" rather
 #: than "the reporting path is broken". Receivers send daily, so three days is three
@@ -334,8 +349,54 @@ def evaluate(streams: list[Stream], policies: dict[str, dict[str, str]], thresho
     return out
 
 
+def _internal(domain: str) -> bool:
+    """Whether the estate owns the domain, so mail to it produces no report."""
+    return any(domain == owned or domain.endswith("." + owned) for owned in INTERNAL_DOMAINS)
+
+
+def _mail_traffic_module():
+    """`check-mail-traffic.py`, loaded by path — it already owns reading this log.
+
+    Reused rather than re-implemented so the recipient parsing and the log's ANSI/format
+    quirks have one implementation; the module has no import side effects.
+    """
+    path = Path(__file__).resolve().parent / "check-mail-traffic.py"
+    spec = importlib.util.spec_from_file_location("check_mail_traffic_for_dmarc", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def outbound_messages(days: int, runner=None) -> int | None:
+    """How many messages were submitted to an address outside the estate in the window.
+
+    Returns `None` when the log cannot be read: an unreachable host is not evidence that
+    the domain has been quiet, and must not be read as zero.
+    """
+    try:
+        traffic = _mail_traffic_module()
+        runner = runner or traffic.ssh
+        host, target = traffic.find_mail_host(runner)
+        cutoff = traffic.cutoff_for(time.time(), days * 24)
+        lines = traffic.read_log(target, cutoff, runner, host)
+    except Exception:  # noqa: BLE001 — unreadable is unknown, never zero
+        return None
+    count = 0
+    for line in lines:
+        match = traffic.LINE.match(line)
+        if not match or not match.group("event").startswith("queue."):
+            continue
+        domain = traffic._domain(traffic._first_recipient(match.group("fields")))
+        if domain and not _internal(domain):
+            count += 1
+    return count
+
+
 def no_reports_finding(
-    wired: date, grace: int, window: int, today: date | None = None
+    wired: date, grace: int, window: int, today: date | None = None,
+    outbound: int | None = None,
 ) -> tuple[Finding, bool]:
     """What silence means: waiting for the first report, or a reporting path that is broken.
 
@@ -343,9 +404,27 @@ def no_reports_finding(
     a `rua` published yesterday has nothing to report on yet, and calling that "could not
     answer" keeps the estate red for a reason nobody can act on — while the same silence
     a week later is exactly the failure worth paging for.
+
+    `outbound` is how many messages left the estate for an outside address in the window.
+    Zero is the state that made this check red with nothing to fix: a receiver reports on
+    mail it has seen, so a domain that has sent nothing outside produces no reports by
+    construction. None means the log could not be read, which is unknown — the age of the
+    `rua` still decides, because silence that cannot be explained is still silence.
     """
     today = today or date.today()
     age = (today - wired).days
+    if outbound == 0:
+        return (
+            Finding(
+                "no-outbound-mail",
+                "note",
+                f"no DMARC report in the last {window} day(s), and no message was submitted to "
+                f"an address outside the estate in that window — a receiver only reports on "
+                f"mail it has seen, so there is nothing to answer with yet. This is a quiet "
+                f"domain, not a broken reporting path",
+            ),
+            False,
+        )
     if age <= grace:
         return (
             Finding(
@@ -365,7 +444,9 @@ def no_reports_finding(
             f"no DMARC report in the last {window} day(s) although the rua has been published "
             f"since {wired:%Y-%m-%d} ({age} day(s)) — the reporting path is broken, not quiet: "
             f"check the rua on _dmarc.<domain>, that mail to it reaches the mailbox, and that "
-            f"a filter is not filing reports outside INBOX",
+            f"a filter is not filing reports outside INBOX"
+            + (f" — {outbound} message(s) did leave the estate in that window, "
+               f"so reports were due" if outbound else ""),
         ),
         True,
     )
@@ -504,6 +585,11 @@ def main(argv: list[str] | None = None) -> int:
         "--grace-days", type=int, default=GRACE_DAYS,
         help=f"days of silence after --wired that are waiting, not failing (default {GRACE_DAYS})",
     )
+    parser.add_argument(
+        "--outbound", type=int, default=None,
+        help="messages submitted to an outside address in the window (default: read the mail "
+             "log; 0 means nothing was sent, so no receiver had anything to report on)",
+    )
     args = parser.parse_args(argv)
 
     domains = tuple(d.strip() for d in args.domains.split(",") if d.strip()) if args.domains else DOMAINS
@@ -536,7 +622,11 @@ def main(argv: list[str] | None = None) -> int:
                 # A directory someone pointed at is a question about an archive: nothing in
                 # it means the archive is empty, which is not a state the rua explains.
                 raise ReportsUnreadable(f"no DMARC report in the last {args.days} day(s) — nothing to answer with")
-            finding, broken = no_reports_finding(args.wired, args.grace_days, args.days)
+            outbound = args.outbound
+            if outbound is None:
+                outbound = outbound_messages(args.days)
+            finding, broken = no_reports_finding(
+                args.wired, args.grace_days, args.days, outbound=outbound)
             result = Audit(findings=[finding])
             emit(result, ran=True)
             print(f"{finding.level.upper():4} {finding.message}")

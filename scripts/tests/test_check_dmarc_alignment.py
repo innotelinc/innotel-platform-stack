@@ -346,5 +346,44 @@ class MainCase(unittest.TestCase):
         self.assertRegex(body, r'innotel_estate_check_dmarc_reports\{check="dmarc_alignment"\} 1')
 
 
+class OutboundCase(unittest.TestCase):
+    """Silence is a failure only when the domain has actually sent mail outside.
+
+    The state this was written for is the one the estate sat in on 2026-11-02: the `rua`
+    had been published for four days, every mailbox folder was empty, and no message had
+    been submitted to an outside address since the record went live — so no receiver had
+    anything to report on. The check called that "the reporting path is broken", which is
+    a page nobody can act on.
+    """
+
+    def test_a_domain_that_sent_nothing_outside_is_quiet_not_broken(self):
+        finding, broken = dmarc.no_reports_finding(
+            wired=date(2026, 10, 29), grace=3, window=7, today=date(2026, 11, 20), outbound=0)
+        self.assertFalse(broken)
+        self.assertEqual(finding.code, "no-outbound-mail")
+        self.assertEqual(finding.level, "note")
+        self.assertIn("quiet", finding.message)
+
+    def test_outbound_mail_past_the_grace_is_still_a_break(self):
+        finding, broken = dmarc.no_reports_finding(
+            wired=date(2026, 10, 29), grace=3, window=7, today=date(2026, 11, 20), outbound=12)
+        self.assertTrue(broken)
+        self.assertEqual(finding.code, "no-reports")
+        self.assertIn("12 message(s) did leave the estate", finding.message)
+
+    def test_an_unreadable_log_falls_back_to_the_age_of_the_rua(self):
+        # Unknown is not zero: a log that could not be read must not silence the check.
+        finding, broken = dmarc.no_reports_finding(
+            wired=date(2026, 10, 29), grace=3, window=7, today=date(2026, 11, 20), outbound=None)
+        self.assertTrue(broken)
+        self.assertEqual(finding.code, "no-reports")
+
+    def test_the_estate_own_domains_are_not_outside(self):
+        self.assertTrue(dmarc._internal("innotel.us"))
+        self.assertTrue(dmarc._internal("mail.atheniq.courses"))
+        self.assertFalse(dmarc._internal("gmail.com"))
+        self.assertFalse(dmarc._internal("notinnotel.us"))
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -947,6 +947,68 @@
           }
         }
       ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Stuck processes",
+      "description": "Processes on an estate host that have been running for over an hour, by host and kind (stray_command, shutdown_pending). Written after an 18-hour `docker exec` took i4 to load 13 with nothing misconfigured; published by check-stuck-processes.py.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 58
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_stuck_processes",
+          "instant": true,
+          "legendFormat": "{{host}} {{kind}}",
+          "range": false
+        }
+      ]
     }
   ],
   "refresh": "1m",
