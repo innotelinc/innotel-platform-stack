@@ -1,4 +1,4 @@
-# Incus container placement — i1 / i2 / i3 / i4
+# Incus container placement — i1 / i2 / i4 (`i3` retired 2026-11-02)
 
 Surveyed 2026-09-27; refreshed 2026-10-01 (a morning survey and an evening
 rebalance), 2026-10-02 (the edge moved onto `i4`) and 2026-10-09 (the edge came back
@@ -14,6 +14,41 @@ incident was fixed by pinning addresses instead of trusting the router, and the
 evening pass moved the edge services back onto i1, right-sized i1's CPU caps, and
 put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
+
+## Changes applied 2026-11-02 — `i3` is retired
+
+- **`i3` (`192.168.1.53`) no longer answers, and is not an estate host any more.**
+  Measured from `i4`: `ip neigh` holds `192.168.1.53 dev br-lan FAILED`, TCP to `:8443`
+  and `:9093` both fail, and the `i3` / `i3move` remotes point at nothing. **The estate is
+  three Incus hosts: `i1`, `i2`, `i4`.**
+- **Every container that was on `i3` runs on `i2` now, at the same address** — `distro`
+  `.61`, `magnate` `.57`, `mail` `.15`, `monitor` `.88`, `onyx` `.60`, `pi` `.70`,
+  `signara` `.44`, `subscribe` `.58`. Verified with `incus list` on all three hosts, not
+  inferred from this page. `proxy` (`.71`) is on `i2` too, where it was recreated on
+  2026-10-26.
+- **No address moved, so no A record, compose bind or vhost target changed.** What did
+  change is every place that *named the host*: `check-container-addresses.py`,
+  `check-estate-inventory.py`, `check-container-limits.py`, `check-host-disk.py`,
+  `check-address-latency.py`, `check-mail-traffic.py`, `check-mount-stacks.py`,
+  `trust-estate-hosts.py` and `setup-sshpass-lan.sh` dropped the `i3` row, and
+  `check-alert-delivery.py` reads Alertmanager on `i2`. A retired host left in one of
+  those tables is not a stale comment — the check exits 2 on a host it cannot read, so
+  every run would have reported the whole estate as unreadable, which is exactly the
+  silence those checks exist to break.
+- **`i2`'s pools are `default`, `fast` and `tank`** (measured 2026-11-02), so
+  `check-estate-inventory.py` asserts all three. The 2026-10-28 note below says `tank`
+  no longer exists on `i2`; that was true then and is not now.
+- **`i4` gained three containers the address table did not name** — `sage` `.94`,
+  `telno` `.95`, `telno-turn` `.96`, all static in their own netplan (`60-<name>.yaml`,
+  `dhcp4: false`). They had been running all along, and every address check warned about
+  them on every run; they are rows now.
+- **Alertmanager did not need to move.** It is `signara-alertmanager-1`, inside the
+  `signara` container, published on `0.0.0.0:9093` and dialled at `.44:9093`; the
+  container kept `.44` across the move, so `extensions/monitoring/prometheus/prometheus.host.yml`
+  is unchanged and verified (`/-/healthy` → 200 from `i4`, where the checks run).
+- The per-container table further down has been relabelled to `i2` for those eight
+  containers. Its memory readings are the 2026-10-27 measurement, taken when they ran on
+  `i3`; they are not a measurement of `i2`.
 
 ## Changes applied 2026-10-28
 
@@ -436,7 +471,7 @@ estate as it is, not as it was.
   Alertmanager's v2 API, then reads the mail server's delivery log for a delivery from
   the receiver's address to its recipient within the window. No delivery is a **failure**
   naming the receiver's own last notify error; a host it cannot read is exit 2, never
-  silence. It needs `i3` (Alertmanager) and the host carrying `mail`, so it keeps its own
+  silence. It needs `i2` (Alertmanager) and the host carrying `mail`, so it keeps its own
   two-host table rather than joining the four-host coverage guard — and it **derives**
   the mail server's host from the container address table rather than pinning it, because
   that server moves (`mail` went `i1` → `i4` on 2026-10-09, and a check still reading `i1`
@@ -453,7 +488,9 @@ The mapping from static rootfs identity to current bind-mount attach status is i
   on the edge. (This entry first gave the reason as the receiver being loopback-only on
   `i3`; it is not — it is published on `192.168.1.44:9093`, `ALERTMANAGER_BIND_ADDRESS=0.0.0.0`
   in Signara's `.env` — corrected 2026-10-15, when the per-host Prometheus was pointed at
-  it.) It is the only checker that can still report the edge being gone, because it does
+  it. The container moved with `i3`'s retirement on 2026-11-02 and kept `.44`, so the
+  target still holds.) It is the only checker that can still report the edge being gone,
+  because it does
   not run there.
 - **The scheduled checks now cover `i4`.** `check-estate-inventory.py` no longer lists
   it as an optional bench (every named host must answer), `check-container-addresses.py`
@@ -614,7 +651,9 @@ The mapping from static rootfs identity to current bind-mount attach status is i
   `regcache`, `rizzaura` and `www` on `i1`; `atheniq`, `blueprint`, `capstone` on `i2`;
   the seven mail/app containers on `i3`; and the edge with `terminal`, `vault`, `vpn` on
   `i4` (`mail` has been on `i3` since 2026-10-15, which is why
-  `check-alert-delivery.py` reads its log there).
+  `check-alert-delivery.py` reads its log there). **Since the 2026-11-02 retirement those
+  seven are on `i2`**, and `check-alert-delivery.py` derives that host from the address
+  table rather than from this sentence.
 
   **`clearpath` (`.83`) is the first container added since that reconciliation, and it
   arrived as two.** The deployment landed it on `i2` with the address pinned statically
@@ -689,8 +728,8 @@ are in finding 1.
 | Host | Address | vCPU | RAM | Load at survey | RAM available | Root disk | Pool |
 |---|---|---|---|---|---|---|---|
 | **i1** | `.51` | 4 | 14.9 GiB | 2.73 / 12.27 / 14.55 † | 3.9 GiB | 98 G (14 %) | `incus` (zfs) |
-| **i2** | `.52` | 8 | 13.1 GiB | 0.54 / 0.68 / 0.89 | 4.5 GiB | 23 G (48 %) | `main-pool` (btrfs) |
-| **i3** | `.53` | 8 | 5.3 GiB | **0.18** / 0.30 / 0.23 | 3.0 GiB | 23 G (67 %) | `tank` (zfs) |
+| **i2** | `.52` | 8 | 13.1 GiB | 0.54 / 0.68 / 0.89 | 4.5 GiB | 23 G (48 %) | `default` (dir) + `fast` (zfs) + `tank` (zfs) |
+| ~~**i3**~~ | ~~`.53`~~ | — | — | — | — | — | **retired 2026-11-02** — containers moved to `i2`; the host no longer answers |
 
 † i1's load is `monarch`'s media stack, not the move: qbittorrent and the *arr
 apps are the top CPU consumers, and the load stayed up after the copies finished.
@@ -781,14 +820,18 @@ that table is a bug in one of them.
 | i1 | `www` | ~~`.80`~~ | **retired 2026-10-29** — the public landing page moved to `ord-atheniq` (`104.238.162.5:8086`); stopped since 2026-10-28 with an empty volume | — | — |
 | i2 | `atheniq` | `.59` | AthenIQ LMS (Tutor / Open edX) | 3.61 GiB (5.25 GiB) | 6 |
 | i2 | `capstone` | `.30` | Zeus / capstone telephony | 4.34 GiB (uncapped) | 2 |
-| i3 | `distro` | `.61` | distro control plane | 204 MiB (1 GiB) | 2 |
-| i3 | `magnate` | `.57` | Magnate | 181 MiB (1 GiB) | 2 |
-| i3 | `mail` | `.15` | mail (SMTP/IMAP) | 438 MiB (4 GiB) | 2 |
-| i3 | `onyx` | `.60` | Onyx (RAG) | 291 MiB (1 GiB) | 2 |
-| i3 | `pi` | `.70` | pi | 193 MiB (1 GiB) | 2 |
-| i3 | `signara` | `.44` | Signara | 539 MiB (896 MiB) | 2 |
-| i3 | `subscribe` | `.58` | Subscribe | 123 MiB (384 MiB) | 2 |
-| i4 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 3.99 GiB (4 GiB) | 2 |
+| i2 | `distro` | `.61` | distro control plane | 204 MiB (1 GiB) | 2 |
+| i2 | `magnate` | `.57` | Magnate | 181 MiB (1 GiB) | 2 |
+| i2 | `mail` | `.15` | mail (SMTP/IMAP) | 438 MiB (4 GiB) | 2 |
+| i2 | `monitor` | `.88` | SigNoz — traces, metrics, logs | — | 2 |
+| i2 | `onyx` | `.60` | Onyx (RAG) | 291 MiB (1 GiB) | 2 |
+| i2 | `pi` | `.70` | pi | 193 MiB (1 GiB) | 2 |
+| i2 | `signara` | `.44` | Signara (and the estate's one Alertmanager) | 539 MiB (896 MiB) | 2 |
+| i2 | `subscribe` | `.58` | Subscribe | 123 MiB (384 MiB) | 2 |
+| i2 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 3.99 GiB (4 GiB) | 2 |
+| i4 | `sage` | `.94` | sage | — | — |
+| i4 | `telno` | `.95` | telno | — | — |
+| i4 | `telno-turn` | `.96` | telno TURN relay | — | — |
 | i4 | `terminal` | `.22` | web terminal (termix, guacd, zapit) | 464 MiB (1280 MiB) | 1 |
 | i4 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 624 MiB (1536 MiB) | 1 |
 | i4 | `vpn` | `.43` | WireGuard (`10.7.0.2` wg0) | 222 MiB (768 MiB) | 1 |

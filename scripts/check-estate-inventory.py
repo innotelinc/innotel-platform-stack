@@ -58,10 +58,12 @@ CHECK = "estate_inventory"
 
 #: The estate as it should be: name → address, and the storage pools each host may have.
 #: Cross-checked against docs/container-placement.md — a change here is a change there.
+#: `i3` was retired on 2026-11-02 (its containers were copied to `i2`), so it is no longer
+#: a host this check can assert anything about. Leaving it here made the whole run exit 2:
+#: a host that does not answer is never silence.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
     "i2": "root@192.168.1.52",
-    "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
 
@@ -72,8 +74,8 @@ NAME_OF_ADDRESS: dict[str, str] = {address: name for name, address in ADDRESS_OF
 #: name → the storage pools that host is allowed to have. A pool not listed is a failure.
 POOLS: dict[str, set[str]] = {
     "i1": {"incus"},
-    "i2": {"default", "fast"},
-    "i3": {"tank"},
+    # `tank` came over with `i3`'s containers on 2026-11-02; measured on i2 the same day.
+    "i2": {"default", "fast", "tank"},
     "i4": {"default", "tank"},
 }
 
@@ -85,9 +87,8 @@ OPTIONAL: set[str] = set()
 #: What each host is for. Reported, so a finding says what the host is.
 ROLE: dict[str, str] = {
     "i1": "estate (edge — every address is dialled here)",
-    "i2": "estate (apps)",
-    "i3": "estate (light)",
-    "i4": "estate (atheniq, mail, vault, vpn — bridged on br-lan)",
+    "i2": "estate (apps, mail, media, monitoring, signing)",
+    "i4": "estate (terminal, vault, vpn, sage, telno — bridged on br-lan)",
 }
 
 

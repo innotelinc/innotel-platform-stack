@@ -82,13 +82,13 @@ class SeriesCase(unittest.TestCase):
     def test_the_reading_is_published_per_host(self):
         usages = [
             disk.Usage(host="i2", mount="/", percent=48.0, avail_bytes=12 * 1024**3, total_bytes=24 * 1024**3),
-            disk.Usage(host="i3", mount="/"),  # no reading
+            disk.Usage(host="i4", mount="/"),  # no reading
         ]
         body = disk.disk_series(usages)
         self.assertIn('innotel_estate_check_host_disk_percent{check="host_disk",host="i2",mount="/"} 48.000', body)
         self.assertIn('innotel_estate_check_host_disk_avail_bytes{check="host_disk",host="i2",mount="/"} ', body)
         # A host with no reading has no number to publish; the finding carries it instead.
-        self.assertNotIn('host="i3"', body)
+        self.assertNotIn('host="i4"', body)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -110,7 +110,7 @@
               },
               {
                 "color": "green",
-                "value": 17
+                "value": 18
               }
             ]
           },
@@ -529,7 +529,7 @@
       "id": 8,
       "type": "timeseries",
       "title": "Root filesystem used",
-      "description": "Each host's root filesystem, from check-host-disk.py. 80 % is the warning line and 90 % the failure line; i3 has the least room.",
+      "description": "Each host's root filesystem, from check-host-disk.py. 80 % is the warning line and 90 % the failure line; i2 has the least room since i3 was retired on 2026-11-02.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

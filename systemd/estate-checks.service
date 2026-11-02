@@ -35,8 +35,9 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-alert-delivery.py -
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-auth.py --prom ${TEXTFILE_DIR}/estate-check-mail-auth.prom
 # The mail server is reached at its own address (`mail`, 192.168.1.15, in the container
 # address table), so the check keeps working when the container moves host — and it has:
-# it is on `i3` since 2026-10-15, having been on `i1` then `i4` before that. The table is
-# the authority for which host that is, not this comment. STALWART_USER/
+# it is on `i2` since 2026-11-02, having been on `i1`, then `i4`, then `i3` (retired
+# 2026-11-02) before that. The table is the authority for which host that is, not this
+# comment. STALWART_USER/
 # STALWART_PASSWORD come from the EnvironmentFile above; the check has no default
 # credential and must never carry one.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-relay.py --base http://192.168.1.15:8080 --prom ${TEXTFILE_DIR}/estate-check-mail-relay.prom
@@ -110,7 +111,8 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --
 # And that no NFS share has been mounted twice or gone stale. On 2026-10-29
 # `/srv/onyx-pool` in `distro` held 32 769 entries: ganesha restarted, every handle
 # went stale, `mountpoint` blocks on a stale handle instead of failing, and the
-# minute timer therefore mounted another copy on top each run until every `df` on i3
+# minute timer therefore mounted another copy on top each run until every `df` on the
+# then-host (i3, retired 2026-11-02, so the mount stack reads `i1`, `i2` and `i4` now)
 # queued behind the probes and the control plane's health probe could not be
 # answered. It reads each host and then each running container *inside* the
 # container — a container's mountpoints are not paths on its host — and bounds every

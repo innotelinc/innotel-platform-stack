@@ -35,8 +35,8 @@ stacks = _load()
 
 class ParseCase(unittest.TestCase):
     def test_a_row_reads_as_a_mount(self):
-        mount = stacks.parse_walk("i3/distro|192.168.1.60:/mnt/onyx/main-pool|/srv/onyx-pool/main-pool|nfs|ok|3")[0]
-        self.assertEqual(mount.scope, "i3/distro")
+        mount = stacks.parse_walk("i2/distro|192.168.1.60:/mnt/onyx/main-pool|/srv/onyx-pool/main-pool|nfs|ok|3")[0]
+        self.assertEqual(mount.scope, "i2/distro")
         self.assertEqual(mount.source, "192.168.1.60:/mnt/onyx/main-pool")
         self.assertEqual(mount.target, "/srv/onyx-pool/main-pool")
         self.assertEqual(mount.state, "ok")
@@ -56,7 +56,7 @@ class ParseCase(unittest.TestCase):
 
 
 class AuditCase(unittest.TestCase):
-    def _mount(self, target="/srv/onyx-pool/main-pool", scope="i3/distro", state="ok",
+    def _mount(self, target="/srv/onyx-pool/main-pool", scope="i2/distro", state="ok",
                elapsed=4, source="192.168.1.60:/mnt/onyx/main-pool"):
         return stacks.Mount(scope=scope, source=source, target=target, state=state, elapsed_ms=elapsed)
 
@@ -86,7 +86,7 @@ class AuditCase(unittest.TestCase):
         self.assertTrue(result.ok, "sdc and main-pool are the same export on two targets, not a stack")
 
     def test_the_same_target_on_a_different_scope_is_not_a_stack(self):
-        result = stacks.audit([self._mount(scope="i3/distro"), self._mount(scope="host")])
+        result = stacks.audit([self._mount(scope="i2/distro"), self._mount(scope="host")])
         self.assertTrue(result.ok)
 
     def test_a_stale_mount_is_a_failure(self):
@@ -111,11 +111,11 @@ class AuditCase(unittest.TestCase):
 class SeriesCase(unittest.TestCase):
     def test_the_entries_gauge_counts_every_scope(self):
         text = stacks.mount_series([
-            stacks.Mount(scope="i3/distro", source="a", target="/mnt/a"),
-            stacks.Mount(scope="i3/distro", source="a", target="/mnt/a"),
+            stacks.Mount(scope="i2/distro", source="a", target="/mnt/a"),
+            stacks.Mount(scope="i2/distro", source="a", target="/mnt/a"),
             stacks.Mount(scope="host", source="b", target="/mnt/b"),
         ])
-        self.assertIn('innotel_estate_check_mount_entries{check="mount_stack",scope="i3/distro"} 2', text)
+        self.assertIn('innotel_estate_check_mount_entries{check="mount_stack",scope="i2/distro"} 2', text)
         self.assertIn('innotel_estate_check_mount_entries{check="mount_stack",scope="host"} 1', text)
 
     def test_the_probe_gauge_carries_the_measured_time(self):

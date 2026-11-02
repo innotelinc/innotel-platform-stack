@@ -112,13 +112,13 @@ class AuditCase(unittest.TestCase):
         self.assertIn("wifi-powersave-off", result.findings[0].message)
 
     def test_an_unusable_address_is_a_failure(self):
-        result = lat.audit([_reading("i3", "192.168.1.53", "host", [1200.0, 1100.0, 1300.0])])
+        result = lat.audit([_reading("i4", "192.168.1.54", "host", [1200.0, 1100.0, 1300.0])])
         self.assertEqual([f.code for f in result.findings], ["unusable"])
         self.assertFalse(result.ok)
 
     def test_partial_loss_is_a_note_not_a_warning(self):
         # A lost first burst on a WiFi hop is normal; warning here would page every run.
-        result = lat.audit([_reading("i3", "192.168.1.53", "host", [5.0, 6.0], attempted=3)])
+        result = lat.audit([_reading("i4", "192.168.1.54", "host", [5.0, 6.0], attempted=3)])
         self.assertTrue(result.ok)
         self.assertEqual([f.level for f in result.findings], ["note"])
         self.assertEqual([f.code for f in result.findings], ["lossy"])

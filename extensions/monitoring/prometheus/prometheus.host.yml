@@ -9,11 +9,14 @@ global:
     stack: innotel-host
 
 # Where the alerts go. The estate has exactly one receiver — `signara-alertmanager-1`
-# in Signara's stack on i3 — and it is dialled at its **container** address rather
-# than a host's, for the reason every other estate address is: `192.168.1.44` is
-# pinned inside that container and published on `0.0.0.0`
+# in Signara's stack, on `i2` since 2026-11-02 — and it is dialled at its **container**
+# address rather than a host's, for the reason every other estate address is:
+# `192.168.1.44` is pinned inside that container and published on `0.0.0.0`
 # (`ALERTMANAGER_BIND_ADDRESS` in Signara's `.env`), so a container that moves
-# between hosts does not change what this line says.
+# between hosts does not change what this line says. That is exactly what it was
+# worth when `i3` was retired: the container was copied to `i2`, kept `.44`, and this
+# line needed no change at all (verified 2026-11-02: `192.168.1.44:9093/-/healthy` →
+# 200 from `i4`, where the checks run).
 #
 # This section is what lets the rules below reach anybody at all. Without it a
 # per-host Prometheus evaluates `rules/*.yml`, shows the alerts in its own UI, and

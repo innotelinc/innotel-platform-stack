@@ -83,13 +83,16 @@ CHECK = "container_address"
 # --------------------------------------------------------------------------------------
 
 #: host → {container: IPv4}. The addresses every A record and every published port names.
-#: The table is the estate as it is, not as any one change left it: `i4` received the edge
-#: (`proxy`, `terminal`, `vault`, `vpn`) from `i1` on 2026-10-02 and holds it now; the
-#: media and business containers (`atlas`, `genesis`, `rizzaura`, `www`) moved to `i1`,
-#: `atheniq` to `i2`, and `mail` to `i3` on 2026-10-15 — every one of them keeping its
-#: address, because the address is pinned in its own manager inside the container and
-#: `incus copy` carries the rootfs. Read the entry that matches the host the container is
-#: on *now*; a stale row here is a false alarm on every run.
+#: The table is the estate as it is, not as any one change left it: `i4` holds the edge's
+#: companions (`terminal`, `vault`, `vpn`, `sage`, `telno`, `telno-turn`); the media and
+#: business containers (`atlas`, `genesis`, `rizzaura`, `www`) moved to `i1`, and on
+#: 2026-11-02 **`i3` was retired** — `distro`, `magnate`, `mail`, `monitor`, `onyx`, `pi`,
+#: `signara` and `subscribe` all run on `i2` now, and `proxy` came back there on
+#: 2026-10-26 — every one of them keeping its address through the move, because the
+#: address is pinned in its own manager inside the container and `incus copy` carries the
+#: rootfs. Read the entry that matches the host the container is on *now*; a stale row
+#: here is a false alarm on every run, and a row for a host that no longer exists is
+#: worse: the check cannot read it, so every run exits 2.
 #: `nas` (`.89`, the Orion desktop) and `regcache` (`.79`) joined the table on 2026-10-24,
 #: when `auvik` (`.72`), `atheniq` (`.59`), `blueprint` (`.76`) and `regcache` (`.79`)
 #: were converted from netplan `dhcp4: true` to static — the addresses had not moved,
@@ -98,7 +101,8 @@ CHECK = "container_address"
 #: `i2` statically in its own netplan, and a second, device-less `clearpath` left on `i4`
 #: by the first attempt was deleted rather than listed — a name on two hosts is a warning
 #: about the estate, not a row for the table.
-#: `mail` moved on again: it runs on `i3` since 2026-10-15, and
+#: `mail` moved on again: it runs on `i2` since 2026-11-02, having been on `i1`, then
+#: `i4` (2026-10-09), then `i3` (2026-10-15) before that host was retired — and
 #: `check-alert-delivery.py` derives the host it reads the mail log on from this table —
 #: so a stale row here does not merely warn, it leaves the estate unable to prove that
 #: its alerts are *delivered* rather than only configured (the probe reads a mail log on
@@ -113,11 +117,16 @@ CHECK = "container_address"
 #: which is a false alarm in the loud direction: the check is supposed to report a dark
 #: address *someone dials*. The container itself is still there, empty; deleting it is a
 #: separate decision and no check depends on it.
-#: `monitor` (`.88`, SigNoz) joined on 2026-10-26: it was created on `i3` on 2026-10-25 and
-#: was the estate's last running container no row named, so every run of this check warned
+#: `monitor` (`.88`, SigNoz) joined on 2026-10-26: it was created on 2026-10-25 and was
+#: the estate's last running container no row named, so every run of this check warned
 #: about a container that was behaving. It is static in its own netplan
 #: (`/etc/netplan/50-static.yaml`, `dhcp4: false`) — the address is pinned, so it is a row,
-#: not a DHCP conversion waiting to happen.
+#: not a DHCP conversion waiting to happen. It moved from `i3` to `i2` with the rest of
+#: that host's containers on 2026-11-02.
+#: `sage` (`.94`), `telno` (`.95`) and `telno-turn` (`.96`) joined the same day, for the
+#: same reason `monitor` did: they run on `i4` and no row named them, so the check warned
+#: about three containers that were behaving. All three are static in their own netplan
+#: (`60-<name>.yaml`, `dhcp4: false`).
 EXPECTED: dict[str, dict[str, str]] = {
     "i1": {
         "atlas": "192.168.1.90",
@@ -137,15 +146,6 @@ EXPECTED: dict[str, dict[str, str]] = {
     "i2": {
         "atheniq": "192.168.1.59",
         "capstone": "192.168.1.30",
-        # `proxy` was recreated on i2 on 2026-10-26 22:00 EDT and is no longer an
-        # i4 container; i4 holds `terminal`, `vault` and `vpn` only. The address is
-        # unchanged (.71), which is why only the host row moves. Its `/data` bind
-        # mount now exists (verified 2026-10-28: raw-mount path=/data,
-        # source=/usr/src/proxy/data, 209 proxy_host confs readable), so rule 4
-        # watches it rather than reporting the 2026-10-26 defect.
-        "proxy": "192.168.1.71",
-    },
-    "i3": {
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
         "mail": "192.168.1.15",
@@ -154,10 +154,19 @@ EXPECTED: dict[str, dict[str, str]] = {
         "monitor": "192.168.1.88",
         "onyx": "192.168.1.60",
         "pi": "192.168.1.70",
+        # `proxy` was recreated on i2 on 2026-10-26 22:00 EDT and is no longer an
+        # i4 container. The address is unchanged (.71), which is why only the host row
+        # moves. Its `/data` bind mount now exists (verified 2026-10-28: raw-mount
+        # path=/data, source=/usr/src/proxy/data, 209 proxy_host confs readable), so
+        # rule 4 watches it rather than reporting the 2026-10-26 defect.
+        "proxy": "192.168.1.71",
         "signara": "192.168.1.44",
         "subscribe": "192.168.1.58",
     },
     "i4": {
+        "sage": "192.168.1.94",
+        "telno": "192.168.1.95",
+        "telno-turn": "192.168.1.96",
         "terminal": "192.168.1.22",
         "vault": "192.168.1.73",
         "vpn": "192.168.1.43",
@@ -167,12 +176,14 @@ EXPECTED: dict[str, dict[str, str]] = {
 #: Where each host is reachable. Overridable with `--hosts`.
 #: `i4` (`root@192.168.1.54`) joined this table on 2026-10-02: it took the edge and three
 #: other containers off i1, so the addresses the estate dials now live there too, and a
-#: table that skipped it would leave those four addresses unwatched.
-#: See docs/container-placement.md §The i4 host.
+#: table that skipped it would leave those addresses unwatched. `i3` (`192.168.1.53`) is
+#: **not** here any more: it was retired on 2026-11-02 and its containers were copied to
+#: `i2`. A host in this table must exist — the check exits 2 on one it cannot read, so
+#: a retired host left behind reads as an estate-wide outage rather than as a stale row.
+#: See docs/container-placement.md §The i3 host is retired.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
     "i2": "root@192.168.1.52",
-    "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
 
@@ -216,9 +227,11 @@ ROLES: dict[str, str] = {
     "192.168.1.76": "blueprint",
     "192.168.1.79": "regcache",
     "192.168.1.83": "Clearpath (`app.denovocredit.com`)",
-    "192.168.1.88": "the monitoring stack (Prometheus, Grafana, Alertmanager)",
+    "192.168.1.88": "`monitor` — SigNoz (traces, metrics, logs) and the monitoring stack",
     "192.168.1.89": "the NAS desktop (`nas.innotel.us`)",
-    "192.168.1.88": "SigNoz (`monitor`) — traces, metrics and logs for the estate",
+    "192.168.1.94": "sage",
+    "192.168.1.95": "telno",
+    "192.168.1.96": "telno-turn (TURN relay)",
 }
 
 
