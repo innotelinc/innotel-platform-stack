@@ -1,15 +1,15 @@
 [Unit]
-Description=Check for a new Authentik release every 15 minutes
+Description=Check for a new Authentik release once a day at 06:00
 
 [Timer]
-# Fifteen minutes is "as soon as it hits" without polling GitHub harder than the
-# unauthenticated API allows: one releases call per quarter hour, and the job
-# exits as soon as the pin already names the latest release. The jitter keeps a
-# release from landing in the same second as the other estate checks.
-OnBootSec=5m
-OnCalendar=*:0/15
-RandomizedDelaySec=2m
-AccuracySec=30s
+# Once a day at 06:00, not every fifteen minutes: Authentik is the estate's
+# pinned identity plane, and a release is only applied after it pulls, the
+# server and worker come up healthy, and the Jellyfin LDAP outpost is moved —
+# a window where somebody should be around to read an alert. Persistent=true
+# catches up when the host was down at 06:00, so a missed morning still runs.
+OnCalendar=*-*-* 06:00:00
+RandomizedDelaySec=5m
+AccuracySec=1m
 Persistent=true
 Unit=authentik-update.service
 
