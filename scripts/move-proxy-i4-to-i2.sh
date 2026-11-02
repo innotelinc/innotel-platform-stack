@@ -78,7 +78,11 @@ rc=$?
 log "delta rc=$rc"
 if [ "$rc" -ne 0 ]; then
   log "delta failed — restarting proxy on i4"
-  incus start proxy >>"$LOG" 2>&1 && log "proxy back on i4" || log "RESTART FAILED — needs a hand"
+  if incus start proxy >>"$LOG" 2>&1; then
+    log "proxy back on i4"
+  else
+    log "RESTART FAILED — needs a hand"
+  fi
   exit 1
 fi
 
@@ -95,7 +99,7 @@ log "device: $($RS $I2 'incus config device show proxy' 2>/dev/null | sed -n "/^
 
 log "starting proxy on i2"
 $RS $I2 'incus start proxy' >>"$LOG" 2>&1 || log "  start returned non-zero"
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   st=$($RS $I2 'incus list proxy -c s --format csv' 2>/dev/null)
   [ "$st" = "RUNNING" ] && break
   sleep 5
@@ -108,7 +112,7 @@ fi
 
 # ── Verify the things the estate actually dials ───────────────────────────
 ip=""
-for i in $(seq 1 24); do
+for _ in $(seq 1 24); do
   ip=$($RS $I2 'incus exec proxy -- ip -4 -o addr show eth0 2>/dev/null' 2>/dev/null | grep -oE '192\.168\.1\.[0-9]+' | head -1)
   [ -n "$ip" ] && break
   sleep 5
@@ -119,7 +123,7 @@ log "checking /data survived the move"
 n_conf=$($RS $I2 'incus exec proxy -- sh -c "ls /data/nginx/proxy_host/*.conf 2>/dev/null | wc -l"' 2>/dev/null | tr -d ' \r')
 log "  proxy_host conf files: ${n_conf:-0}"
 
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   n=$($RS $I2 'incus exec proxy -- docker ps -q 2>/dev/null | wc -l' 2>/dev/null | tr -d ' \r')
   log "  containers up: ${n:-0}"
   [ "${n:-0}" -ge 20 ] && break
@@ -129,9 +133,11 @@ done
 log "-- DNS on the moved edge --"
 dig +short +time=3 +tries=2 @192.168.1.71 innotel.us A >>"$LOG" 2>&1 || log "  dig failed"
 log "-- ingress on the moved edge --"
-curl -sk -o /dev/null -w '  npm https 192.168.1.71 -> %{http_code}\n' --max-time 10 https://192.168.1.71 >>"$LOG" 2>&1
-curl -sk -o /dev/null -w '  atheniq.innotel.us -> %{http_code}\n' --max-time 10 --resolve atheniq.innotel.us:443:192.168.1.71 https://atheniq.innotel.us >>"$LOG" 2>&1
-curl -sk -o /dev/null -w '  classroom.innotel.us -> %{http_code}\n' --max-time 10 --resolve classroom.innotel.us:443:192.168.1.71 https://classroom.innotel.us >>"$LOG" 2>&1
+{
+  curl -sk -o /dev/null -w '  npm https 192.168.1.71 -> %{http_code}\n' --max-time 10 https://192.168.1.71
+  curl -sk -o /dev/null -w '  atheniq.innotel.us -> %{http_code}\n' --max-time 10 --resolve atheniq.innotel.us:443:192.168.1.71 https://atheniq.innotel.us
+  curl -sk -o /dev/null -w '  classroom.innotel.us -> %{http_code}\n' --max-time 10 --resolve classroom.innotel.us:443:192.168.1.71 https://classroom.innotel.us
+} >>"$LOG" 2>&1
 log "-- edge stack --"
 $RS $I2 'incus exec proxy -- docker ps --format "{{.Names}}|{{.Status}}" | sort' >>"$LOG" 2>&1
 

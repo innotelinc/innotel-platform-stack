@@ -78,26 +78,46 @@ echo "  /etc/sysctl.d/99-bridge-nf-off.conf   -> $(grep -c . /etc/sysctl.d/99-br
 
 echo
 echo "=== 3. verification ==="
-lsmod | grep -q '^br_netfilter ' && ok "br_netfilter loaded" || bad "br_netfilter not loaded"
+if lsmod | grep -q '^br_netfilter '; then
+  ok "br_netfilter loaded"
+else
+  bad "br_netfilter not loaded"
+fi
 for k in iptables ip6tables arptables; do
   v=$(cat "/proc/sys/net/bridge/bridge-nf-call-$k" 2>/dev/null)
-  [ "$v" = "0" ] && ok "bridge-nf-call-$k = 0" || bad "bridge-nf-call-$k = ${v:-missing}"
+  if [ "$v" = "0" ]; then
+    ok "bridge-nf-call-$k = 0"
+  else
+    bad "bridge-nf-call-$k = ${v:-missing}"
+  fi
 done
 
 AFTER_BRIDGES=$(ip -br link show type bridge 2>/dev/null | awk '{print $1}' | sort | tr '\n' ' ')
-[ "$AFTER_BRIDGES" = "$BEFORE_BRIDGES" ] \
-  && ok "bridges unchanged ($AFTER_BRIDGES)" \
-  || bad "bridges changed: was [$BEFORE_BRIDGES] now [$AFTER_BRIDGES]"
+if [ "$AFTER_BRIDGES" = "$BEFORE_BRIDGES" ]; then
+  ok "bridges unchanged ($AFTER_BRIDGES)"
+else
+  bad "bridges changed: was [$BEFORE_BRIDGES] now [$AFTER_BRIDGES]"
+fi
 for b in $BEFORE_BRIDGES; do
   n=$(ip -br link show master "$b" 2>/dev/null | wc -l)
-  [ "$n" -gt 0 ] && ok "$b still has its ports: $n" || bad "$b lost every port"
+  if [ "$n" -gt 0 ]; then
+    ok "$b still has its ports: $n"
+  else
+    bad "$b lost every port"
+  fi
 done
 
-incus exec capstone -- sh -c 'test -e /proc/sys/net/bridge/bridge-nf-call-iptables' 2>/dev/null \
-  && ok "capstone sees /proc/sys/net/bridge (what the runner checks)" \
-  || bad "capstone does not see /proc/sys/net/bridge"
+if incus exec capstone -- sh -c 'test -e /proc/sys/net/bridge/bridge-nf-call-iptables' 2>/dev/null; then
+  ok "capstone sees /proc/sys/net/bridge (what the runner checks)"
+else
+  bad "capstone does not see /proc/sys/net/bridge"
+fi
 c=$(incus exec capstone -- docker ps -q 2>/dev/null | wc -l)
-[ "$c" -ge 20 ] && ok "capstone containers up: $c" || bad "capstone containers up: $c"
+if [ "$c" -ge 20 ]; then
+  ok "capstone containers up: $c"
+else
+  bad "capstone containers up: $c"
+fi
 
 echo
 echo "=== 4. the runner: restart it and wait for the registration line ==="
@@ -116,8 +136,11 @@ case "$st" in
   running*) ok "n8n-sandbox-runner-1: $st" ;;
   *)        bad "n8n-sandbox-runner-1: ${st:-not found}" ;;
 esac
-[ "$registered" -eq 1 ] && ok "runner registered with sandbox-api" \
-  || bad "no registration line in the runner's log within 120s"
+if [ "$registered" -eq 1 ]; then
+  ok "runner registered with sandbox-api"
+else
+  bad "no registration line in the runner's log within 120s"
+fi
 incus exec capstone -- docker logs --tail 8 n8n-sandbox-runner-1 2>&1 | tail -4 | sed 's/^/    /'
 
 echo

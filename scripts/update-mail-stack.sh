@@ -214,8 +214,7 @@ stalwart_apply() {
   log "  restarting $STALWART_SVC"
   systemctl restart "$STALWART_SVC" || true
 
-  local i
-  for i in $(seq 1 24); do
+  for _ in $(seq 1 24); do
     stalwart_healthy && break
     sleep 5
   done
@@ -227,9 +226,12 @@ stalwart_apply() {
   warn "stalwart did not come up on $STALWART_TARGET — rolling back to $STALWART_CURRENT"
   mv -f "$STALWART_BIN.prev" "$STALWART_BIN"
   systemctl restart "$STALWART_SVC" || true
-  for i in $(seq 1 12); do stalwart_healthy && break; sleep 5; done
-  stalwart_healthy && log "  rolled back, running $(stalwart_running_version)" \
-                    || warn "  ROLLBACK DID NOT RECOVER — restore $BACKUP/stalwart-binary and the store by hand"
+  for _ in $(seq 1 12); do stalwart_healthy && break; sleep 5; done
+  if stalwart_healthy; then
+    log "  rolled back, running $(stalwart_running_version)"
+  else
+    warn "  ROLLBACK DID NOT RECOVER — restore $BACKUP/stalwart-binary and the store by hand"
+  fi
   return 1
 }
 
@@ -285,7 +287,7 @@ bulwark_apply() {
       return 1
     }
     log "  building $newimg locally (this takes several minutes)"
-    if ! docker build -t "$newimg" "$build" >/root/bulwark-build-$tag.log 2>&1; then
+    if ! docker build -t "$newimg" "$build" >/root/bulwark-build-"$tag".log 2>&1; then
       warn "image build failed — see /root/bulwark-build-$tag.log"
       return 1
     fi
@@ -297,7 +299,7 @@ bulwark_apply() {
       | $BUILD_SSH "$BUILD_HOST" "tar -C $BUILD_DIR -xf -" 2>/dev/null \
       || { warn "cannot copy the source tree to $BUILD_HOST"; return 1; }
     if ! $BUILD_SSH "$BUILD_HOST" "cd $BUILD_DIR && docker build -t $newimg ." \
-         >/root/bulwark-build-$tag.log 2>&1; then
+         >/root/bulwark-build-"$tag".log 2>&1; then
       warn "image build failed on $BUILD_HOST — see /root/bulwark-build-$tag.log"
       return 1
     fi
@@ -309,13 +311,12 @@ bulwark_apply() {
     $BUILD_SSH "$BUILD_HOST" "rm -rf $BUILD_DIR" >/dev/null 2>&1 || true
   fi
 
-  local i
   log "  deploying"
   sed -i "s|^\(\s*image:\s*\).*|\1$newimg|" "$COMPOSE_FILE" || { warn "cannot rewrite compose file"; return 1; }
-  ( cd "$COMPOSE_DIR" && docker compose up -d ) >/root/bulwark-up-$tag.log 2>&1 \
+  ( cd "$COMPOSE_DIR" && docker compose up -d ) >/root/bulwark-up-"$tag".log 2>&1 \
     || warn "compose up returned non-zero"
 
-  for i in $(seq 1 30); do
+  for _ in $(seq 1 30); do
     bulwark_healthy && break
     sleep 10
   done
@@ -328,10 +329,12 @@ bulwark_apply() {
   warn "bulwark did not become healthy on $newimg — restoring $BULWARK_CURRENT"
   cp -f "$BACKUP/compose.yml" "$COMPOSE_FILE"
   ( cd "$COMPOSE_DIR" && docker compose up -d ) >/root/bulwark-rollback.log 2>&1 || true
-  local i
-  for i in $(seq 1 18); do bulwark_healthy && break; sleep 5; done
-  bulwark_healthy && log "  rolled back, healthy on $(bulwark_running_tag)" \
-                  || warn "  ROLLBACK DID NOT RECOVER — see /root/bulwark-rollback.log"
+  for _ in $(seq 1 18); do bulwark_healthy && break; sleep 5; done
+  if bulwark_healthy; then
+    log "  rolled back, healthy on $(bulwark_running_tag)"
+  else
+    warn "  ROLLBACK DID NOT RECOVER — see /root/bulwark-rollback.log"
+  fi
   return 1
 }
 
