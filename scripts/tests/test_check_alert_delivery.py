@@ -155,7 +155,7 @@ class RunProbeCase(unittest.TestCase):
 
     def test_a_delivery_in_the_window_is_reported_delivered(self):
         delivered, evidence, waited = probe.run_probe(
-            am_host="i3", am_target="root@192.168.1.53",
+            am_host="i2", am_target="root@192.168.1.52",
             mail_host="i1", mail_target="root@192.168.1.51",
             wait=5, runner=self._runner(DELIVERED),
             clock=lambda: 1_760_000_000.0, sleeper=lambda _s: None, nonce="x",
@@ -166,7 +166,7 @@ class RunProbeCase(unittest.TestCase):
 
     def test_no_delivery_in_the_window_reads_the_receivers_own_error(self):
         delivered, evidence, _ = probe.run_probe(
-            am_host="i3", am_target="root@192.168.1.53",
+            am_host="i2", am_target="root@192.168.1.52",
             mail_host="i1", mail_target="root@192.168.1.51",
             wait=0, runner=self._runner(OLD_DELIVERY, notify_error="Notify attempt failed: refused"),
             clock=lambda: 1_760_000_000.0, sleeper=lambda _s: None, nonce="x",
@@ -177,7 +177,7 @@ class RunProbeCase(unittest.TestCase):
     def test_the_probe_is_injected_before_the_mail_is_read(self):
         seen: list = []
         probe.run_probe(
-            am_host="i3", am_target="root@192.168.1.53",
+            am_host="i2", am_target="root@192.168.1.52",
             mail_host="i1", mail_target="root@192.168.1.51",
             wait=0, runner=self._runner(DELIVERED, seen=seen),
             clock=lambda: 1_760_000_000.0, sleeper=lambda _s: None, nonce="x",
@@ -195,7 +195,7 @@ class RunProbeCase(unittest.TestCase):
 
         with self.assertRaises(HostUnreadable):
             probe.run_probe(
-                am_host="i3", am_target="root@192.168.1.53",
+                am_host="i2", am_target="root@192.168.1.52",
                 mail_host="i1", mail_target="root@192.168.1.51",
                 wait=0, runner=runner, clock=lambda: 1_760_000_000.0,
                 sleeper=lambda _s: None, nonce="x",

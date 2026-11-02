@@ -110,7 +110,7 @@ class CheckModeCase(unittest.TestCase):
         self.config = Path(self._dir.name) / "config"
 
     def _hosts(self):
-        return "i1=root@192.168.1.51,i2=root@192.168.1.52,i3=root@192.168.1.53,i4=root@192.168.1.54"
+        return "i1=root@192.168.1.51,i2=root@192.168.1.52,i4=root@192.168.1.54"
 
     def test_a_host_whose_key_is_not_trusted_is_drift(self):
         self.config.write_text(trust.config_with(""), encoding="utf-8")

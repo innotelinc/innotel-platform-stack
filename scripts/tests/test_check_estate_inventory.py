@@ -33,7 +33,9 @@ def _load():
 
 inv = _load()
 
-ALL_KNOWN_REMOTES = ["192.168.1.51", "192.168.1.52", "192.168.1.53", "192.168.1.54"]
+#: The 192.168.1.53 (`i3`) remote was removed on 2026-11-02 with the host: every estate
+#: host still trusted it, and a trusted host the inventory does not name is a failure.
+ALL_KNOWN_REMOTES = ["192.168.1.51", "192.168.1.52", "192.168.1.54"]
 
 
 def views(overrides=None):
@@ -82,9 +84,11 @@ class InventoryCase(unittest.TestCase):
         # i2's pools are gone but the host is otherwise as the inventory describes.
         result = inv.audit(views({"i2": inv.HostView("i2", remotes=ALL_KNOWN_REMOTES, pools=[])}))
         self.assertTrue(result.ok, [f.message for f in result.failures])
-        self.assertEqual([f.code for f in result.warnings], ["missing_pool", "missing_pool"])
+        self.assertEqual([f.code for f in result.warnings], ["missing_pool"] * 3)
         self.assertIn("default", result.warnings[0].message)
         self.assertIn("fast", result.warnings[1].message)
+        # `tank` came over with i3's containers on 2026-11-02.
+        self.assertIn("tank", result.warnings[2].message)
 
     def test_the_bench_is_no_longer_optional(self):
         # i4 was the test bench whose absence was only a warning. On 2026-10-02 it took

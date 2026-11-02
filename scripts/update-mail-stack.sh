@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Update the mail stack that lives in i3's `mail` container: Stalwart (native
+# Update the mail stack that lives in the `mail` container (on i2 since 2026-11-02,
+# having been on i3 before that host was retired): Stalwart (native
 # binary over a RocksDB store) and Bulwark/Loomix (the innotelinc/webmail image
 # behind /opt/bulwark).
 #
@@ -53,7 +54,7 @@ UPSTREAM_REPO=bulwarkmail/webmail
 
 # The Bulwark image is NOT built in this container. On 2026-10-27 a local build
 # (npm ci plus the Next.js compile) exhausted the mail container's 4 GiB and left
-# the whole i3 host unable to fork an sshd: mail was down ~28 minutes. The image
+# the whole host unable to fork an sshd: mail was down ~28 minutes. The image
 # is built on BUILD_HOST instead and streamed back, and a local build has to be
 # asked for explicitly.
 BUILD_HOST=${BUILD_HOST:-root@192.168.1.54}

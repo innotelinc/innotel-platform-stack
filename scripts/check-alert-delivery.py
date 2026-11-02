@@ -3,7 +3,8 @@
 
 WHY THIS EXISTS
 ---------------
-The estate has exactly one Alertmanager (`signara-alertmanager-1` on `i3`), and it spent
+The estate has exactly one Alertmanager (`signara-alertmanager-1`, in Signara's stack — on
+`i2` since 2026-11-02, having been on `i3` before that host was retired), and it spent
 its whole life configured-but-silent. First the receiver's `SMTP_HOST` and `ALERT_EMAIL_TO`
 were empty, so it delivered nowhere; then, once pointed at the estate's own Stalwart, it
 was refused for saying `EHLO localhost` and then for a self-signed certificate that names
@@ -23,10 +24,10 @@ THE RULES
 1. **No delivery within the window is a failure**, naming Alertmanager's own last notify
    error when it has one — that is the line that says *why* it is silent.
 2. **A host that cannot be read is exit 2**, never silence, the same rule every check here
-   follows. `i3` holds Alertmanager; the host holding Stalwart (the mail server) is read
+   follows. `i2` holds Alertmanager; the host holding Stalwart (the mail server) is read
    from the container address table rather than pinned here, because it moves — `mail` was
-   on `i1` when this check was written, on `i4` after the 2026-10-09 pass and on `i3`
-   since 2026-10-15, and a check
+   on `i1` when this check was written, on `i4` after the 2026-10-09 pass, on `i3` from
+   2026-10-15 and on `i2` since 2026-11-02, and a check
    that reads the mail log on the host the server has left exits 2 instead of reporting
    the silence it exists to catch.
 3. The probe alert is short-lived (`--end` a few minutes out) so it resolves itself and
@@ -58,9 +59,11 @@ from estate_check import Audit, Finding, METRIC, read_host, ssh, write_prom  # n
 
 CHECK = "alert_delivery"
 
-#: The Alertmanager host: it is the estate's one receiver and it does not move.
-AM_HOST = "i3"
-AM_TARGET = "root@192.168.1.53"  # signara — Alertmanager
+#: The Alertmanager host: it is the estate's one receiver, and it follows the `signara`
+#: container rather than a host of its own — the container kept `.44` when it moved off the
+#: retired `i3` to `i2` on 2026-11-02 (verified: `192.168.1.44:9093/-/healthy` → 200).
+AM_HOST = "i2"
+AM_TARGET = "root@192.168.1.52"  # signara — Alertmanager
 
 #: This check needs exactly two hosts — the one running Alertmanager and the one running
 #: the mail server — so it carries its own table rather than the four-host one the per-host
@@ -297,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--hosts",
-        help="name=target pairs, comma separated (default: i3, and whichever host carries `mail`)",
+        help="name=target pairs, comma separated (default: i2, and whichever host carries `mail`)",
     )
     parser.add_argument("--wait", type=float, default=DEFAULT_WAIT_SECONDS, help="seconds to wait for a delivery (0 = one pass)")
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here for the alerts")

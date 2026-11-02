@@ -66,10 +66,11 @@ END = "# END estate-check-hosts"
 #: The estate hosts, by the same name and order the checks use. Cross-checked against
 #: `check-estate-inventory.py` by `scripts/tests/test_check_host_coverage.py`, so a host
 #: added there and not here (or the reverse) fails the suite rather than going untrusted.
+#: `i3` was retired on 2026-11-02; a retired host must not stay here, or `--check` would
+#: report drift against a machine that cannot answer.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
     "i2": "root@192.168.1.52",
-    "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
 

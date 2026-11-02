@@ -101,7 +101,6 @@ CHECK = "container_limits"
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
     "i2": "root@192.168.1.52",
-    "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
 

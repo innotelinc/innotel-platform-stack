@@ -135,15 +135,20 @@ ADDRESS_ROWS = {
          ("regcache", "192.168.1.79"), ("rizzaura", "192.168.1.62")],
     I2: [("atheniq", "192.168.1.59"), ("capstone", "192.168.1.30"),
          # proxy was recreated here on 2026-10-26 and keeps the edge address.
-         ("proxy", "192.168.1.71")],
-    I3: [("distro", "192.168.1.61"), ("magnate", "192.168.1.57"), ("mail", "192.168.1.15"),
-         ("monitor", "192.168.1.88"), ("onyx", "192.168.1.60"), ("pi", "192.168.1.70"),
+         ("proxy", "192.168.1.71"),
+         # i3 was retired on 2026-11-02 and these eight were copied here; every
+         # address is pinned inside its container, so only the host key changed.
+         ("distro", "192.168.1.61"), ("magnate", "192.168.1.57"),
+         ("mail", "192.168.1.15"), ("monitor", "192.168.1.88"),
+         ("onyx", "192.168.1.60"), ("pi", "192.168.1.70"),
          ("signara", "192.168.1.44"), ("subscribe", "192.168.1.58")],
-    # i4 holds three satellites (terminal, vault, vpn); the edge container itself moved
-    # to i2 and the media/business containers stay on i1. The addresses travel with the
-    # pinned rootfs, so only the host key changes when a container moves — which is why
-    # the rows here are read off the hosts, not remembered.
-    I4: [("terminal", "192.168.1.22"),
+    # i4 holds six satellites (sage, telno, telno-turn, terminal, vault, vpn); the edge
+    # container itself moved to i2 and the media/business containers stay on i1. The
+    # addresses travel with the pinned rootfs, so only the host key changes when a
+    # container moves — which is why the rows here are read off the hosts, not
+    # remembered.
+    I4: [("sage", "192.168.1.94"), ("telno", "192.168.1.95"),
+         ("telno-turn", "192.168.1.96"), ("terminal", "192.168.1.22"),
          ("vault", "192.168.1.73"), ("vpn", "192.168.1.43")],
 }
 
@@ -261,12 +266,14 @@ class LimitsLiveCase(LiveCase):
 # check-estate-inventory: a host or pool the page does not name must fail the run
 ####################################################################################
 
-INVENTORY_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
-KNOWN_REMOTES = [I1, I2, I3, I4]
+#: i3 was retired on 2026-11-02; the estate is three hosts and a retired one in this
+#: table would make every inventory run exit 2 against a machine that cannot answer.
+INVENTORY_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i4": f"root@{I4}"}
+KNOWN_REMOTES = [I1, I2, I4]
 
 
 def _inventory_rules(pools=None, remotes=None) -> dict:
-    pools = pools or {"i1": ["incus"], "i2": ["default", "fast"], "i3": ["tank"], "i4": ["default", "tank"]}
+    pools = pools or {"i1": ["incus"], "i2": ["default", "fast", "tank"], "i4": ["default", "tank"]}
     remotes = remotes or {host: list(KNOWN_REMOTES) for host in INVENTORY_HOSTS}
     rules = {}
     for host, target in INVENTORY_HOSTS.items():
@@ -294,7 +301,7 @@ class InventoryLiveCase(LiveCase):
 
     def test_an_unknown_pool_fails_the_run(self):
         chk = _load("check-estate-inventory")
-        pools = {"i1": ["incus"], "i2": ["default", "fast", "scratch"], "i3": ["tank"], "i4": ["default", "tank"]}
+        pools = {"i1": ["incus"], "i2": ["default", "fast", "tank", "scratch"], "i4": ["default", "tank"]}
         code, _ = self.run_check(chk, INVENTORY_HOSTS, _inventory_rules(pools=pools))
         self.assertEqual(code, 1)
 
@@ -311,7 +318,7 @@ class InventoryLiveCase(LiveCase):
 # check-host-disk: a root filesystem past the line must fail/warn the run
 ####################################################################################
 
-DISK_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
+DISK_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i4": f"root@{I4}"}
 
 
 def _disk_rules(percents: dict | None = None) -> dict:
