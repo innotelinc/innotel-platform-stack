@@ -34,21 +34,30 @@
 #   bash platform-stack/scripts/backup-proxy.sh
 #   bash platform-stack/scripts/backup-proxy.sh --offsite root@192.168.1.51:/var/backups/estate/proxy
 #   bash platform-stack/scripts/backup-proxy.sh --keep 5
+#   bash platform-stack/scripts/backup-proxy.sh --min-free-gib 20
 #
 # Defaults: restore points under /var/lib/incus/backups/proxy (override with
 # PROXY_BACKUP_DIR), the newest 3 kept, no offsite copy.
 #
 # An offsite copy is what makes this a backup rather than a do-over on the same
 # pool: the restore point lives on `fast`, which is where the container lives.
+#
+# Space: `--keep` prunes after a successful write, so on its own it can still be
+# handed a filesystem with no room to write into. Before anything is created this
+# script secures the room it needs — newest point + 10% + 2G, or --min-free-gib —
+# by giving up the oldest point first, and refuses with nothing written if it
+# cannot. A run that dies partway removes its own partial directory.
 
 set -uo pipefail
 
 BASE="${PROXY_BACKUP_DIR:-/var/lib/incus/backups/proxy}"
 KEEP=3
 OFFSITE=""
+MIN_FREE_GIB=""
+FAILED=0
 
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
-die() { printf '[%s] FATAL: %s\n' "$(date '+%F %T')" "$*" >&2; exit 1; }
+die() { FAILED=1; printf '[%s] FATAL: %s\n' "$(date '+%F %T')" "$*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -58,6 +67,9 @@ while [ $# -gt 0 ]; do
     --offsite)
       [ $# -ge 2 ] || die "--offsite needs root@host:/path"
       OFFSITE="$2"; shift 2 ;;
+    --min-free-gib)
+      [ $# -ge 2 ] || die "--min-free-gib needs a number"
+      MIN_FREE_GIB="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,60p' "$0"; exit 0 ;;
     *)
@@ -66,6 +78,11 @@ while [ $# -gt 0 ]; do
 done
 case "$KEEP" in ''|*[!0-9]*) die "--keep must be a positive number" ;; esac
 [ "$KEEP" -ge 1 ] || die "--keep must be a positive number"
+case "$MIN_FREE_GIB" in
+  '') ;;
+  *[!0-9]*) die "--min-free-gib must be a positive number" ;;
+  *) [ "$MIN_FREE_GIB" -ge 1 ] || die "--min-free-gib must be a positive number" ;;
+esac
 
 [ "$(id -u)" -eq 0 ] || die "run as root on the Incus host that holds proxy"
 for c in incus tar zstd sha256sum; do
@@ -79,6 +96,42 @@ for d in /usr/src/proxy/data /usr/src/innotel-site /usr/src/innotel-deploy; do
   [ -d "$d" ] || die "host path missing: $d (a restore point without it is not a restore point)"
 done
 
+# ── Room to write, before anything is created ────────────────────────────────
+# `--keep` is a retention policy, not a space policy: it prunes after a
+# successful run, so a week when three points already fill the dataset is the
+# week the export dies at 90% and leaves a partial directory to be cleaned up by
+# hand. Instead, the room is secured here by giving up the oldest point, and the
+# run refuses without writing when it still cannot fit — an old restore point is
+# worth less than a failed write on top of it.
+avail_kb() { df -Pk "$BASE" 2>/dev/null | awk 'NR==2 {print $4}'; }
+points_local() { find "$BASE" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort; }
+
+mkdir -p "$BASE" || die "cannot create $BASE"
+case "$(avail_kb)" in ''|*[!0-9]*) die "cannot read free space on $BASE" ;; esac
+
+if [ -n "$MIN_FREE_GIB" ]; then
+  need_kb=$(( MIN_FREE_GIB * 1024 * 1024 ))
+else
+  newest_local="$(points_local | tail -1)"
+  need_kb=""
+  [ -n "$newest_local" ] && need_kb="$(du -sk "$BASE/$newest_local" 2>/dev/null | cut -f1)"
+  case "${need_kb:-}" in ''|*[!0-9]*) need_kb=$(( 11 * 1024 * 1024 )) ;; esac
+  # 10% for the edge growing between runs, and 2G of slack so the export's own
+  # temp files and the offsite rsync's partial copy cannot be the thing that
+  # fills the dataset.
+  need_kb=$(( need_kb + need_kb / 10 + 2 * 1024 * 1024 ))
+fi
+
+while [ "$(avail_kb)" -lt "$need_kb" ] && [ -n "$(points_local)" ]; do
+  give_up="$(points_local | head -1)"
+  log "space: $(avail_kb) KiB free of $need_kb KiB needed — giving up the oldest point ($give_up)"
+  rm -rf "${BASE:?}/$give_up"
+  case "$(avail_kb)" in ''|*[!0-9]*) die "cannot read free space on $BASE" ;; esac
+done
+[ "$(avail_kb)" -ge "$need_kb" ] \
+  || die "not enough space: $(avail_kb) KiB free on $BASE, $need_kb KiB needed — nothing was written"
+log "space: $(avail_kb) KiB free, $need_kb KiB needed"
+
 STAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
 OUT="$BASE/$STAMP"
 SNAP="rp-$STAMP"
@@ -87,6 +140,14 @@ CLONE="proxy-rp-$STAMP"
 mkdir -p "$OUT" || die "cannot create $OUT"
 
 cleanup() {
+  # A partial export is not a restore point, and on a capped dataset it is the
+  # difference between next week's run fitting and not. Failures clean up after
+  # themselves; the manifest is only written at the end, so its absence is the
+  # signal that a directory is incomplete.
+  if [ "$FAILED" -eq 1 ] && [ -n "${OUT:-}" ] && [ -d "${OUT:-}" ]; then
+    log "discarding the incomplete restore point $OUT"
+    rm -rf "${OUT:?}"
+  fi
   if [ -n "$CLONE" ]; then
     incus delete "$CLONE" --force >/dev/null 2>&1 || log "warning: could not delete clone $CLONE"
     CLONE=""
