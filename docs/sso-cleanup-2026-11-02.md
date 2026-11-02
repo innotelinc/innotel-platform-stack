@@ -76,9 +76,42 @@ to "Unsupported credentials type for OIDC backend" — the directory now loads, 
 remaining refusal is the backend's, not a network one. **The fix is in Stalwart's directory
 configuration, not in this repo**: authentication must be backed by the internal directory
 (accounts named by full address, which is Stalwart's own requirement and what the estate
-already uses), with Authentik as the SSO front door, not as the password verifier. That is
-a change to make in the Stalwart admin UI (`https://admin.mail.innotel.us`) or its config
-store, and it must be verified with an IMAP login as `admin@innotel.us` afterwards.
+already uses), with Authentik as the SSO front door, not as the password verifier.
+
+The configuration was read through Stalwart's own JMAP management API
+(`x:Directory/get`, `x:Account/get`, `x:Domain/get`), which is the record of what the server
+actually holds rather than what a file says:
+
+- The **only** directory is `{"description":"Authentik","@type":"Oidc","issuerUrl":
+  "https://auth.cerulean.innotel.us/application/o/stalwart-webui/","requireAudience":
+  "stalwart-webui","claimUsername":"sub"}`. There is no internal directory object to fall
+  back to, and **no domain carries a `directoryId`** — the 26 domains (`innotel.us`,
+  `loomix.art`, `ontrak.technology`, `atheniq.*`, `telno.*`, …) are all unbounded, so
+  nothing selects a password verifier per domain.
+- Accounts do exist locally — `x:Account/get` shows them by name (`postmaster`, …) with
+  `AppPassword` credentials and their aliases. So the account store is intact; what is
+  missing is an authentication path that consults it.
+
+Removing the OIDC directory would restore password checks but break SSO, because a JMAP
+bearer token from `stalwart-webui` is validated through that same object. Adding the
+internal one was attempted over the same API and **refused**, which is the useful result:
+
+```
+x:Directory/set create {"@type":"Internal","description":"Local password store"}
+  -> notCreated: invalidPatch "Missing or invalid '@type' property in object"
+```
+
+So the internal directory has to be created by the server's own admin UI at
+`https://admin.mail.innotel.us`, which knows the type names and the field set; the API does
+not accept a hand-written object. The directory itself was left exactly as found (one
+`Oidc` object, `jjb7ynuiacqa`).
+
+State after the restarts, for whoever picks this up: the directory now loads, and an IMAP
+password login as `admin@innotel.us` or `dhunter@innotel.us` answers
+`[AUTHENTICATIONFAILED] Authentication error` — a credential verdict, not the earlier
+"directory unavailable" outage. **Interactive mail sign-in is still broken**, and the
+remaining step is creating and binding the internal directory in the admin UI, then
+re-testing IMAP.
 
 The identity model the user asked for — Stalwart accounts keyed by the email address and
 mirrored into Authentik under the same address — is the right one, and the estate is half
@@ -104,14 +137,21 @@ Its provider configuration points at the wrong gateway:
 | `OPENAI_LIKE_API_KEY` | 46 characters | **401 `AUTH_002 Invalid API key`** against `https://gateway.innotel.us/v1` |
 | `OPENAI_LIKE_API_MODELS` | `auto/coding`, `auto/best-chat`, `auto/cheap`, … | ids the estate gateway serves |
 
-So two things are wrong at once: the base URL has moved to the estate gateway
-(`https://gateway.innotel.us/v1`, the one `g0dm0d3` uses), and the key in the container is
-not valid at that gateway. The fix is an environment change in
-`/usr/src/ontrak/ontrak-bolt/docker-compose.prod.yml` (or the container's env): point the
-base URL at the gateway and install a key the gateway accepts — a Distro-issued per-user
-key if the builder is to be metered like the rest of the family, otherwise the shared
-gateway key. No valid key was available to this run, so the change was **not** applied
-blindly; a guessed key would only move the failure.
+So two things were wrong at once: the base URL had moved to the estate gateway
+(`https://gateway.innotel.us/v1`, the one `g0dm0d3` uses), and the key in the container was
+not valid at that gateway. Both are now applied:
+
+- `docker-compose.all.yml` carries `OPENAI_LIKE_API_BASE_URL: https://gateway.innotel.us/v1`
+  (was the retired `https://gateway.telno.services/v1`), pre-change copy beside it as
+  `docker-compose.all.yml.bak-20261102-bolt`.
+- The key lives where the deployment already keeps it — `ontrak-bolt/.env` (the
+  `env_file` the service reads, pre-change copy `.env.bak-20261102`) — because the compose
+  file is tracked and a key does not belong in it. The installed key answers **200** on
+  `/v1/models` and `/v1/chat/completions` (model `auto/coding`, answered by `gpt-6.1-sol`)
+  when called from `i4`, and the container was recreated to pick it up.
+
+A key that is valid at the gateway is the whole fix; the app's route, session and SSE path
+were never at fault.
 
 ## Host and container patching, 2026-11-02
 
@@ -129,12 +169,16 @@ the `ord` VPS, which is off this LAN.
 
 ## Still open
 
-1. **Stalwart directory backend** — put password authentication back on the internal
-   directory and leave Authentik as the SSO door (above). Interactive mail sign-in is
-   broken until this is done.
+1. **Stalwart directory backend** — create the internal directory and bind the domains
+   that should authenticate locally, leaving Authentik as the SSO door (above). Interactive
+   mail sign-in is broken until this is done. It is a config change in the admin UI, not a
+   code change: the management API rejects a hand-written `Internal` object, so this needs
+   `https://admin.mail.innotel.us`.
 2. **Mail account provisioning** — one direction of truth: Stalwart account ⇄ Authentik user
    with the same email address.
-3. **bolt provider** — the gateway base URL and a working key.
+3. **bolt provider verification in the browser** — the base URL and key are in place and
+green from the host; confirm a chat turn streams through `bolt.ontrak.technology` now that
+`bolt-app` has been recreated.
 4. **`mail.innotel.us` is a 301 to `oasis.innotel.us`.** NPM host 95 already forwards
    `mail.innotel.us` → `192.168.1.15:3000`, so the redirect is emitted by the app or a
    redirection host above it. It should serve the webmail directly: the address is a
