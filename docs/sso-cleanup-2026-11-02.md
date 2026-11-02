@@ -106,20 +106,44 @@ So the internal directory has to be created by the server's own admin UI at
 not accept a hand-written object. The directory itself was left exactly as found (one
 `Oidc` object, `jjb7ynuiacqa`).
 
-State after the restarts, for whoever picks this up: the directory now loads, and an IMAP
-password login as `admin@innotel.us` or `dhunter@innotel.us` answers
-`[AUTHENTICATIONFAILED] Authentication error` — a credential verdict, not the earlier
-"directory unavailable" outage. **Interactive mail sign-in is still broken**, and the
-remaining step is creating and binding the internal directory in the admin UI, then
-re-testing IMAP.
+State after the restarts: the directory initialises again, and the sign-in the webmail
+actually uses was driven end to end afterwards — `/api/auth/sso/start`, the Authentik flow,
+the callback code, `/api/auth/sso/complete` (**200**), then
+`GET /jmap/session` with that token on **both** `mail.innotel.us` and `oasis.innotel.us`
+(**200**, `"username": "admin@innotel.us"`). So the webmail sign-in the user reported is
+working again; what broke it was the directory outage, not the OAuth settings.
+
+What still answers `[AUTHENTICATIONFAILED] Authentication error` is a bare **IMAP password
+login**. That is the OIDC directory doing its job: these accounts carry app passwords (the
+log shows `dhunter` and `alertmanager` authenticating with one) and no local password, so a
+client should use an app password or OAuth, not the account password. The internal
+directory remains uncreated — the admin UI at `https://admin.mail.innotel.us` is where that
+belongs if password IMAP is wanted.
 
 The identity model the user asked for — Stalwart accounts keyed by the email address and
 mirrored into Authentik under the same address — is the right one, and the estate is half
 way there: Authentik already holds `admin` and `dhunter` as internal users in the `Mail`
-group. What is missing is the provisioning direction (an account created in Stalwart should
-create/attach the Authentik user with that address). No such sync exists today; the
-candidates are a Stalwart account-creation hook posting to Authentik's
-`/api/v3/core/users/`, or creating mail accounts from Authentik instead.
+group. What was missing is the provisioning direction, and that is now
+`scripts/sync-mail-identities.py`.
+
+It reads Stalwart's accounts over JMAP (`x:Domain/get` + `x:Account/get`), reads Authentik's
+users, matches case-insensitively by **username or email**, and creates only the ones that
+truly do not exist — with `username = email = <name>@<domain>`, `type: internal`, no password
+(SSO is the door) and optionally `--group Mail`. It never deletes, renames, deactivates or
+re-issues a password, and it never writes to Stalwart, so the worst case of a wrong run is a
+useless account that the same dry run names first.
+
+A dry run against production (`incus exec mail`, `STALWART_URL=http://127.0.0.1:8080`,
+the Cerulean bootstrap token) reports **13** addressable mailboxes with no Authentik user:
+`onyx@`, `magnate@`, `monarch@`, `signara@`, `rizzaura@`, `oasis@`, `zapit@`, `plutus@`,
+`atlaschef@`, `atheniqlms@`, `olympus@`, `monarch-request@`, `atheniq@` — all `@innotel.us`.
+`admin@innotel.us` already matches, which is why the sign-in above resolves.
+
+An unfiltered run also lists role, list and service boxes (fifteen `postmaster@` addresses
+across the domains, `paid_users@`, `jellyfin_admins@`, `atheniq-admins@`, `incus@`, `monit@`,
+`jellyfin@`, `pbx@`, `pm3@`, `pm4@`, and a few accounts whose `name` is a display name with a
+space in it). Those are skipped by default and only synced under `--include-all`, because an
+estate does not need an identity for every role address it owns.
 
 ## bolt.ontrak.technology: the provider base URL and key
 
@@ -169,13 +193,16 @@ the `ord` VPS, which is off this LAN.
 
 ## Still open
 
-1. **Stalwart directory backend** — create the internal directory and bind the domains
-   that should authenticate locally, leaving Authentik as the SSO door (above). Interactive
-   mail sign-in is broken until this is done. It is a config change in the admin UI, not a
-   code change: the management API rejects a hand-written `Internal` object, so this needs
-   `https://admin.mail.innotel.us`.
-2. **Mail account provisioning** — one direction of truth: Stalwart account ⇄ Authentik user
-   with the same email address.
+1. **Stalwart internal directory (optional)** — only needed if bare IMAP password login is
+   wanted next to the app passwords and SSO. Create it in the admin UI at
+   `https://admin.mail.innotel.us`; the management API rejects a hand-written `Internal`
+   object, and the webmail sign-in does not depend on it.
+2. **Mail account provisioning** — `scripts/sync-mail-identities.py` makes the address the
+   identity in both stores. It is written and dry-run against production (13 missing people
+   and platform addresses); running it with `--apply --group Mail` creates them. It is not
+   wired to run on creation yet: the estate has no Stalwart account-creation hook, so the
+   automation belongs in whatever creates the mailbox (a post-create call to the script, or
+   a periodic `--apply`), and that choice is the platform owner's.
 3. **bolt provider verification in the browser** — the base URL and key are in place and
 green from the host; confirm a chat turn streams through `bolt.ontrak.technology` now that
 `bolt-app` has been recreated.
