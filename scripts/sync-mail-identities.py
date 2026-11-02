@@ -92,6 +92,23 @@ def authentik_users(base: str, token: str) -> dict[str, dict]:
     return users
 
 
+def resolve_group(base: str, token: str, group: str) -> str:
+    """Turn a group name into the pk Authentik's user API actually requires.
+
+    `groups` accepts pks only; passing `Mail` is rejected with "not a valid UUID".
+    A pk is returned unchanged, a name is matched exactly (case-insensitively).
+    """
+    if len(group) == 36 and group.count("-") == 4:
+        return group
+    auth = {"Authorization": "Bearer " + token}
+    url = base.rstrip("/") + "/api/v3/core/groups/?search=" + urllib.parse.quote(group)
+    page = read_json(url, auth)
+    for candidate in page.get("results", []):
+        if candidate["name"].lower() == group.lower():
+            return str(candidate["pk"])
+    raise ValueError(f"no Authentik group named {group!r}")
+
+
 def create_user(base: str, token: str, address: str, name: str, group: str | None) -> dict:
     payload: dict[str, object] = {
         "username": address,
@@ -113,8 +130,9 @@ RESERVED = {
     "abuse", "hostmaster", "noreply", "no-reply", "postmaster", "webmaster",
 }
 SERVICE = {
-    "alertmanager", "authentik", "grafana", "incus", "jellyfin", "monit", "pbx",
-    "prometheus", "proxmox", "root", "stalwart", "traefik",
+    "alertmanager", "authentik", "authentikadmins", "cerulean", "default", "grafana",
+    "incus", "jellyfin", "mail", "monit", "pbx", "prometheus", "proxmox", "root",
+    "signara-alerts", "stalwart", "traefik", "zeus",
 }
 
 
@@ -165,6 +183,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.apply:
         print("\ndry run: nothing was created (pass --apply)")
         return 0
+
+    if args.group:
+        try:
+            args.group = resolve_group(api, token, args.group)
+            print(f"group: {args.group}")
+        except (urllib.error.URLError, ValueError) as error:
+            print(f"sync-mail-identities: {error}", file=sys.stderr)
+            return 2
 
     failures = 0
     for address, name in missing:

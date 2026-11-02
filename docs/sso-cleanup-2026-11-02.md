@@ -101,10 +101,24 @@ x:Directory/set create {"@type":"Internal","description":"Local password store"}
   -> notCreated: invalidPatch "Missing or invalid '@type' property in object"
 ```
 
-So the internal directory has to be created by the server's own admin UI at
-`https://admin.mail.innotel.us`, which knows the type names and the field set; the API does
-not accept a hand-written object. The directory itself was left exactly as found (one
-`Oidc` object, `jjb7ynuiacqa`).
+Later probing settled this properly: **this build has no internal directory type at all.**
+`strings /usr/local/bin/stalwart` (0.16.27) contains exactly two directory variants, `Ldap`
+and `Oidc`; `Internal` and `Memory` are not among them, and `x:Directory/set` rejects them
+with the same generic `Missing or invalid '@type'` it gives a deliberately bogus type. There
+is also no per-listener or per-domain hook to change the backend: `x:NetworkListener/get`
+carries no directory field, `x:SystemSettings/get` has none, and the only binding is the
+single `Oidc` object (`jjb7ynuiacqa`), which the `imaps` listener falls back to.
+
+Credential repair is closed off too. `admin@innotel.us` already holds a `Password`
+credential, and `x:Account/set` refuses to touch the credentials map —
+`invalidPatch "Cannot modify server set property"` on `credentials/credentialId` — while
+`x:Credential/set` is an unknown method. The directory itself was left exactly as found.
+
+So bare IMAP password login cannot be turned on by configuration in 0.16.27: password
+verification is the directory's job, the only directory speaks OIDC, and OIDC cannot check a
+password. Mail clients belong on **app passwords** (which authenticate against the account's
+`AppPassword` credentials and work today — `dhunter`, `alertmanager` and `pbx` all do it) or
+on OAuth, and that is a client-side setting, not a server change.
 
 State after the restarts: the directory initialises again, and the sign-in the webmail
 actually uses was driven end to end afterwards — `/api/auth/sso/start`, the Authentik flow,
@@ -113,12 +127,10 @@ the callback code, `/api/auth/sso/complete` (**200**), then
 (**200**, `"username": "admin@innotel.us"`). So the webmail sign-in the user reported is
 working again; what broke it was the directory outage, not the OAuth settings.
 
-What still answers `[AUTHENTICATIONFAILED] Authentication error` is a bare **IMAP password
-login**. That is the OIDC directory doing its job: these accounts carry app passwords (the
-log shows `dhunter` and `alertmanager` authenticating with one) and no local password, so a
-client should use an app password or OAuth, not the account password. The internal
-directory remains uncreated — the admin UI at `https://admin.mail.innotel.us` is where that
-belongs if password IMAP is wanted.
+The refusal is specific and worth recording verbatim, because it names the mechanism:
+`reason = "Unsupported credentials type for OIDC backend"`,
+`causedBy = "crates/directory/src/core/dispatch.rs:19"` — the `imaps` listener dispatches the
+account lookup to the OIDC directory on every password attempt.
 
 The identity model the user asked for — Stalwart accounts keyed by the email address and
 mirrored into Authentik under the same address — is the right one, and the estate is half
@@ -133,11 +145,22 @@ truly do not exist — with `username = email = <name>@<domain>`, `type: interna
 re-issues a password, and it never writes to Stalwart, so the worst case of a wrong run is a
 useless account that the same dry run names first.
 
-A dry run against production (`incus exec mail`, `STALWART_URL=http://127.0.0.1:8080`,
-the Cerulean bootstrap token) reports **13** addressable mailboxes with no Authentik user:
-`onyx@`, `magnate@`, `monarch@`, `signara@`, `rizzaura@`, `oasis@`, `zapit@`, `plutus@`,
-`atlaschef@`, `atheniqlms@`, `olympus@`, `monarch-request@`, `atheniq@` — all `@innotel.us`.
-`admin@innotel.us` already matches, which is why the sign-in above resolves.
+It has now been applied against production (`incus exec mail`,
+`STALWART_URL=http://127.0.0.1:8080`, the Cerulean bootstrap token) and created **15**
+identities in the `Mail` group, exit 0, every create accepted:
+`cerulean-platform@`, `capstone@`, `onyx@`, `magnate@`, `monarch@`, `signara@`, `rizzaura@`,
+`oasis@`, `zapit@`, `plutus@`, `atlaschef@`, `atheniqlms@`, `olympus@`, `monarch-request@`,
+`atheniq@` (pks 621–635). `admin@innotel.us` already matched, which is why the sign-in above
+resolves. A second run is a no-op by construction.
+
+The first attempt created nothing, and the reason was a bug in the script rather than the
+estate: `--group Mail` was passed straight through, and Authentik's user API accepts pks only
+— `400 {"groups":["“Mail” is not a valid UUID."]}` on all 21 candidates. The script now
+resolves a group name to its pk (exact, case-insensitive, via
+`/api/v3/core/groups/?search=`) and returns `2` with a clear message if no such group exists.
+The same run also showed the service-address filter was too narrow, so
+`default@`, `mail@`, `cerulean@`, `zeus@`, `authentikadmins@` and `signara-alerts@` are now in
+`SERVICE` and stay out of the identity store — they send and route mail, they do not sign in.
 
 An unfiltered run also lists role, list and service boxes (fifteen `postmaster@` addresses
 across the domains, `paid_users@`, `jellyfin_admins@`, `atheniq-admins@`, `incus@`, `monit@`,
@@ -183,7 +206,10 @@ Every running Incus container on `i1`, `i2` and `i4`, plus the three hosts thems
 updated with its package manager (`apt-get upgrade -y`, `apk upgrade`, or `dnf -y upgrade`
 where that is what the image uses):
 
-- 24 containers + 3 hosts updated.
+- 26 running containers + 3 hosts updated.
+- The two containers that were **stopped** on `i2` (`atheniq`, `capstone`) were started,
+  upgraded and returned to stopped. `atheniq` took a real batch (`libbrotli1` and the libc
+  trigger chain); `capstone` was already current. Neither needed a reboot.
 - **0** hosts or containers report `reboot-required`.
 - No package failures and nothing held back in the run log (`/tmp/patch-all.log` on `i4`).
 
@@ -191,26 +217,35 @@ Not covered by that sweep, and still to do: the Docker images and the applicatio
 them (the container's own OS is patched; the images are only as new as the next pull), and
 the `ord` VPS, which is off this LAN.
 
+One finding from the same window is unrelated to patching and worth its own line: at 03:11
+the kernel OOM-killed `clickhouse-serv` twice inside the **`monitor`** container's cgroup
+(`constraint=CONSTRAINT_MEMCG`, `oom_memcg=/lxc.payload.monitor/...`), and the Authentik
+containers restarted in the same minutes. Authentik came back healthy on its own (`live`
+and `ready` both **200**) and the mail sign-in was re-verified end to end afterwards, but the
+`monitor` container's memory limit is too small for ClickHouse and will keep cycling until it
+is raised or ClickHouse is capped. That is a capacity change, so it was not made here.
+
 ## Still open
 
-1. **Stalwart internal directory (optional)** — only needed if bare IMAP password login is
-   wanted next to the app passwords and SSO. Create it in the admin UI at
-   `https://admin.mail.innotel.us`; the management API rejects a hand-written `Internal`
-   object, and the webmail sign-in does not depend on it.
-2. **Mail account provisioning** — `scripts/sync-mail-identities.py` makes the address the
-   identity in both stores. It is written and dry-run against production (13 missing people
-   and platform addresses); running it with `--apply --group Mail` creates them. It is not
-   wired to run on creation yet: the estate has no Stalwart account-creation hook, so the
-   automation belongs in whatever creates the mailbox (a post-create call to the script, or
-   a periodic `--apply`), and that choice is the platform owner's.
-3. **bolt provider verification in the browser** — the base URL and key are in place and
+1. **Bare IMAP password login** — not available in Stalwart 0.16.27 (see above: no internal
+   directory type, credentials not writable over the API). Clients use app passwords or
+   OAuth. Only a server build with an internal directory, or a populated `Ldap`/`Sql`
+   directory, changes that.
+2. **Mail account provisioning** — `scripts/sync-mail-identities.py` now matches the two
+   stores by address and has created the 15 missing identities. It is still not wired to run
+   on creation: the estate has no Stalwart account-creation hook, so the automation belongs
+   in whatever creates the mailbox (a post-create call to the script, or a periodic
+   `--apply`), and that choice is the platform owner's.
+3. **`monitor` container memory** — ClickHouse is being OOM-killed inside that cgroup; raise
+   its limit or cap ClickHouse before the next restart takes Authentik down with it.
+4. **bolt provider verification in the browser** — the base URL and key are in place and
 green from the host; confirm a chat turn streams through `bolt.ontrak.technology` now that
 `bolt-app` has been recreated.
-4. **`mail.innotel.us` is a 301 to `oasis.innotel.us`.** NPM host 95 already forwards
+5. **`mail.innotel.us` is a 301 to `oasis.innotel.us`.** NPM host 95 already forwards
    `mail.innotel.us` → `192.168.1.15:3000`, so the redirect is emitted by the app or a
    redirection host above it. It should serve the webmail directly: the address is a
    documented webmail name and is registered as an SSO callback.
-5. **Forward-auth to native OIDC.** Seven proxy providers still gate apps through
+6. **Forward-auth to native OIDC.** Seven proxy providers still gate apps through
    oauth2-proxy. n8n, Grist, Grafana and Technitium all speak OIDC natively; the media apps
    (Radarr/Sonarr/Lidarr/Bazarr/Prowlarr/SABnzbd/qBittorrent) do not and should stay behind
    the gateway. Each move is an app-side configuration change plus a provider, so it is a
