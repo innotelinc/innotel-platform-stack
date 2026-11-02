@@ -1,0 +1,10 @@
+[Unit]
+Description=Keep Authentik identities in step with Stalwart mailboxes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+Unit=sync-mail-identities.service
+
+[Install]
+WantedBy=timers.target

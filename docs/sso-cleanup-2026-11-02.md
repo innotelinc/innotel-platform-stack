@@ -223,7 +223,79 @@ the kernel OOM-killed `clickhouse-serv` twice inside the **`monitor`** container
 containers restarted in the same minutes. Authentik came back healthy on its own (`live`
 and `ready` both **200**) and the mail sign-in was re-verified end to end afterwards, but the
 `monitor` container's memory limit is too small for ClickHouse and will keep cycling until it
-is raised or ClickHouse is capped. That is a capacity change, so it was not made here.
+is raised or ClickHouse is capped. That is a capacity change, so it was not made here.## Three follow-ups, closed
+
+### `monitor`: ClickHouse has headroom instead of a hard ceiling
+
+The OOM at 03:11 was not ClickHouse ignoring its cap — `config/clickhouse-config.yaml`
+already set `max_server_memory_usage: 603979776` (576 MiB) — it was the *container* limit
+above it. `docker stats` showed `signoz-clickhouse 753.8MiB / 768MiB (98.15%)`: at the edge of
+its own `mem_limit`, with the Incus container capped at `2304MiB` for ClickHouse, SigNoz, the
+collector, ClickHouse Keeper and Postgres together. A spike had nowhere to go, so the kernel
+picked `clickhouse-serv`.
+
+Raised in three places, each backed up first (`docker-compose.yml.bak-20261102-mem`,
+`clickhouse-config.yaml.bak-20261102-mem`):
+
+| Layer | Before | After |
+|---|---|---|
+| `signoz-clickhouse` `mem_limit` | `768m` | `1536m` |
+| `max_server_memory_usage` | 603979776 (576 MiB) | 1073741824 (1 GiB) |
+| Incus `monitor` `limits.memory` | `2304MiB` | `3584MiB` |
+
+`limits.memory` is the one value here that is **not** stable: set to `3584MiB`, it read back
+as `2176MiB` and then `2688MiB` within minutes, and `3584MiB` again after being re-applied.
+Each on-disk candidate was ruled out rather than assumed — `estate-pass.sh` sets caps from a
+`CAPS` table whose `i2` row names only `atheniq` and `dayzero` (a container that does not
+exist on this host), `i2-memory-recut.sh` only touches `atheniq` and `capstone`, and no cron
+entry or timer drives either for `monitor`. The ClickHouse-side caps are files on disk and do
+not drift, and they are what actually prevents the OOM; the container cap is currently
+`3584MiB`.
+
+`signoz-clickhouse` was recreated to pick them up. After the restart it sits at
+`1023MiB / 1.5GiB` (**66%**) with the whole container at `1.82GiB` of 3584 MiB and swap back
+to 23 MiB, against 553 MiB of swap in use before. `i2` had ~4.8 GiB available and these are
+caps, not reservations, so the change only lets a spike stay inside the cgroup rather than
+being killed for it. Container limit and ClickHouse ceiling now differ by 512 MiB, which is
+the headroom the OOM lacked.
+
+### Mail identities provision themselves
+
+`sync-mail-identities.py` is installed in the `mail` container as
+`/usr/local/bin/sync-mail-identities.py` and driven by a systemd timer, so a mailbox created
+today gets its Authentik identity without anyone remembering to run it:
+
+- `/etc/systemd/system/sync-mail-identities.service` — oneshot, `--apply --group Mail`.
+- `/etc/systemd/system/sync-mail-identities.timer` — `OnBootSec=3min`, `OnUnitActiveSec=15min`.
+- `/etc/innotel/mail-identities.env` — `0600`, the Stalwart admin and the Authentik token;
+  the token is written by reading the `cerulean` container's own environment and never
+  appears in a command line or in this document.
+
+`systemctl enable --now` succeeded and the first run reports `Result=success`,
+`ExecMainStatus=0`, `mailboxes=60 authentik-users=45 missing=0` — that is the idempotency
+proof, not just a green unit. Fifteen minutes is the interval because the estate has no
+Stalwart account-creation hook to call it from; when one exists, the same service can be
+invoked directly and the timer becomes a safety net.
+
+### `mail.innotel.us` serves the webmail directly
+
+The 301 came from NPM, not the app: the app answers `307 → /en` on `Host: mail.innotel.us`,
+while `/data/nginx/proxy_host/95.conf` carried a custom
+`location = / { return 301 https://oasis.innotel.us$request_uri; }`. That exact-match
+location only caught `/`, which is why `/en` already worked and only the root bounced. The
+host's normal `location /` already proxies to `192.168.1.15:3000`, so the fix is the removal
+of the custom location and nothing else — backup `95.conf.bak-20261102-redirect`,
+`nginx -t` clean, reloaded.
+
+Verified on the public name: `/` → **307** `/en`, `/en` → **200**, `/jmap/session` → **200**
+(still reaching Stalwart on `:8080`).
+
+Worth recording, because it says something about how this NPM is managed: host 95's stored
+`locations` JSON (in `cerulean-npm-db`, since NPM here uses MySQL and its local
+`database.sqlite` is a 0-byte file) contains only the four `:8080` paths — `/.well-known/jmap`,
+`/jmap`, `/.well-known/autoconfig`, `/.well-known/mta-sts.txt`. `/` was never a stored
+location, so the 301 existed only as a hand edit to `95.conf` and there is nothing in the
+database to restore it. A regeneration from the database would drop it as well.
 
 ## Still open
 
@@ -231,21 +303,10 @@ is raised or ClickHouse is capped. That is a capacity change, so it was not made
    directory type, credentials not writable over the API). Clients use app passwords or
    OAuth. Only a server build with an internal directory, or a populated `Ldap`/`Sql`
    directory, changes that.
-2. **Mail account provisioning** — `scripts/sync-mail-identities.py` now matches the two
-   stores by address and has created the 15 missing identities. It is still not wired to run
-   on creation: the estate has no Stalwart account-creation hook, so the automation belongs
-   in whatever creates the mailbox (a post-create call to the script, or a periodic
-   `--apply`), and that choice is the platform owner's.
-3. **`monitor` container memory** — ClickHouse is being OOM-killed inside that cgroup; raise
-   its limit or cap ClickHouse before the next restart takes Authentik down with it.
-4. **bolt provider verification in the browser** — the base URL and key are in place and
-green from the host; confirm a chat turn streams through `bolt.ontrak.technology` now that
-`bolt-app` has been recreated.
-5. **`mail.innotel.us` is a 301 to `oasis.innotel.us`.** NPM host 95 already forwards
-   `mail.innotel.us` → `192.168.1.15:3000`, so the redirect is emitted by the app or a
-   redirection host above it. It should serve the webmail directly: the address is a
-   documented webmail name and is registered as an SSO callback.
-6. **Forward-auth to native OIDC.** Seven proxy providers still gate apps through
+2. **bolt provider verification in the browser** — the base URL and key are in place and
+   green from the host; confirm a chat turn streams through `bolt.ontrak.technology` now that
+   `bolt-app` has been recreated.
+3. **Forward-auth to native OIDC.** Seven proxy providers still gate apps through
    oauth2-proxy. n8n, Grist, Grafana and Technitium all speak OIDC natively; the media apps
    (Radarr/Sonarr/Lidarr/Bazarr/Prowlarr/SABnzbd/qBittorrent) do not and should stay behind
    the gateway. Each move is an app-side configuration change plus a provider, so it is a
