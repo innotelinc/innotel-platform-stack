@@ -2,15 +2,22 @@
 # to this file and fails when a vhost names a target that is not declared here.
 #
 # Only vhosts whose target is a *contract* belong here. A normal proxy host points at a
-# service that moves with its container and its UI entry is the truth; these two exist
-# because the admin UI has no other way in: both doors terminate the Authentik sign-in
-# at the SSO gateway (`cerulean-npm-sso`), and after the gateway left the edge's network
-# namespace they still pointed at the edge's own loopback, which answered 502.
+# service that moves with its container and its UI entry is the truth; these exist
+# because each one has already gone wrong in a way nothing else noticed. The first two
+# front the admin UI through the SSO gateway (`cerulean-npm-sso`), which left the edge's
+# network namespace and left both doors proxying into the edge's own loopback; they named
+# the container instead of its address on 2026-11-02, which resolves inside NPM's network
+# and nowhere else, so the door worked while `check-edge-vhost-targets.py` called it dead.
 #
-# The second column is an address, never a name: the gateway is one container on the
-# `npm-gate` network, and the edge's peer map trusts exactly that address.
+# The second column is an address, never a name: a name is only resolvable by whoever
+# shares that Docker network, and the check runs outside it.
 #
 # domain<TAB>host<TAB>port<TAB>note
 admin.monarch.innotel.us	172.31.42.10	4180	Admin UI door on Monarch's name — SSO gateway
 proxy.innotel.us	172.31.42.10	4180	Admin UI door on the proxy's name — SSO gateway
 sage.innotel.tech	192.168.1.94	443	Sage session site — TLS terminated by the container, proxied by the edge
+# `blueprint` moved from i2 to i1 on 2026-10-30 and its vhost kept dialling the *host*
+# address it used to publish from (192.168.1.52:8787), so the name answered 502 from a
+# container that was running the whole time. The app also bound loopback only, which the
+# move made fatal rather than local: it now passes `--host 0.0.0.0` on its own address.
+blueprint.innotel.us	192.168.1.76	8787	DayZero app on blueprint's own address — moved off i2 on 2026-10-30

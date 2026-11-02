@@ -421,9 +421,11 @@ class LatencyLiveCase(LiveCase):
         self.assertIn('innotel_estate_check_failures{check="address_latency"} 0', body)
 
     def test_a_dark_service_address_fails_the_run(self):
-        # capstone's address is dialled; nothing answers it. That is the outage one layer
-        # below a renumber, and it must fail rather than be invisible.
-        code, prom = self.run_latency({"192.168.1.30": None})
+        # blueprint's address is dialled; nothing answers it. That is the outage one layer
+        # below a renumber, and it must fail rather than be invisible. (It used to use
+        # capstone's `.30`, which was retired on 2026-11-02 — a table address that is no
+        # longer dialled cannot prove this, so the test names one that is.)
+        code, prom = self.run_latency({"192.168.1.76": None})
         self.assertEqual(code, 1)
         self.assertIn('innotel_estate_check_failures{check="address_latency"} 1', self.text(prom))
 

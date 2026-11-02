@@ -143,9 +143,17 @@ EXPECTED: dict[str, dict[str, str]] = {
         "regcache": "192.168.1.79",
         "rizzaura": "192.168.1.62",
     },
+    # `capstone` (`.30`, Zeus telephony) is **not** a row any more. It stopped on
+    # 2026-11-02 and cannot be started on `i2`: the host reports 4.8 GiB total (1.3 GiB
+    # available after the edge, mail, monitor and magnate) and the container's own stack
+    # ran at 4.3 GiB against a 6 GiB cap, so a start there takes the box down rather than
+    # bringing telephony up. It has no vhost (`capstone.innotel.us` resolves to the edge
+    # and lands on the default server) and nothing on the estate dials `.30`, so the row
+    # was asserting a service the estate does not run — and `check-address-latency`, which
+    # reads this table, failed every run on a deliberately stopped container. Re-add the
+    # row with the address the day it is placed on a host that can hold it.
     "i2": {
         "atheniq": "192.168.1.59",
-        "capstone": "192.168.1.30",
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
         "mail": "192.168.1.15",
@@ -223,7 +231,6 @@ ROLES: dict[str, str] = {
     "192.168.1.22": "the web terminal",
     "192.168.1.43": "WireGuard VPN",
     "192.168.1.73": "Vaultwarden + Linkwarden + Meilisearch",
-    "192.168.1.30": "capstone / Zeus telephony",
     "192.168.1.76": "blueprint",
     "192.168.1.79": "regcache",
     "192.168.1.83": "Clearpath (`app.denovocredit.com`)",

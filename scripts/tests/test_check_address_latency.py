@@ -98,12 +98,12 @@ class AuditCase(unittest.TestCase):
         self.assertTrue(result.ok)
 
     def test_a_dark_service_address_is_a_failure(self):
-        result = lat.audit([_reading("capstone", "192.168.1.30", "service", [], where="i2", role="capstone / Zeus telephony")])
+        result = lat.audit([_reading("blueprint", "192.168.1.76", "service", [], where="i1", role="blueprint")])
         self.assertEqual([f.code for f in result.findings], ["no_reply"])
         self.assertFalse(result.ok)
         # It must name the address and what is dialled there, or the failure says nothing.
-        self.assertIn("192.168.1.30", result.findings[0].message)
-        self.assertIn("Zeus telephony", result.findings[0].message)
+        self.assertIn("192.168.1.76", result.findings[0].message)
+        self.assertIn("blueprint", result.findings[0].message)
 
     def test_scores_of_milliseconds_is_a_warning_naming_the_power_save(self):
         result = lat.audit([_reading("i1", "192.168.1.51", "host", [400.0, 380.0, 420.0])])
@@ -127,7 +127,7 @@ class AuditCase(unittest.TestCase):
         readings = [
             _reading("i1", "192.168.1.51", "host", [7.0]),
             _reading("atlas", "192.168.1.90", "service", [400.0], where="i2"),
-            _reading("capstone", "192.168.1.30", "service", [], where="i2"),
+            _reading("blueprint", "192.168.1.76", "service", [], where="i1"),
         ]
         result = lat.audit(readings)
         self.assertEqual(sorted(f.code for f in result.findings), ["no_reply", "slow"])
