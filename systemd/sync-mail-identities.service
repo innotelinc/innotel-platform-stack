@@ -1,0 +1,12 @@
+[Unit]
+Description=Mirror Stalwart mailboxes into Authentik, keyed by the address
+Documentation=https://github.com/innotelinc/innotel-platform-stack
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/innotel/mail-identities.env
+ExecStart=/usr/bin/python3 /usr/local/bin/sync-mail-identities.py --apply --group Mail
+TimeoutStartSec=180
+Nice=10
