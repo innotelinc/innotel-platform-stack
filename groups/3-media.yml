@@ -101,6 +101,13 @@ x-sso-env: &sso-env
   OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
   OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
   OAUTH2_PROXY_REVERSE_PROXY: "true"
+  # The identity header core trusts (CORE_AUTH_HEADER), and the only one this
+  # mode of deployment can carry. `pass-user-headers` sets X-Forwarded-User and
+  # X-Forwarded-Email on the request it hands upstream; `set-xauthrequest` sets
+  # X-Auth-Request-* on the *response* to the browser, for nginx auth_request
+  # mode, which is not what runs here. Core asked for the auth_request name, so
+  # every signed-in /api/* call arrived with no header and answered 401 while the
+  # page itself loaded - "not signed in", signed in (measured 2026-10-30).
   OAUTH2_PROXY_PASS_USER_HEADERS: "true"
   OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
   OAUTH2_PROXY_WHITELIST_DOMAINS: ${SSO_COOKIE_DOMAIN:-.innotel.us}
@@ -138,6 +145,23 @@ services:
     # stack's biggest consumer; cap and keep swap off.
     mem_limit: 4g
     memswap_limit: 4g
+    healthcheck:
+      # The image's first start after a recreate can stall in its own init: the
+      # container reports Up while the app service never starts, and nothing that
+      # asks the edge sees the difference until a person tries to play something.
+      # Jellyfin answers /System/Info/Public before it has a database, so this is
+      # the process being alive rather than the library being ready.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null",
+             "http://127.0.0.1:8096/System/Info/Public"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Not 180s. The image's first start in a *new* container chowns the whole
+      # web client (`init-setup-app`), and on overlayfs every chown copies the
+      # file up: measured at ~1,600 paths left after thirteen minutes, against
+      # instant once the ownership is in the container's layer. Twenty minutes
+      # is the honest window before "unhealthy" means anything here.
+      start_period: 1200s
     ports:
       # Host 8097 → container 8096: 8096 on this host belongs to the capstone
       # Control Center (dashboard), so Jellyfin shifts to the next free port.
@@ -163,6 +187,15 @@ services:
       # address) via `jellyfin_ensure_known_proxies`, and a change needs a
       # Jellyfin restart, so init reports it rather than doing it.
       - 127.0.0.1:8097:8096
+      # A second, LAN-only door, for the television. A TV app cannot complete the
+      # oauth2-proxy cookie flow the gateway above exists for: it authenticates
+      # against Jellyfin's own API (`/Users/AuthenticateByName` answers 200) and
+      # then every call after that - Views, Items, Sessions, the `/socket`
+      # websocket - comes back 401, because the app holds a Jellyfin token and no
+      # browser session. Measured 2026-10-31 through iptv.innotel.us while the
+      # web client was perfectly healthy. So the TV's name forwards here
+      # directly, and the web names keep the gate; nothing else uses this port.
+      - "${JELLYFIN_TV_PUBLISH:-192.168.1.56:14016}:8096"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /docker/appdata/jellyfin:/config
@@ -178,7 +211,6 @@ services:
   jellyseerr:   # from monarch
     <<: *common-keys
     container_name: jellyseerr
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     image: ghcr.io/seerr-team/seerr:latest
     init: true
     ports:
@@ -201,7 +233,6 @@ services:
   sonarr:   # from monarch
     <<: *common-keys
     container_name: sonarr
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     image: ghcr.io/hotio/sonarr:latest
     ports:
       - 127.0.0.1:8989:8989
@@ -217,7 +248,6 @@ services:
   radarr:   # from monarch
     <<: *common-keys
     container_name: radarr
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     image: ghcr.io/hotio/radarr:latest
     ports:
       - 127.0.0.1:7878:7878
@@ -233,7 +263,6 @@ services:
   lidarr:   # from monarch
     <<: *common-keys
     container_name: lidarr
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     image: ghcr.io/hotio/lidarr:latest
     ports:
       - 127.0.0.1:8686:8686
@@ -249,7 +278,6 @@ services:
   whisparr:   # from monarch
     <<: *common-keys
     container_name: whisparr
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     # v2-develop (not latest): hotio's `latest` is frozen at v2.2.0-release.231,
     # which predates current Whisparr. (The original reason was qBittorrent
     # 5.2.x support; qBittorrent was replaced by Transmission on 2026-10-01,
@@ -286,7 +314,6 @@ services:
   bazarr:   # from monarch
     <<: *common-keys
     container_name: bazarr
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     image: ghcr.io/hotio/bazarr:latest
     ports:
       - 127.0.0.1:6767:6767
@@ -302,7 +329,6 @@ services:
   homarr:   # from monarch
     <<: *common-keys
     container_name: homarr
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     # Homarr v1 (homarr-labs rewrite; the old ajnart/homarr v0.16 line is
     # archived). v1 keeps everything under a single /appdata mount.
     # Pinned by digest, not `:latest`. watchtower runs every 6 h with --cleanup
@@ -311,7 +337,7 @@ services:
     # asks for chunks that no longer exist and lands on the "This page couldn't
     # load" error boundary. Set HOMARR_IMAGE to move deliberately instead
     # (docs/operations.md, "Why the Homarr image is pinned by digest").
-    image: ${HOMARR_IMAGE:-ghcr.io/homarr-labs/homarr@sha256:025471efe0735b6bb89953ea4e141c984a171c1781bc8ca404163d3c26d0e26d}
+    image: ${HOMARR_IMAGE:-ghcr.io/homarr-labs/homarr@sha256:2844201f11ce28b98183728dea2261de2b4fd8ed5480a4eef0b7977cc1a08dc0}
     ports:
       - 7575:7575
     environment:
@@ -350,7 +376,6 @@ services:
   landing:   # from monarch
     <<: *common-keys
     container_name: monarch-landing
-    profiles: ["retired"]   # see docs/unified.md — replaced by the core UI
     image: nginx:alpine
     ports:
       - 14014:80
@@ -427,7 +452,6 @@ services:
   sabnzbd:   # from monarch
     <<: *common-keys
     container_name: sabnzbd
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     image: ghcr.io/hotio/sabnzbd:latest
     ports:
       # 8082 is the default because scripts/npm-hosts.conf forwards
@@ -473,7 +497,6 @@ services:
   requestrr:   # from monarch
     <<: *common-keys
     container_name: requestrr
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     # Served from this repo's own GHCR mirror (published by
     # .github/workflows/publish-image-mirrors.yml) rather than Docker Hub: an
     # anonymous Docker Hub pull shares its small per-address budget with every
@@ -642,7 +665,6 @@ services:
   clipbucket:   # from monarch
     <<: *common-keys
     container_name: clipbucket
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     # Built from ./clipbucket (nginx + PHP-FPM + MariaDB runtime, app source
     # git-cloned on first boot) - the upstream oxygenz image is amd64-only.
     # The release workflow publishes amd64 + arm64 to GHCR.
@@ -780,12 +802,24 @@ services:
       SCAN_INTERVAL: 3600
       MEDIA_ROOT: /data/media
       REPORT_FILE: /app/data/analytics.json
+      # The splash the board's Splash (live) tile reports on: Jellyfin's branding
+      # store and data dir (the collage a scan rewrites), plus the state directory
+      # drift-check writes its splash/guard verdict into. Read-only throughout -
+      # this service reports on them, it never repairs them.
+      JELLYFIN_CONFIG_DIR: /jellyfin
+      JELLYFIN_DATA_DIR: /jellyfin/data/data
+      SPLASH_STATUS_FILE: /state/splash-status
+      LIVETV_STATUS_FILE: /var/lib/monarch/livetv-monitor.json
     ports:
       - 8003:8003
     volumes:
       - ../../3-media/monarch/health-analytics:/app
       - /data/media:/data/media:ro
       - /docker/appdata/monarch-health:/app/data
+      - /docker/appdata/jellyfin:/jellyfin:ro
+      - /docker/appdata/init:/state:ro
+      # The live TV monitor's own report, so a dead feed turns the IPTV tile red.
+      - /var/lib/monarch:/var/lib/monarch:ro
 
   ###############################################
   # MONARCH-SEED - Pre-seed Transmission session settings
@@ -965,7 +999,6 @@ services:
   radarr-sso:   # from monarch
     <<: *sso-gateway
     container_name: radarr-sso
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     environment:
       <<: *sso-env
       OAUTH2_PROXY_UPSTREAMS: http://radarr:7878
@@ -976,7 +1009,6 @@ services:
   sonarr-sso:   # from monarch
     <<: *sso-gateway
     container_name: sonarr-sso
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     environment:
       <<: *sso-env
       OAUTH2_PROXY_UPSTREAMS: http://sonarr:8989
@@ -987,7 +1019,6 @@ services:
   lidarr-sso:   # from monarch
     <<: *sso-gateway
     container_name: lidarr-sso
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     environment:
       <<: *sso-env
       OAUTH2_PROXY_UPSTREAMS: http://lidarr:8686
@@ -998,7 +1029,6 @@ services:
   whisparr-sso:   # from monarch
     <<: *sso-gateway
     container_name: whisparr-sso
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     environment:
       <<: *sso-env
       OAUTH2_PROXY_UPSTREAMS: http://whisparr:6969
@@ -1009,7 +1039,6 @@ services:
   bazarr-sso:   # from monarch
     <<: *sso-gateway
     container_name: bazarr-sso
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     environment:
       <<: *sso-env
       OAUTH2_PROXY_UPSTREAMS: http://bazarr:6767
@@ -1040,7 +1069,6 @@ services:
   sabnzbd-sso:   # from monarch
     <<: *sso-gateway
     container_name: sabnzbd-sso
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     environment:
       <<: *sso-env
       OAUTH2_PROXY_UPSTREAMS: http://sabnzbd:8080
@@ -1062,7 +1090,6 @@ services:
   jellyseerr-sso:   # from monarch
     <<: *sso-gateway
     container_name: jellyseerr-sso
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     environment:
       <<: *sso-env
       # The request portal publishes its own sign-in page (the Jellyfin/Cerulean
@@ -1126,7 +1153,6 @@ services:
   clipbucket-sso:   # from monarch
     <<: *sso-gateway
     container_name: clipbucket-sso
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     environment:
       <<: *sso-env
       OAUTH2_PROXY_UPSTREAMS: http://clipbucket:80
@@ -1153,7 +1179,6 @@ services:
   requestrr-sso:   # from monarch
     <<: *sso-gateway
     container_name: requestrr-sso
-    profiles: ["retired"]   # see docs/unified.md — replaced by monarch-core
     environment:
       <<: *sso-env
       # Upstream is the app by name over the compose network, which is why the
@@ -1177,6 +1202,7 @@ services:
     logging:
       driver: json-file
     container_name: monarch-core
+    profiles: ["retired"]   # parked by the 2026-10-30 rollback (docs/unified.md)
     image: monarch-core:1.0.0
     labels:
       com.centurylinklabs.watchtower.enable: "false"
@@ -1186,7 +1212,10 @@ services:
       TZ: ${TZ:-America/New_York}
       CORE_DATA_DIR: /data
       CORE_LIBRARY_ROOT: /data/media
-      CORE_AUTH_HEADER: X-Auth-Request-Email
+      # What this gateway actually sends upstream. X-Auth-Request-Email belongs to
+      # nginx auth_request mode and never reaches core through a reverse proxy
+      # (see the note on OAUTH2_PROXY_PASS_USER_HEADERS above).
+      CORE_AUTH_HEADER: X-Forwarded-Email
       TRANSMISSION_URL: http://transmission:9091
       JELLYFIN_URL: ${JELLYFIN_URL:-http://jellyfin:8096}
       JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
@@ -1221,6 +1250,7 @@ services:
   core-sso:   # from monarch
     <<: *sso-gateway
     container_name: monarch-core-sso
+    profiles: ["retired"]   # parked by the 2026-10-30 rollback (docs/unified.md)
     environment:
       <<: *sso-env
       OAUTH2_PROXY_UPSTREAMS: http://core:8090
