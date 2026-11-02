@@ -136,3 +136,16 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-traffic.py --p
 # same day, it ran there by hand and was never brought into the repo or this unit, which
 # is why the dashboard's "Checks reporting" number was one behind the unit's own list.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stuck-processes.py --prom ${TEXTFILE_DIR}/estate-check-stuck-processes.prom
+
+# And that the Telno node still holds the records its legacy database has (2026-11-02).
+# The console and the Asterisk-era database are two copies of one fact with no live link:
+# `scripts/import-legacy.mjs` copies devices, extensions, confirmed directory listings and
+# brand strings once, and is idempotent, so on a healthy node it reports nothing but
+# `exists`. A row deleted in the console, or a record that arrived in the legacy database
+# afterwards, changes nothing about whether any service is healthy — the only symptom is a
+# missing name on a phone — so nothing else in the estate could see it. The node runs the
+# same script daily from `telno-legacy-import-check.timer`, but that verdict only reaches
+# the node's own journal; this publishes it as a series beside every other check. It reads
+# the node through `incus exec` because the container has no sshd, and it asks the running
+# image's own importer rather than reimplementing what "present" means here.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-telno-legacy-import.py --prom ${TEXTFILE_DIR}/estate-check-telno-legacy-import.prom
