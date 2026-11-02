@@ -1,0 +1,15 @@
+[Unit]
+Description=Announce a new Authentik release before the 06:00 apply run
+Documentation=https://github.com/innotelinc/cerulean
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Nice=10
+EnvironmentFile=-/etc/innotel/authentik-update.env
+Environment=ESTATE_ROOT=/usr/src/projects/complete
+# Resolves the newest release and reports it; pulls nothing, recreates nothing,
+# commits nothing. The 06:00 timer applies it.
+ExecStart=/opt/innotel/authentik-update/authentik-update.sh --notify-only

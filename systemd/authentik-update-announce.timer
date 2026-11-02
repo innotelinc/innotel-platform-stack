@@ -1,0 +1,15 @@
+[Unit]
+Description=Look for a new Authentik release at 04:00, two hours before apply
+
+[Timer]
+# Two hours ahead of the 06:00 apply window: long enough to hold a release by
+# hand (pin AUTHENTIK_IMAGE_TAG in the cerulean .env) while the estate is quiet,
+# and it only mails — nothing restarts on this run.
+OnCalendar=*-*-* 04:00:00
+RandomizedDelaySec=5m
+AccuracySec=1m
+Persistent=true
+Unit=authentik-update-announce.service
+
+[Install]
+WantedBy=timers.target
