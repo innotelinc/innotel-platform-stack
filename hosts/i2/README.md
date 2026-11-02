@@ -22,6 +22,8 @@ parameter that no container can set.
 | `innotel-site/reconcile.sh` | `/usr/src/innotel-deploy/reconcile.sh` on the host, mounted into `proxy` |
 | `innotel-site/innotel-site.service` | `/etc/systemd/system/innotel-site.service` inside `proxy` |
 | `innotel-site/innotel-site-reconcile.{service,timer}` | `/etc/systemd/system/` inside `proxy` |
+| `../../scripts/backup-proxy.sh` | run in place on i2 (`/root/backup-proxy.sh`) |
+| `../../scripts/restore-proxy.sh` | run in place on i2 (`/root/restore-proxy.sh`) |
 
 ## Install / re-apply
 
@@ -79,6 +81,27 @@ One ownership detail: host directories mounted into `proxy` must be writable by
 the container's root, i.e. owned by the idmap base (`1000000:1000000`). A directory
 created as host `root` is not, and a `tee` into it from inside the container fails
 with `Permission denied`.
+
+## Rebuilding `proxy`
+
+`proxy` cannot be rebuilt from `incus export` alone: `/data`, `/usr/src/innotel-site`
+and `/usr/src/innotel-deploy` are host paths, not rootfs, and a container restored
+without them comes up with NPM serving no vhosts. `scripts/backup-proxy.sh` writes
+a restore point that holds all of it — rootfs from a snapshot clone, `/data`, the
+two deploy directories, the units from inside the container, and a manifest it
+checks itself against — and `scripts/restore-proxy.sh` rebuilds from it and then
+verifies the result (address, NPM host-conf count, `docker ps`, the innotel-site
+units, and `https://innotel.us/` answering 200).
+
+```sh
+bash /root/backup-proxy.sh --offsite root@192.168.1.51:/var/backups/estate/proxy
+bash /root/restore-proxy.sh /var/lib/incus/backups/proxy/<stamp> --replace
+```
+
+Restore points land in `/var/lib/incus/backups/proxy` on this host and in
+`/var/backups/estate/proxy` on i1; the newest three are kept on each. i2 holds a
+root key for i1 for that copy, marked `backup@i2`. Full detail:
+[`docs/proxy-restore.md`](../../docs/proxy-restore.md).
 
 ## Why the module is loaded, and why the traversal is off
 
