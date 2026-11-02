@@ -1,0 +1,17 @@
+[Unit]
+Description=Check for a new Authentik release every 15 minutes
+
+[Timer]
+# Fifteen minutes is "as soon as it hits" without polling GitHub harder than the
+# unauthenticated API allows: one releases call per quarter hour, and the job
+# exits as soon as the pin already names the latest release. The jitter keeps a
+# release from landing in the same second as the other estate checks.
+OnBootSec=5m
+OnCalendar=*:0/15
+RandomizedDelaySec=2m
+AccuracySec=30s
+Persistent=true
+Unit=authentik-update.service
+
+[Install]
+WantedBy=timers.target
