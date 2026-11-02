@@ -52,6 +52,11 @@ CHECK_SCRIPTS = [
     # NPM's host list against the vhost files it wrote: a deleted row whose file still
     # proxies, and a row whose port no longer matches the file nginx serves.
     "check-npm-config-drift",
+    # Written on the edge on 2026-10-27 after a `docker exec` sat for 18 h 20 m and took
+    # i4 to load 13, then left there unowned for six days: the script lived in
+    # /opt/innotel/estate-checks and published nothing, so it was the same silence this
+    # list exists to catch — a check that exists is not a check that runs.
+    "check-stuck-processes",
 ]
 
 

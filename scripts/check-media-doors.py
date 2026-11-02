@@ -7,11 +7,16 @@ The media estate collapsed eight hostnames onto one product (docs in the `monarc
 `docs/unified.md`). Two doors are all that is left, and both fail quietly in a way nobody
 notices until somebody wants to watch something:
 
-  * `media.innotel.us` is the gated front page. Its correct answer is a **302 to
-    `auth.cerulean.innotel.us`** — the gate working. A **200** there is not success, it is
-    the single sign-in having fallen off the front of the product, and the only way to
-    tell the two apart is to look at the status rather than at "did it answer". A 5xx is
-    the gateway or `core` being down behind a name that still resolves.
+  * `media.innotel.us` is the Jellyfin front page, and since 2026-09-18 it is
+    **deliberately not OIDC-gated**: its gateway carries `OAUTH2_PROXY_SKIP_AUTH_ROUTES:
+    "^/.*$"` and Jellyfin serves its own sign-in page (a Cerulean Authentik button plus an
+    LDAP binding for native clients). Gating the page was tried and reverted, because a TV
+    client that opens `…/web/#/login` in a webview was sent to Authentik — a flow it cannot
+    complete — and Quick Connect had no page to enter its code on. So the working answer
+    here is Jellyfin's own page, reached through one app-relative hop (`/` answers `302
+    web/`). A **redirect to the IdP** is now the regression: it is the gate having been put
+    back in front of a product whose clients cannot complete it. A 5xx is the gateway or
+    the app being down behind a name that still resolves.
   * `tv.innotel.us` is the watch door, and it is deliberately **not** a redirect: Jellyfin
     keeps its own accounts because TV and native clients cannot complete a browser OIDC
     flow. Nothing in the estate checks it, so a stopped Jellyfin, a bad proxy pass or a
@@ -19,8 +24,10 @@ notices until somebody wants to watch something:
 
 WHAT IT ASSERTS
 ---------------
-  1. GATE — `media.innotel.us/` answers 3xx with `auth.cerulean.innotel.us` in `Location`.
-     200 is a failure (open door), 5xx is a failure (door broken), no answer is a failure.
+  1. FRONT PAGE — `media.innotel.us/` answers 200 naming Jellyfin, or one app-relative
+     hop to that (`302 web/`). A redirect to `auth.cerulean.innotel.us` is a failure: the
+     OIDC gate is not allowed in front of this name. 5xx is a failure, no answer is a
+     failure, and a 200 that is not Jellyfin is a failure.
   2. WATCH — `tv.innotel.us/web/` answers 200 and its body is Jellyfin's web client (the
      page names jellyfin), not a proxy error page that happens to be 200.
   3. BRANDING — `tv.innotel.us/Branding/Splashscreen` answers 200 `image/png` of at least
@@ -46,6 +53,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urljoin
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -92,30 +100,56 @@ def fetch(url: str, timeout: float = 20.0) -> tuple[int | None, dict[str, str], 
         return None, {}, b""
 
 
+def _names_jellyfin(body: bytes) -> bool:
+    """Whether a 200 body is Jellyfin's own page rather than a proxy error page."""
+    return "jellyfin" in body[:64_000].decode("utf-8", "replace").lower()
+
+
 def audit(media: str, watch: str, *, probe=fetch, splash_min: int = DEFAULT_SPLASH_MIN) -> Audit:
     """The three assertions, as findings. Pure enough to test with a fake `probe`."""
     result = Audit()
 
-    status, headers, _ = probe(media)
+    status, headers, body = probe(media)
     location = headers.get("Location", "") or headers.get("location", "")
     if status is None:
         result.findings.append(Finding(
-            "gate-unreachable", "fail", f"{media} did not answer — DNS, TLS or the edge is down"))
+            "front-unreachable", "fail", f"{media} did not answer — DNS, TLS or the edge is down"))
     elif 300 <= status < 400 and AUTH_HOST in location:
-        pass
-    elif status == 200:
         result.findings.append(Finding(
-            "gate-missing", "fail",
-            f"{media} answered 200 instead of redirecting to {AUTH_HOST}: the sign-in is "
-            "not in front of the product"))
+            "gate-restored", "fail",
+            f"{media} redirects to {AUTH_HOST}: the OIDC gate is back in front of the "
+            "front page, and a TV client in a webview cannot complete that flow (Jellyfin "
+            "serves its own sign-in; see monarch docs/operations.md §Jellyfin and Seerr)"))
+    elif 300 <= status < 400 and location and not location.startswith("http"):
+        # Jellyfin's own front page answers `/` with `302 web/` — the app's page, one
+        # relative hop away. Follow exactly that hop and judge the page it lands on.
+        target = urljoin(media, location)
+        landed, _, landed_body = probe(target)
+        if landed is None:
+            result.findings.append(Finding(
+                "front-unreachable", "fail", f"{media} redirected to {target}, which did not answer"))
+        elif landed != 200:
+            result.findings.append(Finding(
+                "front-status", "fail",
+                f"{media} redirected to {target}, which answered {landed} — the app is down behind the name"))
+        elif not _names_jellyfin(landed_body):
+            result.findings.append(Finding(
+                "front-not-jellyfin", "fail",
+                f"{media} redirected to {target}, which answered 200 but does not name "
+                "Jellyfin — something else is answering on the front door"))
+    elif status == 200 and not _names_jellyfin(body):
+        result.findings.append(Finding(
+            "front-not-jellyfin", "fail",
+            f"{media} answered 200 but the page does not name Jellyfin — something else is "
+            "answering on the front door"))
     elif 300 <= status < 400:
         result.findings.append(Finding(
-            "gate-wrong-target", "fail",
-            f"{media} redirects to {location or 'nowhere'} instead of {AUTH_HOST}"))
-    else:
+            "front-wrong-target", "fail",
+            f"{media} redirects off the app to {location or 'nowhere'}"))
+    elif status != 200:
         result.findings.append(Finding(
-            "gate-status", "fail",
-            f"{media} answered {status} — the gateway or core is down behind the name"))
+            "front-status", "fail",
+            f"{media} answered {status} — the gateway or the app is down behind the name"))
 
     status, _, body = probe(watch + WEB_PATH)
     text = body[:64_000].decode("utf-8", "replace").lower()
@@ -189,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         }, indent=2, sort_keys=True))
         return 0 if result.ok else 1
 
-    print(f"  {args.media:<40} gated front page")
+    print(f"  {args.media:<40} Jellyfin front page (not OIDC-gated by design)")
     print(f"  {args.watch}{WEB_PATH:<27} watch door")
     print(f"  {args.watch}{SPLASH_PATH:<20} Gizmo splash")
     for finding in result.findings:

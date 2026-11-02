@@ -1,5 +1,5 @@
 {
-  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), whether the alert receiver actually delivers mail, and whether the mail domains' SPF/DKIM/DMARC records resolve in the public zone plus, for the outbound half, whether the SMTP chain sends at all (check-mail-relay.py shows up in the per-check panels beside them). The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Traffic \u2014 what was delivered, bounced, queued, authenticated and blocked in the last day \u2014 is the other dashboard, `mail.json`, built from `check-mail-traffic.py`'s counts. Provisioned read-only from this repo \u2014 see provisioning/dashboards/dashboards.yml.",
+  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), whether the alert receiver actually delivers mail, and whether the mail domains' SPF/DKIM/DMARC records resolve in the public zone plus, for the outbound half, whether the SMTP chain sends at all (check-mail-relay.py shows up in the per-check panels beside them). The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Traffic — what was delivered, bounced, queued, authenticated and blocked in the last day — is the other dashboard, `mail.json`, built from `check-mail-traffic.py`'s counts. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
   "annotations": {
     "list": []
   },
@@ -88,7 +88,7 @@
       "id": 2,
       "type": "stat",
       "title": "Checks reporting",
-      "description": "How many checks have a series at all \u2014 one per ExecStart line in systemd/estate-checks.service, held in step by scripts/tests/test_estate_dashboard.py. Fewer than expected means a textfile is missing, which is the silence `EstateCheckAbsent` exists to catch.",
+      "description": "How many checks have a series at all — one per ExecStart line in systemd/estate-checks.service, held in step by scripts/tests/test_estate_dashboard.py. Fewer than expected means a textfile is missing, which is the silence `EstateCheckAbsent` exists to catch.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -110,7 +110,7 @@
               },
               {
                 "color": "green",
-                "value": 18
+                "value": 19
               }
             ]
           },
@@ -150,7 +150,7 @@
       "id": 3,
       "type": "table",
       "title": "Status, failures, warnings and notes by check",
-      "description": "One row per check. `status` is 1 only for a clean run; `failures` and `warnings` are what it found; `notes` is what it stated and did not fail on \u2014 a parked name, a dev target the estate declares is asleep, a mail name that is a CNAME \u2014 so a green row still says what was noticed.",
+      "description": "One row per check. `status` is 1 only for a clean run; `failures` and `warnings` are what it found; `notes` is what it stated and did not fail on — a parked name, a dev target the estate declares is asleep, a mail name that is a CNAME — so a green row still says what was noticed.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -265,7 +265,7 @@
       "id": 9,
       "type": "stat",
       "title": "Alert receiver delivered",
-      "description": "1 only when the probe alert injected through the estate's Alertmanager was seen delivered by the mail server. A receiver that is configured but silenced publishes 0 here while every other panel stays green \u2014 the state check-alert-delivery.py exists to make visible.",
+      "description": "1 only when the probe alert injected through the estate's Alertmanager was seen delivered by the mail server. A receiver that is configured but silenced publishes 0 here while every other panel stays green — the state check-alert-delivery.py exists to make visible.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -474,7 +474,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Address latency (median ICMP)",
-      "description": "Every address the estate dials \u2014 hosts and containers. A step up here, across the board, is the WiFi power-save regression; a step up for one address is that address.",
+      "description": "Every address the estate dials — hosts and containers. A step up here, across the board, is the WiFi power-save regression; a step up for one address is that address.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -657,7 +657,7 @@
       "id": 10,
       "type": "stat",
       "title": "Mail auth records",
-      "description": "How many of the mail domains' SPF/DKIM/DMARC records resolved in the zone the public reads, out of how many must. A drop here is a record that stopped resolving \u2014 for example a rotation Stalwart generated but, because the public zone refuses its TSIG updates, never published. See check-mail-auth.py.",
+      "description": "How many of the mail domains' SPF/DKIM/DMARC records resolved in the zone the public reads, out of how many must. A drop here is a record that stopped resolving — for example a rotation Stalwart generated but, because the public zone refuses its TSIG updates, never published. See check-mail-auth.py.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -728,7 +728,7 @@
       "id": 11,
       "type": "stat",
       "title": "DMARC: messages p=reject would drop",
-      "description": "The DMARC aggregate reports' own verdict \u2014 messages whose SPF and DKIM both failed to align, beside every message the reports named and the number of reports read. Non-zero would-be-dropped means a tightened policy would lose mail, and that failure is silent: the symptom is a reset link that never arrives. `reports read 0` is the other state \u2014 nothing has been reported on yet (the rua is new) or the reporting path is broken, and the check's note says which. See check-dmarc-alignment.py.",
+      "description": "The DMARC aggregate reports' own verdict — messages whose SPF and DKIM both failed to align, beside every message the reports named and the number of reports read. Non-zero would-be-dropped means a tightened policy would lose mail, and that failure is silent: the symptom is a reset link that never arrives. `reports read 0` is the other state — nothing has been reported on yet (the rua is new) or the reporting path is broken, and the check's note says which. See check-dmarc-alignment.py.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -845,7 +845,7 @@
       "id": 12,
       "type": "table",
       "title": "What the checks noticed",
-      "description": "The notes, one row each, with the reason the check wrote. They are true and they are not failures \u2014 the dev box is off, a name is parked, a mail name is a CNAME \u2014 so a green run that noticed three things and a run that noticed nothing used to read the same on this page. `scripts/estate_check.py` publishes each one as its own series.",
+      "description": "The notes, one row each, with the reason the check wrote. They are true and they are not failures — the dev box is off, a name is parked, a mail name is a CNAME — so a green run that noticed three things and a run that noticed nothing used to read the same on this page. `scripts/estate_check.py` publishes each one as its own series.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
