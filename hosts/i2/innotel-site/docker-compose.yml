@@ -1,0 +1,26 @@
+# innotel.us — the Innotel Labs company site, served from the edge host.
+#
+# Declared here rather than started by hand, because the NPM host that fronts the
+# apex (id 88) addresses this container by name: `innotel-site:80`. A container
+# recreated off NPM's network would leave innotel.us with nothing to resolve, so
+# the network is part of the definition and `docker compose up -d` is always safe.
+#
+# The content lives on the i2 host at /usr/src/innotel-site and is mounted in
+# read-only through the Incus `site` device, so rebuilding the proxy container
+# does not take the site with it.
+services:
+  innotel-site:
+    image: nginx:alpine
+    container_name: innotel-site
+    restart: unless-stopped
+    ports:
+      - "8086:80"
+    volumes:
+      - /usr/src/innotel-site:/usr/share/nginx/html:ro
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: proxy_default
