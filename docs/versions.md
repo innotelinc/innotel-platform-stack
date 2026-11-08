@@ -17,10 +17,10 @@ roadmap, a roadmap targets a different version, or the table and `VERSION` disag
 | magnate | platform service | server 1 | 2.0.0 | [roadmap](roadmaps/magnate.md) |
 | npm-edge | platform service | 192.168.1.71 | 2.0.0 | [roadmap](roadmaps/npm-edge.md) |
 | monarch | business | server 3 (192.168.1.56) | 2.0.0 | [roadmap](roadmaps/monarch.md) |
-| zeus | business | server 2 (192.168.1.30) | 2.0.0 | [roadmap](roadmaps/zeus.md) |
+| zeus | business | server 2 (address unverified) | 2.0.0 | [roadmap](roadmaps/zeus.md) |
 | oasis | business | server 5 | 2.0.0 | [roadmap](roadmaps/oasis.md) |
 | signara | business | server 1 | 2.0.0 | [roadmap](roadmaps/signara.md) |
-| capstone | business | server 2 (192.168.1.30) | 2.0.0 | [roadmap](roadmaps/capstone.md) |
+| capstone | business | server 2 (address unverified) | 2.0.0 | [roadmap](roadmaps/capstone.md) |
 | rizzaura | business | server 4 | 2.0.0 | [roadmap](roadmaps/rizzaura.md) |
 | zapit | business | on demand | 2.0.0 | [roadmap](roadmaps/zapit.md) |
 | ontrak | business | 192.168.1.21 (incus ontrak) | 2.0.0 | [roadmap](roadmaps/ontrak.md) |
