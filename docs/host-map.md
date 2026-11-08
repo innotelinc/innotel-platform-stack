@@ -13,7 +13,51 @@ what a login to that host confirms.
 
 Every one of these addresses is reached as **root over SSH** with the estate
 credential held in the operator store. The credential itself never belongs in this
-repository, in a roadmap, or in a committed `.env`.
+repository, in a roadmap, or in a committed `.env`. The hosts do not all share one
+password, so the checker accepts a per-address override.
+
+## Published names
+
+The public name an app answers on is not always the container's name. Read the
+edge before concluding a product is unreachable:
+
+| App | Public name | Upstream | Notes |
+|---|---|---|---|
+| clipbucket | `tube.innotel.us` | `192.168.1.56:14011` | NPM proxy host 295, wildcard cert, not a `*.monarch` name |
+| iptv | `tv.monarch.innotel.us` | `192.168.1.56:14012` | NPM proxy host 162 |
+| radarr | `movies.innotel.us` | `192.168.1.56:14002` | 301 to the alias |
+| lidarr | `mp3.innotel.us` | `192.168.1.56:14003` | 301 to the alias |
+| whisparr | `xxx.innotel.us` | `192.168.1.56:14004` | 301 to the alias |
+
+All eleven sidecars authenticate against the single Authentik provider
+**`Monarch-media` (PK 37, client `monarch-media`)**. Its redirect list is the
+authority on which callback is legal: in this pass it held 19 URIs and was missing
+`radarr`, `lidarr`, `whisparr`, `clipbucket` and `iptv`, so those five answered
+`400 invalid, or mismatching redirection URI`. Those five names were added (24
+total), so each sidecar's own hostname is legal, and every one now redirects into
+the login flow. The two real public names, `tube.innotel.us` and
+`tv.monarch.innotel.us`, were already registered: the aliases worked before this
+pass, and it was the `*.monarch` names that did not.
+
+## The gateway is behind two doors, and only one is Authentik
+
+`192.168.1.71:20128` is `gateway-sso` (oauth2-proxy) in front of OmniRoute, which
+itself is published on loopback only. The proxy already exempts the routes that
+must answer without a session:
+
+```
+--skip-auth-route=^/v1/
+--skip-auth-route=^/healthz$
+--skip-auth-route=GET=^/api/system/version(\?.*)?$
+--skip-auth-route=^/api/auth/login(\?.*)?$
+--skip-auth-route=^/api/keys(\?.*)?$
+```
+
+So `/api/system/version` never touches Authentik — the `401 AUTH_001` it returns is
+**OmniRoute's own** auth. `/api/health` and `/api/monitoring/health` answer JSON
+without a session, but neither carries a version, so a version probe cannot avoid
+the gateway login. Distro's probe authenticates with `GATEWAY_ADMIN_PASSWORD` and
+now records `gateway version: 3.8.53 — pin none → unpinned`.
 
 ## Re-apply, not rebuild
 
@@ -41,6 +85,23 @@ on `innotel-gateway` leaves `cookie-secret`, `client-id` and the Redis password
 empty, and the containers restart with `missing setting: cookie-secret`. When
 nothing in the config changed, `up -d` leaves the containers running — that is a
 healthy re-apply, not a rebuild.
+
+## Checking this page
+
+`scripts/check-host-map.py` reads the table above and logs in to each address,
+failing when the hostname that answers is not the one written down:
+
+```bash
+scripts/check-host-map.py                       # key-based SSH as root
+scripts/check-host-map.py --ssh 'sshpass -p "$ESTATE_PASSWORD" ssh' \
+  --ssh-for 192.168.1.51='sshpass -p "$I1_PASSWORD" ssh'
+```
+
+Credentials come from the environment or an agent, never from this repository. The
+check verifies reachability, the hostname, and that dockerd answers; it does not
+compare container counts, which move with normal operation. SSH to these hosts
+sheds sessions under load, so a host is retried (`--retries`, default 3) before it
+is reported as a mismatch — a reset is a network event, not a placement error.
 
 ## Placement corrections from this pass
 
