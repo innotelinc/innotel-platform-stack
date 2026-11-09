@@ -1,0 +1,15 @@
+[Unit]
+Description=Republish Coolify domains on deployment events (Cerulean DNS)
+Documentation=file:///root/coolify-cerulean-dns-watch.py
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /root/coolify-cerulean-dns-watch.py
+Restart=always
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

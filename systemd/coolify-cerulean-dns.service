@@ -1,0 +1,11 @@
+[Unit]
+Description=Publish Coolify domains into Cerulean DNS
+Documentation=file:///root/coolify-cerulean-dns.py
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /root/coolify-cerulean-dns.py --apply
+Nice=10
+TimeoutStartSec=180

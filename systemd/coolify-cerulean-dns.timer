@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily reconcile of Coolify's addresses into Cerulean DNS
+
+# Deployments already reconcile on their own (coolify-cerulean-dns-watch.service);
+# this is the drift net for what container events cannot see — a domain edited
+# without a redeploy, a zone re-created under us, a reconcile that failed when
+# nothing else was happening.
+[Timer]
+OnCalendar=*-*-* 03:17:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

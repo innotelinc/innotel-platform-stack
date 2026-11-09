@@ -1,0 +1,13 @@
+[Unit]
+Description=Check that Coolify domains exist in Cerulean DNS
+Documentation=file:///root/coolify-cerulean-dns-health.py
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/innotel/coolify-cerulean-dns.env
+# Non-zero when a domain is missing, so the failed unit is the alert of last resort.
+ExecStart=/usr/bin/python3 /root/coolify-cerulean-dns-health.py
+Nice=10
+TimeoutStartSec=180

@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Coolify domains against Cerulean DNS
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
