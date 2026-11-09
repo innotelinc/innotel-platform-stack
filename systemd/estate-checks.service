@@ -54,6 +54,17 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-relay.py --bas
 # says whether it is working. See docs/mail-sso-directory-2026-11-06.md.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-sso.py --webmail https://mail.innotel.us --base http://192.168.1.15:8080 --prom ${TEXTFILE_DIR}/estate-check-mail-sso.prom
 
+# And that the document the mail server reads at start-up is still there, still current and
+# still servable. Since 2026-11-09 Stalwart fetches it from a copy inside its own container
+# rather than from the identity provider, which is what stopped a single unreachable
+# provider from poisoning the directory for the life of the process. The copy refreshes
+# every fifteen minutes and *keeps its last good bytes* when a refresh fails — so an
+# ageing copy, a dead proxy, an uninstalled DNAT and a permission regression that panics
+# the server are all silent here: the mail server starts, and nobody can sign in. This check
+# reads the container through `incus exec` on the host that runs it, because the container
+# has sshd but not the key the checks hold; the same route `check-alert-delivery.py` uses.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stalwart-oidc-cache.py --prom ${TEXTFILE_DIR}/estate-check-stalwart-oidc-cache.prom
+
 # The one check that is about this repo rather than about a host. The files in `groups/`
 # are generated *and tracked*, so a member repo that moves on leaves the file a rebuild
 # starts from behind — and this repo's CI only compares them when *this* repo changes,

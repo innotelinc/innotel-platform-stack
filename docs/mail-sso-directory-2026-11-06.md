@@ -203,3 +203,7 @@ since and one missing registration:
   `/root/authentik-oauth2-providers-20261109T145648Z.json` (pre-prune) and
   `/root/authentik-oauth2-providers-20261109T145810Z-pre-fix.json`.
 - `check-mail-sso.py` stays green after the change: 0 failures, exit 0.
+
+`check-stalwart-oidc-cache.py` watches all of that from the estate's checks: the two
+unit states, the copy's age, its issuer, whether the `stalwart` user can still read the
+bundle and the proxy user its copy — the four silent ways this ends in "nobody can sign in".
