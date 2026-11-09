@@ -42,6 +42,18 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-auth.py --prom
 # credential and must never carry one.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-relay.py --base http://192.168.1.15:8080 --prom ${TEXTFILE_DIR}/estate-check-mail-relay.prom
 
+# And that the mail server can still *sign a person in*, which is the half none of the
+# checks above asks. On 2026-11-06 the sign-in completed and every request after it 500d:
+# Stalwart's only directory speaks OIDC, it initialises that directory once, and a failed
+# discovery fetch is cached for the process lifetime — so every bearer token answers 500
+# while anonymous requests answer 200, and the page says "Authentication Failed" after a
+# correct Authentik login. The check drives the webmail's sso/start, asks Authentik to
+# accept the exact callback, and requires an impossible bearer token to be *refused with
+# 401*; 500 names the cached-directory failure and its recovery. The timer
+# `stalwart-watchdog.timer` on the mail container performs that recovery; this is what
+# says whether it is working. See docs/mail-sso-directory-2026-11-06.md.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-sso.py --webmail https://mail.innotel.us --base http://192.168.1.15:8080 --prom ${TEXTFILE_DIR}/estate-check-mail-sso.prom
+
 # The one check that is about this repo rather than about a host. The files in `groups/`
 # are generated *and tracked*, so a member repo that moves on leaves the file a rebuild
 # starts from behind — and this repo's CI only compares them when *this* repo changes,
@@ -136,6 +148,15 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-traffic.py --p
 # same day, it ran there by hand and was never brought into the repo or this unit, which
 # is why the dashboard's "Checks reporting" number was one behind the unit's own list.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stuck-processes.py --prom ${TEXTFILE_DIR}/estate-check-stuck-processes.prom
+
+# The two doors carried over the reverse tunnel from 192.168.1.93 (2026-11-03):
+# `deploy.innotel.us` (Coolify, 172.18.0.1:8090) and `fax-staging.lab.innotel.us`
+# (172.18.0.1:8091). Inbound to .93 is proxied by the Windows box at .17, which
+# dropped about half the connects; the VM itself looked healthy throughout. Asks
+# three things that fail separately and silently: the name answers over HTTPS with
+# the panel's own page, the edge's tunnel listener is up, and the certificate has
+# runway left. See check-deploy-door.py.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-deploy-door.py --prom ${TEXTFILE_DIR}/estate-check-deploy-door.prom
 
 # And that the Telno node still holds the records its legacy database has (2026-11-02).
 # The console and the Asterisk-era database are two copies of one fact with no live link:

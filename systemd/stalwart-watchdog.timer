@@ -1,0 +1,13 @@
+[Unit]
+Description=Check Stalwart's Authentik directory every five minutes
+Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/mail-sso-directory-2026-11-06.md
+
+[Timer]
+# Five minutes: long enough that a restart is not thrashing, short enough that the
+# window in which a correct sign-in ends in "Authentication Failed" stays small.
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
