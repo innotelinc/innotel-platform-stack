@@ -1,0 +1,8 @@
+[Unit]
+Description=Recover Stalwart's Authentik directory if it failed to initialise
+Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/mail-sso-directory-2026-11-06.md
+After=stalwart.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/stalwart-directory-watchdog.sh

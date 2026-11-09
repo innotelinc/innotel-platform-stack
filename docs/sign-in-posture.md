@@ -411,6 +411,17 @@ the meta stays empty and the portal authorizes as an anonymous public client
 with PKCE. That is Stalwart's own default and the flow completes on it; it is
 noted here because the empty `<meta>` looks like the fault and is not.
 
+**The directory cache, 2026-11-06.** The console's provider is not the only thing
+that can go quiet here. Stalwart's *only* directory is the Authentik `Oidc` object,
+and it initialises once per process: a failed discovery fetch is cached, after which
+every bearer token answers 500 while anonymous requests still answer 200. The webmail
+sign-in completes and then fails, which reads as "SSO is broken". It was measured
+again on 2026-11-04/06 after the same fault on 2026-11-02, so the recovery is now
+automatic (`stalwart-watchdog.timer` in the `mail` container) and the symptom is
+watched (`check-mail-sso.py` in the estate checks). The whole record, the exact log
+line and the one action that remains a restart are in
+[mail-sso-directory-2026-11-06.md](mail-sso-directory-2026-11-06.md).
+
 ---
 
 ## 3. Third-party apps

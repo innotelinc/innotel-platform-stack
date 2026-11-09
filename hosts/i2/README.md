@@ -118,6 +118,7 @@ journalctl -u proxy-backup.service -n 40
 systemctl start proxy-backup.service      # run it now
 ```
 
+
 The dataset is what bounds it. `/var/lib/incus/backups` is its own ZFS dataset
 (`fast/incus-backups`), separate from the pool root where `proxy` itself lives —
 an exhausted backup dataset cannot starve a container. It had no quota until
@@ -169,3 +170,24 @@ boot without ordering tricks.
 Set the three sysctls back to `1` — never unload the module. Removing this
 directory's files only changes what happens at the next boot; the running host
 keeps the module until it reboots.
+
+## ARP/SR notes
+
+The experiments below are only probes off this host and only my side of whatever
+switching fabric exists between me and `br-lan` endpoints. They are not a proof
+that the fabric does not carry the relevant frames; they are a record of what this
+host saw under specific transmit/receive setups.
+
+Current posture:
+
+- Endpoint scale: the `baseline_some` probe sent `who-has` for four LAN addresses
+  (`192.168.1.65`, `.116`, `.117`, `.118`) in one window. That run produced only
+  background traffic: no prompt match for `.116`, and the only same-source lines
+  closer to `.116` were either `192.168.1.65` self-references or generic other-side
+  reflection, not a direct `.115`→`.116` or `.116`↔`.117` pair.
+- Blind runs: `blind_pair` / `blind_pair2`-style variants toward
+  `192.168.1.116`↔`192.168.1.117` on `br-lan`, with both broadcast-target and
+  own-sender-mac variants. None of them fed back any same-interface prompt match
+  or cross-interface match during the window, so those runs did not surface the
+  ARP traffic we were looking for in that form.
+
