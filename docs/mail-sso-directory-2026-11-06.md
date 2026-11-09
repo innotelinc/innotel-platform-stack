@@ -158,3 +158,48 @@ notices"; it does not remove it. Two changes would:
 
 If bare IMAP password login is wanted again, that is the same 2026-11-02 conclusion: this
 build has no internal directory, so clients stay on app passwords or OAuth.
+
+## The discovery document is now local, 2026-11-09
+
+The second change listed above is in place. This build has no separate
+discovery-URL setting — it appends `/.well-known/openid-configuration` to the
+issuer and rejects a document whose issuer differs — so the document is served
+*as that hostname* from a cache inside the container:
+
+| Piece | What it does |
+| --- | --- |
+| `stalwart-oidc-proxy.service` | answers the well-known path from the last good copy, forwards everything else upstream unchanged; refreshes every 15 minutes and keeps the old copy when a refresh fails |
+| `stalwart-oidc-redirect.service` | installs the DNAT that sends that name to the proxy — exempt by uid so the refresh still reaches the IdP, scoped by destination so nothing else in the container moves |
+| `stalwart.service.d/hosts.conf` | gives Stalwart alone a hosts file that points the name at loopback |
+| `SSL_CERT_FILE` in `stalwart.env` | trusts the local certificate without touching the system trust store |
+
+Measured: with the cache's upstream blocked, `systemctl restart stalwart` comes
+back **active** with zero "Discovery fetch failed" and zero "Directory is
+unavailable because it failed to initialize" lines, and the impossible-bearer
+probe answers **401** again as soon as the upstream returns — without a restart.
+That is the fault this document describes, removed rather than bounded.
+
+Files: `scripts/stalwart-oidc-discovery-proxy.py`,
+`scripts/stalwart-oidc-redirect.sh`,
+`scripts/stalwart-oidc-discovery-setup.sh` (idempotent install; `rollback`
+restores the previous state and restarts Stalwart),
+`systemd/stalwart-oidc-proxy.service`, `systemd/stalwart-oidc-redirect.service`.
+
+## Redirect registrations cleaned up, 2026-11-09
+
+The 46 findings left alone on 2026-11-06 were pruned, plus two that had drifted
+since and one missing registration:
+
+- **48 → 0**: every registered redirect URI now passes (`check-sso-redirects.py`
+  from the edge: **143 pass, 0 warn, 0 fail**, exit 0). The 47 removed
+  registrations were dead names -- retired Capstone/pbx/zeus hosts, three LAN
+  addresses, `fax.pbx.services` -- and each was checked against what the estate's
+  hostnames actually request before removal.
+- **One added**: `classroom.atheniq.courses` asked for
+  `https://classroom.atheniq.courses/oauth2/callback`, which was not registered.
+  That is a live sign-in that could not complete; the URI is now on the
+  `classroom` provider.
+- Backups (they contain client secrets, so they stay on the edge host):
+  `/root/authentik-oauth2-providers-20261109T145648Z.json` (pre-prune) and
+  `/root/authentik-oauth2-providers-20261109T145810Z-pre-fix.json`.
+- `check-mail-sso.py` stays green after the change: 0 failures, exit 0.

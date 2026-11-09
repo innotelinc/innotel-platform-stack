@@ -1,0 +1,14 @@
+# Send Stalwart's discovery fetch to the local cache (2026-11-09).
+#
+# Root, because iptables needs it; separate from the proxy so the proxy itself
+# can run unprivileged. Removing the rules is the rollback path.
+[Unit]
+Description=Redirect Stalwart's OIDC discovery fetch to the local cache
+Before=stalwart.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/stalwart-oidc-redirect.sh install
+ExecStop=/usr/local/bin/stalwart-oidc-redirect.sh remove
+[Install]
+WantedBy=multi-user.target
