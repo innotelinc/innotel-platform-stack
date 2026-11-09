@@ -37,12 +37,16 @@ check the mount first.
 | `blueprint.innotel.us` | `192.168.1.52:8787` | `192.168.1.76:8787` | nothing listening on the old address; the app answers on i4 |
 | `sage.innotel.tech` | **no vhost** | `443` → app, `*.innotel.tech` cert | the 200 was NPM's default server, not Sage — port 443 had no host for the name |
 | `innotel.us` (apex) | `innotel-site:80` | `192.168.1.71:8086` | `innotel-site` resolves only inside Docker; the check and the host cannot use it |
-| `tv.innotel.us` | `sonarr-sso:14002` | `192.168.1.56:14016` | TV clients cannot complete a browser flow, so this door must be Jellyfin's own accounts, not an Authentik gate |
+| `tv.innotel.us` | `sonarr-sso:14002` | `192.168.1.56:14016` | TV clients cannot complete a browser flow, so this door must be Jellyfin's own accounts, not an Authentik gate — now pinned in `scripts/edge-vhost-targets.tsv` |
 | `i3.innotel.us` | live upstream | `127.0.0.1:9` (parked) | i3 is retired in `docs/container-placement.md`; parking is the estate's way of keeping a name without pretending it serves |
-| `pm4.innotel.us` | live upstream | `127.0.0.1:9` (parked) | no host answers on it |
+| `pm4.innotel.us` | live upstream | `127.0.0.1:9` (parked) | no host answers on it |`check-edge-vhost-targets.py` treats `port == 9` as parked, so the two retired names stay declared without counting as dead targets.
 
-`check-edge-vhost-targets.py` treats `port == 9` as parked, so the two retired
-names stay declared without counting as dead targets.
+`tv.innotel.us` is in `scripts/edge-vhost-targets.tsv` too, as of the same day. Its
+target had gone wrong before, and the first repair changed only the vhost file while
+the `proxy_host` row still said `14002` — NPM regenerated the file from the row and
+the SSO gate was back in front of a door that cannot complete a browser flow. Nothing
+in the estate noticed until `check-media-doors.py` failed. With the target pinned, the
+rewrite fails at the edge instead of at somebody's TV.
 
 ## How the edits were made
 
