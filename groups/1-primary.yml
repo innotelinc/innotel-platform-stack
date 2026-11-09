@@ -704,7 +704,21 @@ services:
       - db
 
   magnate:   # from magnate
-    build: ../../1-primary/magnate
+    # The image's build stage caps Next's heap at NODE_HEAP (3072 by default) and
+    # lets a small host switch bundler. Both are decided by the machine that
+    # builds, so they are recorded here rather than left to a remembered flag.
+    # They are not sufficient on this host: i3 has 768 MiB and no swap, and
+    # `next build` there is SIGKILLed even at a 512 MiB heap (measured
+    # 2026-11-02 — exit 137, then a build worker killed outright). The image is
+    # built where there is room and shipped, which is why the args read as they
+    # do: `docker build --build-arg NODE_HEAP=1280 --build-arg
+    # NEXT_BUILD_FLAGS=--webpack`, then `docker save | docker load` on i3 and
+    # `docker compose up -d --no-build magnate`.
+    build:
+      context: ../../1-primary/magnate
+      args:
+        NODE_HEAP: "1280"
+        NEXT_BUILD_FLAGS: "--webpack"
     container_name: magnate
     restart: unless-stopped
     # Memory posture (docs/service-audit.md): billing API is light; cap for
@@ -806,6 +820,8 @@ services:
       GATEWAY_ADMIN_PASSWORD: "${GATEWAY_ADMIN_PASSWORD:-}"
       SAGE_SWEEP_TOKEN: "${SAGE_SWEEP_TOKEN:-}"
       SAGE_SESSION_MINUTES: "${SAGE_SESSION_MINUTES:-15}"
+      SAGE_IAP_MINT_TOKEN: "${SAGE_IAP_MINT_TOKEN:-}"
+      SAGE_IAP_BUNDLE_ID: "${SAGE_IAP_BUNDLE_ID:-us.innotel.sage}"
       # Authentik (Cerulean SSO) — the admin panel's identity provider.
       # These MUST be passed through: lib/oidc.ts reads them from process.env,
       # so a value that only lives in .env (compose substitution) never reaches
