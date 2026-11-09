@@ -15,7 +15,6 @@
 set -u
 ETC=/etc/stalwart-oidc
 UNIT_DIR=/etc/systemd/system
-STAMP=$(date +%Y%m%dT%H%M%SZ)
 ACTION=${1:-install}
 
 probe() {
