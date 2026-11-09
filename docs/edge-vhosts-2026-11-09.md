@@ -55,7 +55,15 @@ edge serving the old config until the next reload.
 
 ## What is still open
 
-- `check-media-doors.py` reports one warning: `tv.innotel.us` has no splash
-  image. The door works; the polish does not exist yet.
 - Sage's vhost is a plain proxy to the app. If it grows its own auth, it needs
   the same decision `tv` got: a browser flow is fine there, a TV client is not.
+
+## Afterwards, the media door closed clean
+
+Once `tv.innotel.us` reached Jellyfin again, `check-media-doors.py` reported
+**0 failures, 0 warnings** — the branding warning it had been raising was never
+the splash. `https://tv.innotel.us/Branding/Splashscreen` had been answering
+`200 image/png` all along (344 514 bytes); the check could not see it because
+the name dialled the Sonarr gate, so the splash URL went to the wrong product.
+A warning about an asset was really a warning about the vhost: worth remembering
+when a "missing" thing lives behind a door that is pointing somewhere else.
