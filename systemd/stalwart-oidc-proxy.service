@@ -1,0 +1,23 @@
+# Serve Stalwart's OIDC discovery document locally (2026-11-09).
+#
+# Installed in the `mail` container. Runs unprivileged; the DNAT that sends
+# Stalwart's fetch here belongs to stalwart-oidc-redirect.service, which needs
+# root and is therefore a separate unit.
+[Unit]
+Description=Local discovery document for Stalwart's OIDC directory
+After=network-online.target
+Wants=network-online.target
+Before=stalwart.service
+
+[Service]
+Type=simple
+User=oidcproxy
+Group=oidcproxy
+ExecStart=/usr/bin/python3 /usr/local/bin/stalwart-oidc-discovery-proxy.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
