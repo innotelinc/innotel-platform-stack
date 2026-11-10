@@ -48,6 +48,25 @@ the SSO gate was back in front of a door that cannot complete a browser flow. No
 in the estate noticed until `check-media-doors.py` failed. With the target pinned, the
 rewrite fails at the edge instead of at somebody's TV.
 
+### Where a pin is checked, and which copy is the authority
+
+Two checks read the declaration, and between them they covered every pair except the one
+that broke:
+
+| compared | check |
+| --- | --- |
+| the declaration ↔ the generated `.conf` | `check-edge-vhost-targets.py` |
+| the NPM row ↔ the generated `.conf` | `check-npm-config-drift.py` |
+| **the declaration ↔ the NPM row** | `check-edge-vhost-pins.py` |
+
+The row is the authority: NPM writes `proxy_host/NN.conf` **from it**, on its own
+schedule. That is why a file-only repair is temporary, and why the third comparison is the
+one that fails first — before the regeneration, not after it. `--apply` writes a drifted
+pin back through the panel's API, so the row, the file and the running nginx move together
+in one write; it then reads the whole row back and fails if any field other than the
+target changed, because `advanced_config`, `certificate_id` and `ssl_forced` are load
+bearing for a door that serves video.
+
 ## How the edits were made
 
 NPM's database and the container's `/data` are authoritative; the host's
