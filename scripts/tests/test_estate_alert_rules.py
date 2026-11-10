@@ -45,6 +45,11 @@ CHECK_SCRIPTS = [
     # timer on 2026-10-29 without branches here, which is exactly the silence this test
     # exists to catch: a textfile that stops arriving would have alerted on nothing.
     "check-edge-vhost-targets",
+    # The pin: a pinned door's target must hold in NPM's *row*, not only in the file NPM
+    # regenerates from it, and a name that must stay a redirect must not gain a proxy
+    # host. It arrived with the rule branch, because a check whose absence is silent is
+    # the failure this list exists to catch.
+    "check-edge-vhost-pins",
     "check-edge-sso-door",
     "check-mount-stacks",
     # The mail server's traffic, which is the only source the mail dashboard has.

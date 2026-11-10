@@ -37,6 +37,22 @@ For every line in the declaration:
      because the row moved and the file has not been rewritten yet), or is missing
      entirely. Reported beside the row so the run says *which copy* to fix.
 
+WHAT IT CHECKS FOR REDIRECTIONS
+-------------------------------
+`scripts/edge-redirect-targets.tsv` names the names the estate promises are redirects and
+where each must go (28 names on 2026-11-09, every one of them a retired name that was
+moved rather than deleted). The same three-way comparison runs against the redirection row
+and `redirection_host/NN.conf`, plus one assertion no file comparison can make:
+
+  4. SERVED AS A PROXY — an enabled proxy host lists that name. A redirect is how the
+     estate retires a name; a proxy host on it means the name is being served again and
+     the redirect it was promised to have stopped happening. Both files would still look
+     right, so only the proxy-host list can answer this.
+
+Redirection drift is reported and never applied: where a name should point is a product
+decision (a customer TLD, not a container address), so a wrong destination is a person's
+call rather than a rewrite.
+
 `--apply` fixes (2) and (3) by PUTting the row with every other field it already had,
 then reading the whole row back and requiring it to be unchanged apart from the target
 and `modified_on` — a field that goes missing on the way through is exactly how a
@@ -84,7 +100,9 @@ CHECK = "edge_vhost_pins"
 DEFAULT_API = "http://192.168.1.71:81"
 DEFAULT_CONFIG_DIR = Path("/data/nginx")
 DEFAULT_PINS = SCRIPT_DIR / "edge-vhost-targets.tsv"
+DEFAULT_REDIRECT_PINS = SCRIPT_DIR / "edge-redirect-targets.tsv"
 PROXY_HOSTS = "/api/nginx/proxy-hosts"
+REDIRECTION_HOSTS = "/api/nginx/redirection-hosts"
 
 #: The fields NPM's update endpoint accepts, in the shape its own UI sends them. The rest
 #: of a row is bookkeeping (`id`, `created_on`, `modified_on`, `owner_user_id`) or the
@@ -114,6 +132,9 @@ UPDATABLE = (
 SERVER_RE = re.compile(r'^\s*set\s+\$server\s+"([^"]*)"\s*;', re.M)
 PORT_RE = re.compile(r"^\s*set\s+\$port\s+(\d+)\s*;", re.M)
 NAME_RE = re.compile(r"^\s*server_name\s+([^;]+);", re.M)
+#: A redirection file's `return 301 https://dest$request_uri` — the destination is the
+#: contract, so it is read without its scheme, path or the `$request_uri` suffix.
+RETURN_RE = re.compile(r"^\s*return\s+3\d\d\s+https?://([^/\s;$]+)", re.M)
 
 
 @dataclass(frozen=True)
@@ -147,6 +168,51 @@ class Host:
     @property
     def target(self) -> str:
         return f"{self.raw.get('forward_host')}:{self.raw.get('forward_port')}"
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.raw.get("enabled", True))
+
+
+@dataclass(frozen=True)
+class RedirectPin:
+    """A name the estate promises is a redirect, and where it must go."""
+
+    domain: str
+    destination: str
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class Redirect:
+    """One redirection host as NPM's API reports it."""
+
+    raw: dict
+
+    @property
+    def id(self) -> int:
+        return int(self.raw["id"])
+
+    @property
+    def domains(self) -> tuple[str, ...]:
+        return tuple(self.raw.get("domain_names") or ())
+
+    @property
+    def destination(self) -> str:
+        return str(self.raw.get("forward_domain_name") or "")
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.raw.get("enabled", True))
+
+
+@dataclass(frozen=True)
+class RedirectFile:
+    """The generated redirection file, reduced to name and destination."""
+
+    path: Path
+    domains: tuple[str, ...]
+    destination: str | None
 
 
 @dataclass(frozen=True)
@@ -205,6 +271,44 @@ def read_vhosts(config_dir: Path) -> list[Vhost]:
         found.append(Vhost(path=path, domains=tuple(dict.fromkeys(domains)),
                            host=server.group(1) if server else None,
                            port=int(port.group(1)) if port else None))
+    return found
+
+
+def load_redirect_pins(path: Path) -> list[RedirectPin]:
+    """Read the redirection declaration. `name<TAB>destination<TAB>note`."""
+    pins = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        if len(fields) < 2:
+            raise ValueError(f"{path}: expected name<TAB>destination, got: {line!r}")
+        domain, destination = fields[0].strip(), fields[1].strip()
+        note = fields[2].strip() if len(fields) > 2 else ""
+        pins.append(RedirectPin(domain=domain, destination=destination, note=note))
+    return pins
+
+
+def read_redirect_files(config_dir: Path) -> list[RedirectFile]:
+    """Every generated redirection file. `.bak` copies beside them are not redirects."""
+    root = config_dir / "redirection_host"
+    if not root.is_dir():
+        return []
+    found = []
+    for path in sorted(root.glob("*.conf")):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        names = NAME_RE.search(text)
+        if not names:
+            continue
+        destination = RETURN_RE.search(text)
+        found.append(RedirectFile(
+            path=path,
+            domains=tuple(dict.fromkeys(names.group(1).split())),
+            destination=destination.group(1) if destination else None))
     return found
 
 
@@ -275,9 +379,60 @@ def compare(pins: list[Pin], hosts: list[Host], vhosts: list[Vhost]) -> list[dic
     return findings
 
 
-def check(pins: list[Pin], hosts: list[Host], vhosts: list[Vhost]) -> tuple[int, list[dict]]:
+def compare_redirects(pins: list[RedirectPin], redirects: list[Redirect],
+                      files: list[RedirectFile], hosts: list[Host]) -> list[dict]:
+    """Where a promised redirect can fail: the row, the file, or a proxy host on it."""
+    by_domain: dict[str, Redirect] = {}
+    for redirect in redirects:
+        for domain in redirect.domains:
+            by_domain.setdefault(domain, redirect)
+    files_by_domain: dict[str, RedirectFile] = {}
+    for redirect_file in files:
+        for domain in redirect_file.domains:
+            files_by_domain.setdefault(domain, redirect_file)
+    # An enabled proxy host on a pinned redirect name is the failure this file exists for:
+    # the name is being served again rather than moved. A disabled or deleted host on it is
+    # history, and says nothing about what nginx is serving.
+    proxied = {domain for host in hosts if host.enabled for domain in host.domains}
+
+    findings: list[dict] = []
+    for pin in pins:
+        row = by_domain.get(pin.domain)
+        if row is None:
+            findings.append({"check": "no_redirect", "domain": pin.domain,
+                             "pin": pin.destination})
+        else:
+            if not row.enabled:
+                findings.append({"check": "redirect_disabled", "domain": pin.domain,
+                                 "row": row.id, "pin": pin.destination})
+            elif row.destination != pin.destination:
+                findings.append({"check": "redirect_drift", "domain": pin.domain,
+                                 "row": row.id, "pin": pin.destination,
+                                 "row_destination": row.destination})
+            live = files_by_domain.get(pin.domain)
+            if live is None:
+                findings.append({"check": "redirect_file_lag", "domain": pin.domain,
+                                 "row": row.id, "pin": pin.destination,
+                                 "file_destination": None, "file": None})
+            elif live.destination != pin.destination:
+                findings.append({"check": "redirect_file_lag", "domain": pin.domain,
+                                 "row": row.id, "pin": pin.destination,
+                                 "file_destination": live.destination,
+                                 "file": live.path.name})
+        if pin.domain in proxied:
+            findings.append({"check": "served_as_proxy", "domain": pin.domain,
+                             "pin": pin.destination})
+    return findings
+
+
+def check(pins: list[Pin], hosts: list[Host], vhosts: list[Vhost],
+          redirect_pins: list[RedirectPin] | tuple = (),
+          redirects: list[Redirect] | tuple = (),
+          redirect_files: list[RedirectFile] | tuple = ()) -> tuple[int, list[dict]]:
     """Returns (exit code, findings) so a test can read the verdict."""
     findings = compare(pins, hosts, vhosts)
+    findings += compare_redirects(list(redirect_pins), list(redirects),
+                                  list(redirect_files), hosts)
     return (1 if findings else 0), findings
 
 
@@ -302,6 +457,32 @@ def to_audit(findings: list[dict]) -> "Audit":
                 code="file_lag", level="fail",
                 message=(f"{f['domain']}: {f['file'] or 'the vhost'} serves {got}, the "
                          f"estate pins {f['pin']}")))
+        elif f["check"] == "no_redirect":
+            audit.findings.append(Finding(
+                code="no_redirect", level="fail",
+                message=(f"{f['domain']} is pinned as a redirect to {f['pin']}, but NPM "
+                         "has no redirection host for it")))
+        elif f["check"] == "redirect_disabled":
+            audit.findings.append(Finding(
+                code="redirect_disabled", level="fail",
+                message=(f"{f['domain']} is pinned as a redirect to {f['pin']}, but its "
+                         f"redirection host {f['row']} is disabled")))
+        elif f["check"] == "redirect_drift":
+            audit.findings.append(Finding(
+                code="redirect_drift", level="fail",
+                message=(f"{f['domain']} redirects to {f['row_destination']}, the estate "
+                         f"pins {f['pin']} (host {f['row']})")))
+        elif f["check"] == "redirect_file_lag":
+            got = f["file_destination"] or "no file"
+            audit.findings.append(Finding(
+                code="redirect_file_lag", level="fail",
+                message=(f"{f['domain']}: {f['file'] or 'the redirection'} answers with "
+                         f"{got}, the estate pins {f['pin']}")))
+        elif f["check"] == "served_as_proxy":
+            audit.findings.append(Finding(
+                code="served_as_proxy", level="fail",
+                message=(f"{f['domain']} is pinned as a redirect to {f['pin']}, but an "
+                         "enabled proxy host serves it — the name is back, not moved")))
     return audit
 
 
@@ -313,16 +494,40 @@ def report(findings: list[dict]) -> str:
         elif f["check"] == "row_drift":
             lines.append(f"{'ROW-DRIFT':9} {f['domain']:32} pin {f['pin']:22} "
                          f"row {f['row_target']} (host {f['row']})")
-        else:
+        elif f["check"] == "file_lag":
             got = f["file_target"] or "no file"
             lines.append(f"{'FILE-LAG':9} {f['domain']:32} pin {f['pin']:22} "
                          f"file {got}")
+        elif f["check"] == "no_redirect":
+            lines.append(f"{'NO-REDIR':9} {f['domain']:32} pin {f['pin']:22} "
+                         "no NPM redirection")
+        elif f["check"] == "redirect_disabled":
+            lines.append(f"{'REDIR-OFF':9} {f['domain']:32} pin {f['pin']:22} "
+                         f"row {f['row']} is disabled")
+        elif f["check"] == "redirect_drift":
+            lines.append(f"{'REDIR-DRIFT':11} {f['domain']:32} pin {f['pin']:22} "
+                         f"row {f['row_destination']} (host {f['row']})")
+        elif f["check"] == "redirect_file_lag":
+            got = f["file_destination"] or "no file"
+            lines.append(f"{'REDIR-LAG':9} {f['domain']:32} pin {f['pin']:22} "
+                         f"file {got}")
+        else:
+            lines.append(f"{'PROXIED':9} {f['domain']:32} pin {f['pin']:22} "
+                         "served by an enabled proxy host")
     lines.append("")
     drifted = sum(1 for f in findings if f["check"] == "row_drift")
     lagged = sum(1 for f in findings if f["check"] == "file_lag")
     orphan = sum(1 for f in findings if f["check"] == "no_host")
+    redirects = sum(1 for f in findings
+                    if f["check"] in ("redirect_drift", "redirect_disabled"))
+    redirect_lag = sum(1 for f in findings if f["check"] == "redirect_file_lag")
+    redirect_orphan = sum(1 for f in findings if f["check"] == "no_redirect")
+    proxied = sum(1 for f in findings if f["check"] == "served_as_proxy")
     lines.append(f"{len(findings)} finding(s): {drifted} row drift, {lagged} file lag, "
-                 f"{orphan} pinned name NPM does not have")
+                 f"{orphan} pinned name NPM does not have, {redirects} redirect drift, "
+                 f"{redirect_lag} redirect file lag, "
+                 f"{redirect_orphan} pinned redirect NPM does not have, "
+                 f"{proxied} pinned redirect served as a proxy")
     return "\n".join(lines)
 
 
@@ -371,6 +576,16 @@ def fetch_hosts(api: str, token: str) -> list[Host]:
     if not isinstance(hosts, list):
         raise Unreadable("NPM returned no proxy host list")
     return [Host(raw=host) for host in hosts]
+
+
+def fetch_redirects(api: str, token: str) -> list[Redirect]:
+    try:
+        rows = _call(api.rstrip("/") + REDIRECTION_HOSTS, token=token)
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        raise Unreadable(f"NPM did not list redirection hosts: {error}") from error
+    if not isinstance(rows, list):
+        raise Unreadable("NPM returned no redirection host list")
+    return [Redirect(raw=row) for row in rows]
 
 
 def put_host(api: str, token: str, host_id: int, body: dict) -> dict:
@@ -423,6 +638,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="NPM's nginx directory (holds proxy_host)")
     parser.add_argument("--pins", type=Path, default=DEFAULT_PINS,
                         help="the declaration to hold both copies to")
+    parser.add_argument("--redirect-pins", type=Path, default=DEFAULT_REDIRECT_PINS,
+                        help="names that must stay redirects ('' to skip)")
     parser.add_argument("--apply", action="store_true",
                         help="write each drifted pin through NPM's API")
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here")
@@ -443,16 +660,31 @@ def main(argv: list[str] | None = None) -> int:
             write_prom(args.prom, CHECK, None, False)
         return 2
 
+    redirect_pins: list[RedirectPin] = []
+    if str(args.redirect_pins) not in ("", "none"):
+        if not args.redirect_pins.is_file():
+            print(f"no redirection declaration at {args.redirect_pins} — a missing "
+                  "declaration is not an empty one", file=sys.stderr)
+            if args.prom and HAVE_TELEMETRY:
+                write_prom(args.prom, CHECK, None, False)
+            return 2
+        redirect_pins = load_redirect_pins(args.redirect_pins)
+
     try:
         token = token_for(args.api, os.environ.get("NPM_ADMIN_EMAIL", ""),
                           os.environ.get("NPM_ADMIN_PASSWORD", ""))
         hosts = fetch_hosts(args.api, token)
-        code, findings = check(pins, hosts, vhosts)
+        redirects = fetch_redirects(args.api, token) if redirect_pins else []
+        code, findings = check(pins, hosts, vhosts, redirect_pins, redirects,
+                               read_redirect_files(args.config_dir))
         problems = (apply_pins(args.api, token, pins, findings, args.config_dir)
                     if args.apply else [])
         if args.apply and findings:
             hosts = fetch_hosts(args.api, token)
-            code, findings = check(pins, hosts, read_vhosts(args.config_dir))
+            redirects = fetch_redirects(args.api, token) if redirect_pins else []
+            code, findings = check(pins, hosts, read_vhosts(args.config_dir),
+                                   redirect_pins, redirects,
+                                   read_redirect_files(args.config_dir))
     except Unreadable as error:
         print(f"check-edge-vhost-pins: {error}", file=sys.stderr)
         if args.prom and HAVE_TELEMETRY:

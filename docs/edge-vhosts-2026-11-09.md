@@ -85,6 +85,50 @@ is history, and the drift check's silence about them is correct. Twenty-one othe
 beside the doors are `.bak` copies from earlier hand repairs; they are not included (a
 `.conf.bak` is not a `.conf`) and are not doors.
 
+### The names that must stay redirects
+
+Twenty-eight names on 2026-11-09 are redirects rather than doors — the retired hostnames
+(`lidarr.monarch`, `radarr.monarch`, the `atheniq.online`/`innotel.site`/`innovative.tel`
+TLD family, and the old `www.` forms) and each points at a customer-facing destination, not
+at a container. They are pinned in `scripts/edge-redirect-targets.tsv`, and the pin check
+compares the same three copies as it does for a door: the redirection row, the generated
+`redirection_host/NN.conf`, and the destination each answers with.
+
+The fourth comparison is the one the file exists for. A redirect is how this estate retires
+a name; an **enabled proxy host** listing a pinned redirect name means the name is being
+served again rather than moved — and every file involved would still look right, because
+the redirection file and the proxy file both exist and both match their rows. Nothing else
+in the estate asks the proxy-host list about a name it expects to be retired, so the check
+reports `PROXIED` for it. A **disabled** proxy host on the name is history (that is how the
+name was served before it was redirected) and is not a finding.
+
+Redirection drift is reported and never applied: a destination is a product decision
+(`pbx.it.com`, `atheniq.institute`), so a wrong one is a person's call rather than a
+rewrite of a row. Where a name should point is not derivable from the estate.
+
+### What makes the pin page somebody
+
+A check that only reddens a panel is a check somebody has to be looking at. The pin check
+publishes under `edge_vhost_pins`, and `EstateCheckAbsent` in
+`extensions/monitoring/prometheus/rules/estate-checks.yml` now names it — one branch per
+check is what makes a check that never reports loud, rather than the exact silence of
+2026-10-01. `EstateCheckFailing` then fires `critical` on any finding (5 m), so a drifted
+pin, a redirect that moved, or a retired name that came back as a door reaches the mail
+rather than a dashboard nobody has open. `EstateCheckCouldNotRun` covers the other shape:
+exit 2 when the panel or the declaration cannot be read is not a pass. Its branches are
+mirrored in the promtool cases beside the rules, so adding a check without a branch fails
+CI rather than going quiet.
+
+### The `.bak` copies, archived
+
+The 21 `.conf.bak*` files beside the doors were moved out of nginx's data directory to
+`/root/edge-vhost-bak-2026-11-09/` with a `MANIFEST.sha256`, rather than deleted: they are
+earlier hand repairs, the row and the file are the authority, and a copy nobody serves is
+worth keeping only where it cannot be mistaken for a door. The five `.marker-reload-*`
+files were left alone — those are NPM's own reload markers, and deleting another process's
+markers is not cleanup. Nothing in the estate reads either set; the estate checks and
+`nginx -t` were re-run afterwards and stayed green.
+
 ## How the edits were made
 
 NPM's database and the container's `/data` are authoritative; the host's

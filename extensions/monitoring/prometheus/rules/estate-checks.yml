@@ -14,7 +14,9 @@
 # administer the directory — and `check-sso-callbacks.py` (`sso_callback`), the one
 # about a sign-in gate's answer fitting the proxy in front of it — and the edge's own
 # two, `check-edge-vhost-targets.py` (`edge_vhost_targets`) and `check-edge-sso-door.py`
-# (`edge_sso_door`), and `check-mount-stacks.py` (`mount_stack`) — run by
+# (`edge_sso_door`), and the one that holds a pinned door to NPM's own row rather than to
+# the file NPM regenerates from it, `check-edge-vhost-pins.py` (`edge_vhost_pins`), and
+# `check-mount-stacks.py` (`mount_stack`) — run by
 # `systemd/estate-checks.{service,timer}` on the Cerulean edge, which writes each into
 # node-exporter's textfile directory.
 #
@@ -58,6 +60,13 @@
 # vhost files it generated. Deleting a host leaves the file serving (2026-10-30, 25 of
 # them onto dead ports) and editing one does not rewrite it (a parked name kept its old
 # port in the file), and neither is visible in a config diff or as a dead target.
+# `edge_vhost_pins` is the one about *which copy is the authority*. NPM rewrites
+# `proxy_host/NN.conf` from its row on its own schedule, so a hand-repaired file is right
+# only until the next regeneration — 2026-11-09, the TV door, twice in one afternoon, the
+# second time because only the file had been repaired. It holds a pinned door to the row
+# as well as to the file, and it holds the names that must stay redirects: a name that
+# gains an enabled proxy host is a retired name being served again rather than moved, and
+# in that case *both* generated files still look correct.
 # `mount_stack` is the one about a number rather than a verdict: 32 769 NFS mount entries
 # accumulated under `/srv/onyx-pool` on 2026-10-29, each mounted on top of a stale handle
 # after ganesha restarted, until every `df` on i3 blocked and `admin.distro.innotel.us`
@@ -107,6 +116,7 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="sso_callback"}), "check", "sso_callback", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="dmarc_alignment"}), "check", "dmarc_alignment", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="edge_vhost_targets"}), "check", "edge_vhost_targets", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="edge_vhost_pins"}), "check", "edge_vhost_pins", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="edge_sso_door"}), "check", "edge_sso_door", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="mount_stack"}), "check", "mount_stack", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="mail_traffic"}), "check", "mail_traffic", "check", ".*")
