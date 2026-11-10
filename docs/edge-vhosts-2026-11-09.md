@@ -119,6 +119,13 @@ exit 2 when the panel or the declaration cannot be read is not a pass. Its branc
 mirrored in the promtool cases beside the rules, so adding a check without a branch fails
 CI rather than going quiet.
 
+That last sentence was not true of four checks until this pass: `deploy_door`, `mail_sso`,
+`stalwart_oidc_cache` and `telno_legacy_import` published a series with no `absent()`
+branch, which is the same silence one check at a time — the textfile stops arriving and no
+rule can name what went missing. They have their branches now, and the test that compares
+the rule's list against the checks' own `CHECK` constants covers all 23 that publish, so
+the next one cannot slip through.
+
 ### The `.bak` copies, archived
 
 The 21 `.conf.bak*` files beside the doors were moved out of nginx's data directory to

@@ -61,6 +61,14 @@ tests:
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="stuck_processes"}'
         values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="deploy_door"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="mail_sso"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="stalwart_oidc_cache"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="telno_legacy_import"}'
+        values: '0x60'
     alert_rule_test:
       - eval_time: 35m
         alertname: EstateCheckAbsent
@@ -107,6 +115,14 @@ tests:
       - series: 'innotel_estate_check_last_run_timestamp{check="npm_config_drift"}'
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="stuck_processes"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="deploy_door"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="mail_sso"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="stalwart_oidc_cache"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="telno_legacy_import"}'
         values: '0x60'
     alert_rule_test:
       - eval_time: 35m
@@ -205,3 +221,19 @@ tests:
             exp_annotations:
               summary: 'The stuck_processes check has never reported'
               description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `stuck_processes` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: deploy_door}
+            exp_annotations:
+              summary: 'The deploy_door check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `deploy_door` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: mail_sso}
+            exp_annotations:
+              summary: 'The mail_sso check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `mail_sso` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: stalwart_oidc_cache}
+            exp_annotations:
+              summary: 'The stalwart_oidc_cache check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `stalwart_oidc_cache` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: telno_legacy_import}
+            exp_annotations:
+              summary: 'The telno_legacy_import check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `telno_legacy_import` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'

@@ -62,6 +62,12 @@ CHECK_SCRIPTS = [
     # /opt/innotel/estate-checks and published nothing, so it was the same silence this
     # list exists to catch — a check that exists is not a check that runs.
     "check-stuck-processes",
+    # Publishing since before this list was complete, which is why their absence was
+    # the silence the rule exists for: a textfile that stops arriving alerts on nothing.
+    "check-deploy-door",
+    "check-mail-sso",
+    "check-stalwart-oidc-cache",
+    "check-telno-legacy-import",
 ]
 
 
