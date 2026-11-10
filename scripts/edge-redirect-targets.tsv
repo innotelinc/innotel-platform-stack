@@ -1,0 +1,40 @@
+# Names the estate promises are *redirects*, and where each one must go.
+# `check-edge-vhost-pins.py --redirect-pins` holds three copies to this file: the
+# redirection row, the generated redirection file, and — the reason the file exists — the
+# proxy-host list, because a name that quietly gains a proxy host is a retired name being
+# served again rather than moved. The rows and files were read on 2026-11-09; every pair
+# agreed, so this is that baseline rather than a wish list.
+#
+# Only names that are live redirections belong here. Retired infrastructure names are not
+# redirects — they are parked on port 9 or absent — and pinning one as a redirect would
+# forbid the estate from ever parking it.
+#
+# name<TAB>destination<TAB>note
+apps.lms.innotel.us	apps.atheniq.courses	301 redirect, moved off a retired name
+atheniq.innotel.us	atheniq.institute	301 redirect, moved off a retired name
+atheniq.online	innotel.us	301 redirect, moved off a retired name
+bank.innotel.us	innotel.us	301 redirect, moved off a retired name
+capstone.innotel.us	pbx.it.com	301 redirect, moved off a retired name
+cola.innotel.us	innotel.us	301 redirect, moved off a retired name
+coturn.zeus.innotel.us	innotel.us	301 redirect, moved off a retired name
+credit.innotel.us	innotel.us	301 redirect, moved off a retired name
+envoy.innotel.us	innotel.us	301 redirect, moved off a retired name
+fax.zeus.innotel.us	fax.pbx.technology	301 redirect, moved off a retired name
+innotel.site	innotel.us	301 redirect, moved off a retired name
+innovative.tel	innotel.us	301 redirect, moved off a retired name
+learn.innotel.us	atheniq.courses	301 redirect, moved off a retired name
+lidarr.monarch.innotel.us	mp3.innotel.us	301 redirect, moved off a retired name
+media.magnate.innotel.us	media.innotel.us	301 redirect, moved off a retired name
+ontrak.innotel.us	ontrak.technology	301 redirect, moved off a retired name
+pbx.technology	innotel.us	301 redirect, moved off a retired name
+radarr.monarch.innotel.us	movies.innotel.us	301 redirect, moved off a retired name
+studio.innotel.us	studio.atheniq.courses	301 redirect, moved off a retired name
+whisparr.monarch.innotel.us	xxx.innotel.us	301 redirect, moved off a retired name
+www.atheniq.innotel.us	atheniq.institute	301 redirect, moved off a retired name
+www.atheniq.online	innotel.us	301 redirect, moved off a retired name
+www.capstone.innotel.us	capstone.innotel.us	301 redirect, moved off a retired name
+www.innotel.site	innotel.us	301 redirect, moved off a retired name
+www.innovative.tel	innotel.us	301 redirect, moved off a retired name
+www.monarch.innotel.us	monarch.innotel.us	301 redirect, moved off a retired name
+www.pbx.technology	innotel.us	301 redirect, moved off a retired name
+www.zeus.innotel.us	innotel.us	301 redirect, moved off a retired name

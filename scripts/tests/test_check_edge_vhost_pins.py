@@ -254,6 +254,152 @@ class DeclarationTest(unittest.TestCase):
                 pins.load_pins(bad)
 
 
+REDIRECT_FILE = """server {{
+  listen 80;
+  server_name {domains};
+
+  location / {{
+    return 301 https://{destination}$request_uri;
+  }}
+}}
+"""
+
+
+def redirect_row(rid: int, names, destination: str, enabled: bool = True) -> dict:
+    """A redirection host in the shape NPM's API returns."""
+    return {
+        "id": rid,
+        "domain_names": list(names),
+        "forward_scheme": "https",
+        "forward_domain_name": destination,
+        "forward_http_code": 301,
+        "preserve_path": 1,
+        "certificate_id": 47,
+        "ssl_forced": 1,
+        "block_exploits": 0,
+        "advanced_config": "",
+        "enabled": enabled,
+        "http2_support": 1,
+        "hsts_enabled": 0,
+        "hsts_subdomains": 0,
+        "meta": {"nginx_online": True, "nginx_err": None},
+    }
+
+
+class RedirectEstate:
+    """A throwaway nginx tree for the redirection half."""
+
+    def __init__(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.root = Path(self._dir.name)
+        (self.root / "proxy_host").mkdir()
+        (self.root / "redirection_host").mkdir()
+        self.pins = [pins.RedirectPin("atheniq.innotel.us", "atheniq.institute")]
+
+    def file(self, names, destination: str, name: str = "17.conf"):
+        (self.root / "redirection_host" / name).write_text(
+            REDIRECT_FILE.format(domains=" ".join(names), destination=destination))
+
+    def check(self, rows: list[dict], hosts: list[dict] | None = None):
+        return pins.check([], [pins.Host(raw=h) for h in (hosts or [])], [],
+                          self.pins, [pins.Redirect(raw=r) for r in rows],
+                          pins.read_redirect_files(self.root))
+
+    def close(self):
+        self._dir.cleanup()
+
+
+class RedirectTest(unittest.TestCase):
+    """A redirect is a promise about a name, and a proxy host on it breaks the promise."""
+
+    def setUp(self):
+        self.e = RedirectEstate()
+
+    def tearDown(self):
+        self.e.close()
+
+    def test_a_redirect_that_holds_in_both_copies_and_is_not_proxied_is_clean(self):
+        self.e.file(["atheniq.innotel.us", "www.atheniq.innotel.us"], "atheniq.institute")
+        code, findings = self.e.check([
+            redirect_row(17, ["atheniq.innotel.us", "www.atheniq.innotel.us"],
+                         "atheniq.institute")])
+        self.assertEqual((code, findings), (0, []))
+
+    def test_a_row_that_points_somewhere_else_is_drift(self):
+        self.e.file(["atheniq.innotel.us"], "atheniq.institute")
+        code, findings = self.e.check([
+            redirect_row(17, ["atheniq.innotel.us"], "innotel.us")])
+        self.assertEqual(code, 1)
+        self.assertEqual([f["check"] for f in findings], ["redirect_drift"])
+        self.assertEqual(findings[0]["row_destination"], "innotel.us")
+
+    def test_a_file_that_answers_with_another_destination_is_lag(self):
+        self.e.file(["atheniq.innotel.us"], "innotel.us")
+        code, findings = self.e.check([
+            redirect_row(17, ["atheniq.innotel.us"], "atheniq.institute")])
+        self.assertEqual(code, 1)
+        self.assertEqual([f["check"] for f in findings], ["redirect_file_lag"])
+        self.assertEqual(findings[0]["file_destination"], "innotel.us")
+
+    def test_a_name_that_gains_an_enabled_proxy_host_is_served_again(self):
+        # The failure the file exists for: the redirect still looks right in both copies,
+        # and the name is also being served as a door. Nothing else in the estate asks
+        # the proxy-host list about a name it expects to be retired.
+        self.e.file(["atheniq.innotel.us"], "atheniq.institute")
+        code, findings = self.e.check(
+            [redirect_row(17, ["atheniq.innotel.us"], "atheniq.institute")],
+            hosts=[row(99, "atheniq.innotel.us", "192.168.1.60", 2080)])
+        self.assertEqual(code, 1)
+        self.assertEqual([f["check"] for f in findings], ["served_as_proxy"])
+
+    def test_a_disabled_proxy_host_on_the_name_is_history_not_a_failure(self):
+        # A retired host row is how the name was served *before* it was redirected; only
+        # an enabled one says nginx is serving it now.
+        self.e.file(["atheniq.innotel.us"], "atheniq.institute")
+        code, findings = self.e.check(
+            [redirect_row(17, ["atheniq.innotel.us"], "atheniq.institute")],
+            hosts=[row(98, "atheniq.innotel.us", "192.168.1.60", 2080, enabled=False)])
+        self.assertEqual((code, findings), (0, []))
+
+    def test_a_disabled_redirection_row_is_not_a_redirect(self):
+        self.e.file(["atheniq.innotel.us"], "atheniq.institute")
+        code, findings = self.e.check([
+            redirect_row(17, ["atheniq.innotel.us"], "atheniq.institute", enabled=False)])
+        self.assertEqual(code, 1)
+        self.assertEqual([f["check"] for f in findings], ["redirect_disabled"])
+
+    def test_a_pinned_redirect_npm_has_no_row_for_is_not_a_pass(self):
+        self.e.file(["atheniq.innotel.us"], "atheniq.institute")
+        code, findings = self.e.check([])
+        self.assertEqual(code, 1)
+        self.assertEqual([f["check"] for f in findings], ["no_redirect"])
+
+    def test_a_missing_redirection_file_is_lag_with_no_destination(self):
+        code, findings = self.e.check([
+            redirect_row(17, ["atheniq.innotel.us"], "atheniq.institute")])
+        self.assertEqual(code, 1)
+        self.assertEqual(findings[0]["check"], "redirect_file_lag")
+        self.assertIsNone(findings[0]["file_destination"])
+
+    def test_the_redirect_declaration_parses_and_pins_both_names_on_a_row(self):
+        loaded = pins.load_redirect_pins(SCRIPTS / "edge-redirect-targets.tsv")
+        self.assertGreaterEqual(len(loaded), 20)
+        by_name = {pin.domain: pin for pin in loaded}
+        # A row with two names is two promises; both are pinned.
+        self.assertEqual(by_name["atheniq.innotel.us"].destination, "atheniq.institute")
+        self.assertEqual(by_name["www.atheniq.innotel.us"].destination, "atheniq.institute")
+        for pin in loaded:
+            self.assertNotIn("/", pin.destination, f"{pin.domain}: destination is a name")
+            self.assertNotIn(":", pin.destination, f"{pin.domain}: destination is a name")
+
+    def test_a_redirect_line_without_a_destination_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "redirects.tsv"
+            bad.write_text("atheniq.innotel.us\n")
+            with self.assertRaises(ValueError):
+                pins.load_redirect_pins(bad)
+
+
 class CredentialTest(unittest.TestCase):
     def test_no_credential_is_unreadable_not_an_empty_estate(self):
         with self.assertRaises(pins.Unreadable):
@@ -285,6 +431,23 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(len(audit.failures), 1)
         self.assertEqual(audit.failures[0].code, "row_drift")
         self.assertIn("next regeneration", audit.failures[0].message)
+
+    def test_the_summary_counts_a_redirect_that_came_back_as_a_proxy(self):
+        text = pins.report([
+            {"check": "served_as_proxy", "domain": "atheniq.innotel.us",
+             "pin": "atheniq.institute"},
+            {"check": "redirect_drift", "domain": "bank.innotel.us", "row": 29,
+             "pin": "innotel.us", "row_destination": "elsewhere.example"},
+        ])
+        self.assertIn("PROXIED", text)
+        self.assertIn("1 redirect drift", text)
+        self.assertIn("1 pinned redirect served as a proxy", text)
+
+    def test_the_audit_says_why_a_proxied_name_matters(self):
+        audit = pins.to_audit([{"check": "served_as_proxy", "domain": "atheniq.innotel.us",
+                                "pin": "atheniq.institute"}])
+        self.assertEqual(len(audit.failures), 1)
+        self.assertIn("back, not moved", audit.failures[0].message)
 
 
 if __name__ == "__main__":
