@@ -450,5 +450,143 @@ class ReportTest(unittest.TestCase):
         self.assertIn("back, not moved", audit.failures[0].message)
 
 
+class DestinationTest(unittest.TestCase):
+    """A redirect to a name nobody can reach is a promise to an error page."""
+
+    def setUp(self):
+        self.pins = [pins.RedirectPin("atheniq.innotel.us", "atheniq.institute"),
+                     pins.RedirectPin("www.atheniq.innotel.us", "atheniq.institute"),
+                     pins.RedirectPin("bank.innotel.us", "innotel.us")]
+
+    def _probe(self, table, calls=None):
+        def probe(name):
+            if calls is not None:
+                calls.append(name)
+            if name == pins.CONTROL_DESTINATION:
+                return pins.Destination(name=name, addresses=("73.68.203.71",), reachable=True)
+            return table.get(name, pins.Destination(name=name, addresses=("203.0.113.9",),
+                                                    reachable=True))
+        return probe
+
+    def test_a_destination_with_no_address_is_dead(self):
+        findings, unchecked = pins.check_destinations(self.pins, probe=self._probe({
+            "atheniq.institute": pins.Destination("atheniq.institute", error="no address")}))
+        self.assertIsNone(unchecked)
+        self.assertEqual([f["check"] for f in findings], ["redirect_dead"])
+        # One destination is one finding, however many names point at it.
+        self.assertEqual(findings[0]["domains"],
+                         ["atheniq.innotel.us", "www.atheniq.innotel.us"])
+
+    def test_an_address_that_accepts_nothing_is_unreachable(self):
+        # A destination that is not the control: a closed port on the control itself would
+        # be "this host has no view", which is the other test.
+        closed = [pins.RedirectPin("bank.innotel.us", "closed.example")]
+        findings, unchecked = pins.check_destinations(closed, probe=self._probe({
+            "closed.example": pins.Destination("closed.example",
+                                               addresses=("203.0.113.9",),
+                                               error="[Errno 111] Connection refused")}))
+        self.assertIsNone(unchecked)
+        self.assertEqual([f["check"] for f in findings], ["redirect_unreachable"])
+        self.assertEqual(findings[0]["addresses"], ["203.0.113.9"])
+
+    def test_a_control_that_does_not_answer_leaves_the_facet_unchecked(self):
+        # The edge lost the internet, not 28 destinations. Reporting 28 dead names would
+        # teach people to ignore the one alert that matters.
+        def blind(name):
+            return pins.Destination(name=name, error="no address")
+
+        findings, unchecked = pins.check_destinations(self.pins, probe=blind)
+        self.assertEqual(findings, [])
+        self.assertIn(pins.CONTROL_DESTINATION, unchecked or "")
+        audit = pins.to_audit([], unchecked)
+        self.assertEqual(audit.failures, [])
+        self.assertEqual(len(audit.warnings), 1)
+        self.assertEqual(audit.warnings[0].code, "destination_unchecked")
+
+    def test_each_destination_is_probed_once(self):
+        calls = []
+        findings, _ = pins.check_destinations(self.pins, probe=self._probe({}, calls))
+        self.assertEqual(findings, [])
+        self.assertEqual(sorted(calls).count("atheniq.institute"), 1)
+
+    def test_a_dead_destination_is_a_failure_naming_every_name_that_points_at_it(self):
+        audit = pins.to_audit([{"check": "redirect_dead",
+                                "destination": "atheniq.institute",
+                                "domains": ["atheniq.innotel.us"],
+                                "addresses": [], "detail": "no address"}])
+        self.assertEqual(len(audit.failures), 1)
+        self.assertIn("lands nowhere", audit.failures[0].message)
+        self.assertIn("does not resolve", audit.failures[0].message)
+
+    def test_the_report_separates_dead_from_silent(self):
+        text = pins.report([
+            {"check": "redirect_dead", "destination": "gone.example",
+             "domains": ["a.innotel.us"], "addresses": [], "detail": "no address"},
+            {"check": "redirect_unreachable", "destination": "closed.example",
+             "domains": ["b.innotel.us"], "addresses": ["203.0.113.9"],
+             "detail": "[Errno 111] Connection refused"},
+        ])
+        self.assertIn("REDIR-DEAD", text)
+        self.assertIn("REDIR-NO-ANSWER", text)
+        self.assertIn("1 destination with no address", text)
+        self.assertIn("1 destination not answering", text)
+
+
+class RedirectApplyTest(unittest.TestCase):
+    """The destination write, held to the same rule as a door's target: lose nothing."""
+
+    def setUp(self):
+        self.pin = pins.RedirectPin("www.innovative.tel", "innotel.us")
+        self.before = redirect_row(12, ["www.innovative.tel"], "innotel.site")
+        self.calls = []
+        self._fetch, self._put = pins.fetch_redirects, pins.put_redirect
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        (self.dir / "redirection_host").mkdir()
+
+    def tearDown(self):
+        pins.fetch_redirects, pins.put_redirect = self._fetch, self._put
+        self.tmp.cleanup()
+
+    def _panel(self, reply):
+        pins.fetch_redirects = lambda api, token: [pins.Redirect(raw=self.before)]
+        pins.put_redirect = lambda api, token, rid, body: self.calls.append(body) or reply
+
+    def _drift(self, domain="www.innovative.tel"):
+        return {"check": "redirect_drift", "domain": domain, "row": 12,
+                "pin": "innotel.us", "row_destination": "innotel.site"}
+
+    def _apply(self, findings):
+        return pins.apply_redirects("http://panel", "token", [self.pin], findings,
+                                    config_dir=self.dir, sleep=lambda _: None, attempts=1)
+
+    def test_the_destination_travels_with_every_field_the_redirect_had(self):
+        self._panel(redirect_row(12, ["www.innovative.tel"], "innotel.us"))
+        self.assertEqual(self._apply([self._drift()]), [])
+        self.assertEqual(self.calls[0]["forward_domain_name"], "innotel.us")
+        self.assertEqual(self.calls[0]["forward_http_code"], 301)
+        self.assertEqual(self.calls[0]["certificate_id"], 47)
+        self.assertNotIn("id", self.calls[0])
+
+    def test_a_field_the_panel_dropped_is_named(self):
+        self._panel(dict(redirect_row(12, ["www.innovative.tel"], "innotel.us"),
+                         certificate_id=None))
+        problems = self._apply([self._drift()])
+        self.assertEqual([p["check"] for p in problems], ["apply_lost"])
+        self.assertEqual(problems[0]["detail"], "certificate_id")
+
+    def test_a_name_that_came_back_as_a_proxy_is_not_rewritten(self):
+        # Removing the proxy host is a different decision, and not this flag's to make.
+        self._panel({})
+        problems = self._apply([{"check": "served_as_proxy",
+                                 "domain": "www.innovative.tel", "pin": "innotel.us"}])
+        self.assertEqual((problems, self.calls), ([], []))
+
+    def test_a_clean_estate_writes_nothing(self):
+        self._panel({})
+        self.assertEqual(self._apply([]), [])
+        self.assertEqual(self.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

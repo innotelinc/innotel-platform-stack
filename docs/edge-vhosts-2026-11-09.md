@@ -102,9 +102,58 @@ in the estate asks the proxy-host list about a name it expects to be retired, so
 reports `PROXIED` for it. A **disabled** proxy host on the name is history (that is how the
 name was served before it was redirected) and is not a finding.
 
-Redirection drift is reported and never applied: a destination is a product decision
+Redirection drift is never repaired by `--apply`: a destination is a product decision
 (`pbx.it.com`, `atheniq.institute`), so a wrong one is a person's call rather than a
-rewrite of a row. Where a name should point is not derivable from the estate.
+rewrite of a row. It has its own switch, `--apply-redirects`, because once a person has
+written the destination into the declaration it *is* that decision. The flag writes the
+destination of a drifted row and nothing else; a name that came back as a proxy, a
+redirection that was disabled, and a name NPM has no row for all stay in the findings,
+because each is a different decision.
+
+The panel's redirection schema is stricter than its proxy one: `enabled`, `hsts_enabled`
+and `hsts_subdomains` are rejected as additional properties
+(`/app/schema/paths/nginx/redirection-hosts/post.json`), so the update carries
+`domain_names`, `forward_scheme`, `forward_domain_name`, `forward_http_code`,
+`preserve_path`, `certificate_id`, `ssl_forced`, `block_exploits`, `advanced_config` and
+`http2_support` — the fields the redirect was configured with — and no `enabled`, which
+the flag never changes anyway.
+
+### Do the destinations still exist?
+
+A redirect to a name that has left DNS, or whose address accepts nothing, sends every
+visitor of a retired name into a browser error — while the row, the file and the
+declaration all agree. `--check-destinations`, which the timer passes, resolves each
+declared destination once and opens 443 on the first address: `REDIR-DEAD` for no address,
+`REDIR-NO-ANSWER` for an address that accepts nothing. It is transport only — a 403 from
+Cloudflare still means the name takes the visitor somewhere, and what a destination *says*
+is a product question.
+
+A host that has lost its view of the internet must not report 28 dead names, so the check
+probes a control (`innotel.us`) first: if that does not answer, the facet reports
+`destination_unchecked` as a warning and the rest of the run's findings stand, rather than
+exiting 2 and pretending the whole check could not run.
+
+### Proved end to end, 2026-11-09
+
+The alert path was exercised rather than assumed. A declaration pinning
+`atheniq.innotel.us` at `example.invalid` was published through the real check
+(2 findings, `rc=1`), with the timer stopped so the textfile would survive the wait:
+
+| when | what |
+| --- | --- |
+| t+15 s | `innotel_estate_check_failures{check="edge_vhost_pins"} 2`; alert `pending` |
+| t+319 s | alert `firing` — the rule's 5 m hold, elapsed |
+| then | Alertmanager holds `EstateCheckFailing`, `check="edge_vhost_pins"`, `severity=critical`, summary *The edge_vhost_pins check is failing* |
+| 04:35:26Z | Stalwart logs `delivery.completed … from = "alertmanager@innotel.us", to = ["admin@innotel.us"], size = 3325` |
+
+That delivery is to the human inbox; the earlier `to = ["alertmanager@innotel.us"]`
+entries in the same log are the delivery probe's own short-lived alerts, which route to a
+separate receiver on purpose. The clean textfile was rewritten afterwards and the timer
+restarted from a `trap`, so the probe cannot outlive its own run.
+
+The same pass drifted `bank.innotel.us` to `innotel.site` on the real panel: the check
+reported `REDIR-DRIFT` and `REDIR-LAG`, `--apply-redirects` put row 29 and `29.conf` back to
+`innotel.us`, and `nginx -t` stayed successful.
 
 ### What makes the pin page somebody
 

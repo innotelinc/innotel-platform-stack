@@ -126,7 +126,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-npm-config-drift.py
 # same script's `--apply` puts a drifted pin back through the API, which updates the row,
 # the file and the running nginx in one write. NPM_ADMIN_EMAIL/NPM_ADMIN_PASSWORD come
 # from the EnvironmentFile above.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-pins.py --api http://192.168.1.71:81 --config-dir /usr/src/proxy/data/nginx --pins /opt/innotel/estate-checks/edge-vhost-targets.tsv --redirect-pins /opt/innotel/estate-checks/edge-redirect-targets.tsv --prom ${TEXTFILE_DIR}/estate-check-edge-vhost-pins.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-pins.py --api http://192.168.1.71:81 --config-dir /usr/src/proxy/data/nginx --pins /opt/innotel/estate-checks/edge-vhost-targets.tsv --redirect-pins /opt/innotel/estate-checks/edge-redirect-targets.tsv --check-destinations --prom ${TEXTFILE_DIR}/estate-check-edge-vhost-pins.prom
 
 # The media estate's two remaining doors, from the outside: `media.innotel.us` has to
 # answer 302 to Authentik (a 200 means the single sign-in has fallen off the front of
