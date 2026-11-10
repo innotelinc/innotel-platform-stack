@@ -49,9 +49,27 @@ and `redirection_host/NN.conf`, plus one assertion no file comparison can make:
      the redirect it was promised to have stopped happening. Both files would still look
      right, so only the proxy-host list can answer this.
 
-Redirection drift is reported and never applied: where a name should point is a product
+Redirection drift is not repaired by `--apply`: where a name should point is a product
 decision (a customer TLD, not a container address), so a wrong destination is a person's
-call rather than a rewrite.
+call. It has its own switch, `--apply-redirects`, because once a person has written the
+destination into `edge-redirect-targets.tsv` it *is* that decision — the flag writes the
+destination of a drifted row and nothing else. A name that came back as a proxy, a
+redirection that was disabled, and a name NPM has no row for are three different decisions,
+and none of them is a destination edit.
+
+WHAT IT CHECKS ABOUT DESTINATIONS
+---------------------------------
+Every destination in the declaration is asked the one question neither the panel nor the
+files can answer: does this name still take a visitor anywhere? A redirect to a name with
+no address, or to one whose address accepts nothing on 443, sends every visitor of that
+retired name into a browser error — and the row, the file and the declaration all agree
+while it does.
+
+No address is `redirect_dead`; an address that accepts nothing is `redirect_unreachable`.
+If the check's own control name does not answer, the facet reports `destination_unchecked`
+instead: a host that has lost its view of the internet has not learned that its 28
+destinations are dead, and saying so is the only honest answer. That one is a warning
+rather than exit 2, because the rest of the run did happen and its findings stand.
 
 `--apply` fixes (2) and (3) by PUTting the row with every other field it already had,
 then reading the whole row back and requiring it to be unchanged apart from the target
@@ -63,7 +81,9 @@ nothing at all.
 Run it on the edge host, where the API and the vhost tree are both real:
 
     ./scripts/check-edge-vhost-pins.py
-    ./scripts/check-edge-vhost-pins.py --apply      # only when drift is the finding
+    ./scripts/check-edge-vhost-pins.py --check-destinations
+    ./scripts/check-edge-vhost-pins.py --apply              # only when drift is the finding
+    ./scripts/check-edge-vhost-pins.py --apply-redirects    # only when a redirect drifted
     ./scripts/check-edge-vhost-pins.py --prom ${TEXTFILE_DIR}/estate-check-edge-vhost-pins.prom
 
 `NPM_ADMIN_EMAIL` / `NPM_ADMIN_PASSWORD` come from the environment (the same pair the
@@ -79,10 +99,12 @@ import argparse
 import json
 import os
 import re
+import socket
 import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -103,6 +125,31 @@ DEFAULT_PINS = SCRIPT_DIR / "edge-vhost-targets.tsv"
 DEFAULT_REDIRECT_PINS = SCRIPT_DIR / "edge-redirect-targets.tsv"
 PROXY_HOSTS = "/api/nginx/proxy-hosts"
 REDIRECTION_HOSTS = "/api/nginx/redirection-hosts"
+
+#: The fields NPM's redirection update accepts. This panel's redirection schema is stricter
+#: than the proxy one: `enabled`, `hsts_enabled` and `hsts_subdomains` are rejected as
+#: additional properties (read from `/app/schema/paths/nginx/redirection-hosts/` on
+#: 2026-11-09; a body carrying them answers 400 `data must NOT have additional properties`),
+#: while the proxy update accepts them. A destination edit therefore travels with the
+#: certificate, the status code and the flags the redirect was configured with, and leaves
+#: `enabled` alone — which is what this flag wants in any case: it never re-enables a row.
+REDIRECT_UPDATABLE = (
+    "domain_names",
+    "forward_scheme",
+    "forward_domain_name",
+    "forward_http_code",
+    "preserve_path",
+    "certificate_id",
+    "ssl_forced",
+    "block_exploits",
+    "advanced_config",
+    "http2_support",
+)
+
+#: A destination the estate keeps answering, used to tell "this name is dead" apart from
+#: "this host cannot see the internet". Without it every lost uplink would read as 28 dead
+#: redirects, and a check that cries that loudly on a network blip is one people mute.
+CONTROL_DESTINATION = "innotel.us"
 
 #: The fields NPM's update endpoint accepts, in the shape its own UI sends them. The rest
 #: of a row is bookkeeping (`id`, `created_on`, `modified_on`, `owner_user_id`) or the
@@ -213,6 +260,16 @@ class RedirectFile:
     path: Path
     domains: tuple[str, ...]
     destination: str | None
+
+
+@dataclass(frozen=True)
+class Destination:
+    """What one destination name actually does, as seen from the check's own host."""
+
+    name: str
+    addresses: tuple[str, ...] = ()
+    reachable: bool = False
+    error: str = ""
 
 
 @dataclass(frozen=True)
@@ -347,6 +404,25 @@ def round_trip(before: dict, after: dict, pin: Pin) -> list[str]:
     return lost
 
 
+def redirect_payload_for(raw: dict, pin: RedirectPin) -> dict:
+    """The body that sets one redirection's destination and carries every other field."""
+    body = {key: raw[key] for key in REDIRECT_UPDATABLE if key in raw}
+    body["forward_domain_name"] = pin.destination
+    return body
+
+
+def redirect_round_trip(before: dict, after: dict, pin: RedirectPin) -> list[str]:
+    """Fields that did not survive a redirection update, given what it meant to change."""
+    if int(before["id"]) != int(after.get("id", -1)):
+        return ["id"]
+    lost = [key for key in before
+            if key not in ("id", "modified_on", "meta", "forward_domain_name")
+            and before[key] != after.get(key, "<missing>")]
+    if after.get("forward_domain_name") != pin.destination:
+        lost.append("forward_domain_name")
+    return lost
+
+
 def compare(pins: list[Pin], hosts: list[Host], vhosts: list[Vhost]) -> list[dict]:
     """Every way a pin can fail to hold in the row, or in the file that follows it."""
     by_domain: dict[str, Host] = {}
@@ -436,7 +512,69 @@ def check(pins: list[Pin], hosts: list[Host], vhosts: list[Vhost],
     return (1 if findings else 0), findings
 
 
-def to_audit(findings: list[dict]) -> "Audit":
+def probe_destination(name: str, resolver=None, connector=None,
+                      timeout: float = 5.0) -> Destination:
+    """Resolve a name and open 443 on it, without asking what the site says.
+
+    Transport only, on purpose: what a destination *says* is a product question, while
+    whether a visitor's browser can reach it at all is this check's. A 403 or a 404 still
+    means the name takes the visitor somewhere; a name with no address, or an address that
+    accepts nothing, does not.
+    """
+    resolver = resolver or (lambda host: socket.getaddrinfo(host, 443,
+                                                            proto=socket.IPPROTO_TCP))
+    try:
+        infos = resolver(name)
+    except OSError as error:
+        return Destination(name=name, error=str(error) or "no address")
+    addresses = tuple(dict.fromkeys(str(info[4][0]) for info in infos))
+    if not addresses:
+        return Destination(name=name, error="no address")
+    connector = connector or (lambda host: socket.create_connection((host, 443),
+                                                                    timeout=timeout))
+    try:
+        connector(addresses[0])
+    except OSError as error:
+        return Destination(name=name, addresses=addresses,
+                           error=str(error) or "nothing answers on 443")
+    return Destination(name=name, addresses=addresses, reachable=True)
+
+
+def check_destinations(pins: list[RedirectPin], probe=probe_destination,
+                       workers: int = 8) -> tuple[list[dict], str | None]:
+    """Every declared destination, probed once. Returns (findings, why it could not run).
+
+    The control name is probed first: if it does not answer, this host cannot see the
+    internet, and reporting 28 dead destinations would be a worse lie than reporting that
+    the facet went unchecked.
+    """
+    names = list(dict.fromkeys(pin.destination for pin in pins))
+    if not names:
+        return [], None
+    control = probe(CONTROL_DESTINATION)
+    if not control.reachable:
+        return [], (f"{CONTROL_DESTINATION} did not answer ({control.error or 'no address'}), "
+                    "so this host cannot see the internet and no destination was judged")
+    pinned_by: dict[str, list[str]] = {}
+    for pin in pins:
+        pinned_by.setdefault(pin.destination, []).append(pin.domain)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        probed = list(pool.map(probe, names))
+    findings = []
+    for result in probed:
+        if result.reachable:
+            continue
+        findings.append({
+            "check": "redirect_dead" if not result.addresses else "redirect_unreachable",
+            "destination": result.name,
+            "domains": pinned_by[result.name],
+            "addresses": list(result.addresses),
+            "detail": result.error,
+        })
+    return findings, None
+
+
+def to_audit(findings: list[dict], unchecked: str | None = None) -> "Audit":
     """The same verdict in the shape every scheduled check publishes."""
     audit = Audit()
     for f in findings:
@@ -483,6 +621,17 @@ def to_audit(findings: list[dict]) -> "Audit":
                 code="served_as_proxy", level="fail",
                 message=(f"{f['domain']} is pinned as a redirect to {f['pin']}, but an "
                          "enabled proxy host serves it — the name is back, not moved")))
+        elif f["check"] in ("redirect_dead", "redirect_unreachable"):
+            names = ", ".join(f["domains"][:3]) + (" …" if len(f["domains"]) > 3 else "")
+            what = ("does not resolve" if f["check"] == "redirect_dead"
+                    else f"resolves to {f['addresses'][0]} but nothing answers on 443")
+            audit.findings.append(Finding(
+                code=f["check"], level="fail",
+                message=(f"{f['destination']} is a pinned destination ({names}) and {what}: "
+                         f"{f['detail']} — every visitor of those names lands nowhere")))
+    if unchecked:
+        audit.findings.append(Finding(code="destination_unchecked", level="warn",
+                                      message=unchecked))
     return audit
 
 
@@ -511,6 +660,11 @@ def report(findings: list[dict]) -> str:
             got = f["file_destination"] or "no file"
             lines.append(f"{'REDIR-LAG':9} {f['domain']:32} pin {f['pin']:22} "
                          f"file {got}")
+        elif f["check"] in ("redirect_dead", "redirect_unreachable"):
+            label = "REDIR-DEAD" if f["check"] == "redirect_dead" else "REDIR-NO-ANSWER"
+            where = f"{f['addresses'][0]}:443" if f["addresses"] else "no address"
+            lines.append(f"{label:14} {f['destination']:32} {where:22} "
+                         f"{len(f['domains'])} name(s) — {f['detail']}")
         else:
             lines.append(f"{'PROXIED':9} {f['domain']:32} pin {f['pin']:22} "
                          "served by an enabled proxy host")
@@ -523,11 +677,15 @@ def report(findings: list[dict]) -> str:
     redirect_lag = sum(1 for f in findings if f["check"] == "redirect_file_lag")
     redirect_orphan = sum(1 for f in findings if f["check"] == "no_redirect")
     proxied = sum(1 for f in findings if f["check"] == "served_as_proxy")
+    dead = sum(1 for f in findings if f["check"] == "redirect_dead")
+    unanswered = sum(1 for f in findings if f["check"] == "redirect_unreachable")
     lines.append(f"{len(findings)} finding(s): {drifted} row drift, {lagged} file lag, "
                  f"{orphan} pinned name NPM does not have, {redirects} redirect drift, "
                  f"{redirect_lag} redirect file lag, "
                  f"{redirect_orphan} pinned redirect NPM does not have, "
-                 f"{proxied} pinned redirect served as a proxy")
+                 f"{proxied} pinned redirect served as a proxy, "
+                 f"{dead} destination with no address, "
+                 f"{unanswered} destination not answering")
     return "\n".join(lines)
 
 
@@ -597,6 +755,49 @@ def put_host(api: str, token: str, host_id: int, body: dict) -> dict:
     return reply if isinstance(reply, dict) else {}
 
 
+def put_redirect(api: str, token: str, redirect_id: int, body: dict) -> dict:
+    """Update one redirection — the write that also regenerates its file."""
+    try:
+        reply = _call(f"{api.rstrip('/')}{REDIRECTION_HOSTS}/{redirect_id}", body,
+                      token=token)
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        raise Unreadable(f"NPM would not update redirection {redirect_id}: {error}") from error
+    return reply if isinstance(reply, dict) else {}
+
+
+def apply_redirects(api: str, token: str, pins: list[RedirectPin], findings: list[dict],
+                    config_dir: Path = DEFAULT_CONFIG_DIR,
+                    sleep=time.sleep, attempts: int = 10) -> list[dict]:
+    """Write each *drifted* destination to its row, then prove the row survived.
+
+    Only `redirect_drift`. A name served by a proxy host, a disabled redirection and a
+    missing row are three decisions this flag must not make on its own — it leaves them
+    among the run's findings, where a person can see them.
+    """
+    by_id = {f["row"]: f for f in findings if f["check"] == "redirect_drift"}
+    problems: list[dict] = []
+    for redirect_id, finding in by_id.items():
+        before = next((r.raw for r in fetch_redirects(api, token)
+                       if r.id == redirect_id), None)
+        if before is None:
+            problems.append({"check": "apply_failed", "domain": finding["domain"],
+                             "detail": f"redirection {redirect_id} vanished before the update"})
+            continue
+        pin = next(p for p in pins if p.domain == finding["domain"])
+        after = put_redirect(api, token, redirect_id, redirect_payload_for(before, pin))
+        lost = redirect_round_trip(before, after, pin)
+        if lost:
+            problems.append({"check": "apply_lost", "domain": finding["domain"],
+                             "row": redirect_id, "detail": ", ".join(sorted(lost))})
+        for _ in range(attempts):
+            live = next((file for file in read_redirect_files(config_dir)
+                         if pin.domain in file.domains), None)
+            if live is not None and live.destination == pin.destination:
+                break
+            sleep(0.5)
+    return problems
+
+
 def apply_pins(api: str, token: str, pins: list[Pin], findings: list[dict],
                config_dir: Path = DEFAULT_CONFIG_DIR,
                sleep=time.sleep, attempts: int = 10) -> list[dict]:
@@ -642,6 +843,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="names that must stay redirects ('' to skip)")
     parser.add_argument("--apply", action="store_true",
                         help="write each drifted pin through NPM's API")
+    parser.add_argument("--apply-redirects", action="store_true",
+                        help="write each drifted redirect destination through NPM's API")
+    parser.add_argument("--check-destinations", action="store_true",
+                        help="also resolve and reach every pinned redirect destination")
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
@@ -670,6 +875,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         redirect_pins = load_redirect_pins(args.redirect_pins)
 
+    problems: list[dict] = []
+    unchecked: str | None = None
     try:
         token = token_for(args.api, os.environ.get("NPM_ADMIN_EMAIL", ""),
                           os.environ.get("NPM_ADMIN_PASSWORD", ""))
@@ -677,14 +884,21 @@ def main(argv: list[str] | None = None) -> int:
         redirects = fetch_redirects(args.api, token) if redirect_pins else []
         code, findings = check(pins, hosts, vhosts, redirect_pins, redirects,
                                read_redirect_files(args.config_dir))
-        problems = (apply_pins(args.api, token, pins, findings, args.config_dir)
-                    if args.apply else [])
-        if args.apply and findings:
+        if args.apply:
+            problems += apply_pins(args.api, token, pins, findings, args.config_dir)
+        if args.apply_redirects:
+            problems += apply_redirects(args.api, token, redirect_pins, findings,
+                                        args.config_dir)
+        if findings and (args.apply or args.apply_redirects):
             hosts = fetch_hosts(args.api, token)
             redirects = fetch_redirects(args.api, token) if redirect_pins else []
             code, findings = check(pins, hosts, read_vhosts(args.config_dir),
                                    redirect_pins, redirects,
                                    read_redirect_files(args.config_dir))
+        if args.check_destinations and redirect_pins:
+            dead, unchecked = check_destinations(redirect_pins)
+            findings += dead
+            code = 1 if findings else 0
     except Unreadable as error:
         print(f"check-edge-vhost-pins: {error}", file=sys.stderr)
         if args.prom and HAVE_TELEMETRY:
@@ -696,7 +910,7 @@ def main(argv: list[str] | None = None) -> int:
             print("check-edge-vhost-pins: --prom needs estate_check.py beside this file",
                   file=sys.stderr)
         else:
-            write_prom(args.prom, CHECK, to_audit(findings), True)
+            write_prom(args.prom, CHECK, to_audit(findings, unchecked), True)
     print(json.dumps({"findings": findings, "problems": problems}, indent=2)
           if args.json else report(findings))
     for problem in problems:
