@@ -100,7 +100,10 @@ class DashboardCase(unittest.TestCase):
         # break. `check-mail-relay` arrived on 2026-10-09 and moved this from 7 to 8;
         # `check-authentik-privilege` arrived on 2026-10-23 and moved it from 9 to 10;
         # `check-mount-stacks` arrived on 2026-10-29 and moved it from 14 to 15, and
-        # `check-media-doors` the same day took it to 17.
+        # `check-media-doors` the same day took it to 17. `check-edge-vhost-pins` took it
+        # to 24 on 2026-11-09: the pins were compared to the file, and the row to the
+        # file, but never the pin to the row — which is the comparison that would have
+        # caught the TV door's repair being undone by its own panel.
         unit = UNIT.read_text(encoding="utf-8")
         checks = set(re.findall(r"/opt/innotel/estate-checks/(check-[a-z0-9-]+)\.py", unit))
         self.assertTrue(checks, "the unit must run the checks")
