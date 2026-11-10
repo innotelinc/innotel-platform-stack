@@ -67,6 +67,24 @@ in one write; it then reads the whole row back and fails if any field other than
 target changed, because `advanced_config`, `certificate_id` and `ssl_forced` are load
 bearing for a door that serves video.
 
+The same day's audit, read from the database rather than the API so deleted and disabled
+rows could not hide, came back clean and is worth writing down as the baseline:
+
+| | proxy hosts | redirections |
+| --- | --- | --- |
+| rows | 302 | 44 |
+| files serving names | 204 | 23 |
+| enabled rows with no file | 0 | 0 |
+| row/file target mismatch | 0 | 0 |
+| served name with no live row | 0 | 0 |
+| files whose only row is deleted | 21 | 4 |
+
+The last line needs reading carefully: those 25 names each also belong to a **live** row,
+because the estate deleted and recreated them. The file is the live row's, the deleted row
+is history, and the drift check's silence about them is correct. Twenty-one other entries
+beside the doors are `.bak` copies from earlier hand repairs; they are not included (a
+`.conf.bak` is not a `.conf`) and are not doors.
+
 ## How the edits were made
 
 NPM's database and the container's `/data` are authoritative; the host's
