@@ -47,8 +47,8 @@ def probe_for(*, media=(302, {"Location": "web/"}, b""), web=(200, {}, JELLYFIN_
     answers = {
         "https://media.innotel.us/": media,
         "https://media.innotel.us/web/": front,
-        "https://tv.innotel.us/web/": web,
-        "https://tv.innotel.us/Branding/Splashscreen": splash,
+        "https://iptv.innotel.us/web/": web,
+        "https://iptv.innotel.us/Branding/Splashscreen": splash,
     }
 
     def probe(url, timeout=20.0):
@@ -64,64 +64,64 @@ def codes(result) -> list[str]:
 class FrontPage(unittest.TestCase):
     def test_the_app_relative_hop_to_jellyfin_is_the_working_answer(self):
         # `/` answers `302 web/` and `web/` is Jellyfin: one hop, the app's own page.
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for())
         self.assertTrue(result.ok)
         self.assertEqual(codes(result), [])
 
     def test_a_direct_200_from_jellyfin_is_also_the_working_answer(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(media=(200, {}, JELLYFIN_PAGE)))
         self.assertTrue(result.ok)
 
     def test_a_redirect_to_authentik_is_now_the_regression(self):
         # The gate itself was the outage: a TV client cannot complete an OIDC webview flow.
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(media=(302, {"Location": AUTH}, b"")))
         self.assertFalse(result.ok)
         self.assertEqual(codes(result), ["gate-restored"])
 
     def test_a_200_that_is_not_jellyfin_is_named(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(media=(200, {}, b"<html>Welcome to nginx</html>")))
         self.assertFalse(result.ok)
         self.assertEqual(codes(result), ["front-not-jellyfin"])
 
     def test_the_hop_landing_on_a_non_jellyfin_page_is_named(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(front=(200, {}, b"<html>proxy error</html>")))
         self.assertEqual(codes(result), ["front-not-jellyfin"])
 
     def test_a_redirect_off_the_app_is_named_not_passed(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(media=(301, {"Location": "https://example.org/"}, b"")))
         self.assertEqual(codes(result), ["front-wrong-target"])
 
     def test_a_five_hundred_is_the_app_being_down(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(media=(502, {}, b"<html>502</html>")))
         self.assertEqual(codes(result), ["front-status"])
 
     def test_no_answer_is_reported_as_unreachable(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(media=(None, {}, b"")))
         self.assertEqual(codes(result), ["front-unreachable"])
 
 
 class WatchDoor(unittest.TestCase):
     def test_an_error_page_that_is_200_is_not_jellyfin(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(web=(200, {}, b"<html>Welcome to nginx</html>")))
         self.assertFalse(result.ok)
         self.assertEqual(codes(result), ["watch-not-jellyfin"])
 
     def test_a_status_that_is_not_200_fails(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(web=(404, {}, b"")))
         self.assertEqual(codes(result), ["watch-status"])
 
     def test_the_watch_door_being_down_fails_the_check(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(web=(None, {}, b"")))
         self.assertFalse(result.ok)
         self.assertEqual([f.level for f in result.findings], ["fail"])
@@ -129,19 +129,19 @@ class WatchDoor(unittest.TestCase):
 
 class Splash(unittest.TestCase):
     def test_missing_branding_is_a_warning_not_a_failure(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(splash=(404, {"Content-Type": "text/html"}, b"")))
         self.assertTrue(result.ok)
         self.assertEqual([(f.code, f.level) for f in result.findings],
                          [("branding-missing", "warn")])
 
     def test_a_placeholder_image_is_under_the_floor(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(splash=(200, {"Content-Type": "image/png"}, b"x" * 900)))
         self.assertEqual(codes(result), ["branding-small"])
 
     def test_the_wrong_content_type_is_named(self):
-        result = check.audit("https://media.innotel.us/", "https://tv.innotel.us",
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(splash=(200, {"Content-Type": "text/html"}, SPLASH)))
         self.assertEqual(codes(result), ["branding-type"])
 

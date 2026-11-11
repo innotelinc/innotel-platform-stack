@@ -21,9 +21,11 @@ sage.innotel.tech	192.168.1.94	443	Sage session site — TLS terminated by the c
 # container that was running the whole time. The app also bound loopback only, which the
 # move made fatal rather than local: it now passes `--host 0.0.0.0` on its own address.
 blueprint.innotel.us	192.168.1.76	8787	DayZero app on blueprint's own address — moved off i2 on 2026-10-30
-# `tv` is pinned because its target has now gone wrong twice in the same way: the door was
-# pointed at a Monarch SSO gateway (14002) rather than Jellyfin (14016), which is the one
-# thing this name must not be. 2026-11-09 it was fixed in the vhost file only, the panel's
-# row still said 14002, and a backend regeneration put the gate back in front of the door.
-# The target is a contract, so a rewrite to a gateway fails here rather than at a TV.
-tv.innotel.us	192.168.1.56	14016	Jellyfin watch door — its own accounts, never a browser OIDC gate
+# `tv` is pinned because its target kept changing under it: the door moved between Jellyfin
+# (14016) and the Monarch SSO gateway in front of Sonarr (14002) twice, and the first repair
+# was vhost-only while the panel's row still said 14002, so a regeneration put the gate back.
+# On 2026-11-11 the owner settled which one it is: `tv.innotel.us` opens **Sonarr**, so the
+# pin names Sonarr's gate and a rewrite to Jellyfin fails here instead. Jellyfin's direct
+# publish (14016) is still declared under `iptv`, which is where check-media-doors.py now
+# watches the TV client, so the watch-door assertion follows the name that still serves it.
+tv.innotel.us	192.168.1.56	14002	Sonarr — the owner's arrangement as of 2026-11-11; Jellyfin's direct door is `iptv`
