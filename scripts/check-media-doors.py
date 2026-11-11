@@ -17,10 +17,13 @@ notices until somebody wants to watch something:
     web/`). A **redirect to the IdP** is now the regression: it is the gate having been put
     back in front of a product whose clients cannot complete it. A 5xx is the gateway or
     the app being down behind a name that still resolves.
-  * `tv.innotel.us` is the watch door, and it is deliberately **not** a redirect: Jellyfin
+  * `iptv.innotel.us` is the watch door, and it is deliberately **not** a redirect: Jellyfin
     keeps its own accounts because TV and native clients cannot complete a browser OIDC
     flow. Nothing in the estate checks it, so a stopped Jellyfin, a bad proxy pass or a
     lost branding upload all read as "the site is up" from every other check.
+    (It was `tv.innotel.us` until 2026-11-11, when the owner pointed that name at Sonarr.
+    The assertion is about Jellyfin's direct publish on 14016, so it follows the name that
+    still forwards there; `media.innotel.us` serves the same app through its gateway.)
 
 WHAT IT ASSERTS
 ---------------
@@ -28,9 +31,9 @@ WHAT IT ASSERTS
      hop to that (`302 web/`). A redirect to `auth.cerulean.innotel.us` is a failure: the
      OIDC gate is not allowed in front of this name. 5xx is a failure, no answer is a
      failure, and a 200 that is not Jellyfin is a failure.
-  2. WATCH — `tv.innotel.us/web/` answers 200 and its body is Jellyfin's web client (the
+  2. WATCH — `iptv.innotel.us/web/` answers 200 and its body is Jellyfin's web client (the
      page names jellyfin), not a proxy error page that happens to be 200.
-  3. BRANDING — `tv.innotel.us/Branding/Splashscreen` answers 200 `image/png` of at least
+  3. BRANDING — `iptv.innotel.us/Branding/Splashscreen` answers 200 `image/png` of at least
      `--splash-min-bytes` (default 50 000). The Gizmo splash is an upload into Jellyfin's
      config, so it is the first thing a Jellyfin upgrade or a reinstall drops; it is a
      note rather than a failure, because the library still plays without it.
@@ -61,7 +64,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from estate_check import Audit, Finding, write_prom  # noqa: E402
 
 MEDIA_DOOR = "https://media.innotel.us/"
-WATCH_DOOR = "https://tv.innotel.us"
+WATCH_DOOR = "https://iptv.innotel.us"
 AUTH_HOST = "auth.cerulean.innotel.us"
 SPLASH_PATH = "/Branding/Splashscreen"
 WEB_PATH = "/web/"

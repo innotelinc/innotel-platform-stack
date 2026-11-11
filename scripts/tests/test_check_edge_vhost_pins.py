@@ -243,7 +243,7 @@ class DeclarationTest(unittest.TestCase):
         self.assertIn("admin.monarch.innotel.us", domains)
         self.assertIn("tv.innotel.us", domains)
         tv = next(pin for pin in loaded if pin.domain == "tv.innotel.us")
-        self.assertEqual(tv.target, "192.168.1.56:14016")
+        self.assertEqual(tv.target, "192.168.1.56:14002")  # Sonarr, per the owner, 2026-11-11
         self.assertTrue(tv.note, "a pin carries the reason it is a pin")
 
     def test_a_short_line_is_an_error_not_silently_skipped(self):

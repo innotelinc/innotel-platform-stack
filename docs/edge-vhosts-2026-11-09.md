@@ -208,3 +208,24 @@ the splash. `https://tv.innotel.us/Branding/Splashscreen` had been answering
 the name dialled the Sonarr gate, so the splash URL went to the wrong product.
 A warning about an asset was really a warning about the vhost: worth remembering
 when a "missing" thing lives behind a door that is pointing somewhere else.
+
+## 2026-11-11 — the owner settled `tv`
+
+`tv.innotel.us` had moved between Jellyfin (`192.168.1.56:14016`) and the Monarch SSO
+gateway in front of Sonarr (`14002`) twice, and the 2026-11-09 repair settled it on
+Jellyfin. On 2026-11-11 the owner asked for the other arrangement — `tv.innotel.us` opens
+**Sonarr** — so the pin now names `14002`, and a rewrite to Jellyfin is what fails the
+check. `--apply` writes the row, the file and the running nginx from the declaration in
+one pass, which is the point: a regeneration cannot put the door back the way it was.
+
+Two things follow, both deliberate rather than collateral:
+
+* `tv.innotel.us` is now a **browser** door — Sonarr's UI behind the Authentik gate — which
+  is exactly what the old pin said it must never be. No TV client speaks to that name any
+  more.
+* Jellyfin keeps two doors that serve the watch client, measured while making the change:
+  `media.innotel.us` (its gateway, published with `SKIP_AUTH_ROUTES ^/.*$`) and
+  `iptv.innotel.us` (the direct `14016` publish). `check-media-doors.py` now watches
+  `iptv.innotel.us`, because its assertions are about that publish — `/web/` answers 200
+  naming Jellyfin, `/Branding/Splashscreen` answers the 344 514-byte Gizmo splash — and not
+  about a particular name. Both doors answered identically to `tv`'s before the change.

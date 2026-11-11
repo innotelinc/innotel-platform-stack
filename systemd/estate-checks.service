@@ -128,12 +128,13 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-npm-config-drift.py
 # from the EnvironmentFile above.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-pins.py --api http://192.168.1.71:81 --config-dir /usr/src/proxy/data/nginx --pins /opt/innotel/estate-checks/edge-vhost-targets.tsv --redirect-pins /opt/innotel/estate-checks/edge-redirect-targets.tsv --check-destinations --prom ${TEXTFILE_DIR}/estate-check-edge-vhost-pins.prom
 
-# The media estate's two remaining doors, from the outside: `media.innotel.us` has to
-# answer 302 to Authentik (a 200 means the single sign-in has fallen off the front of
-# Gizmo) and `tv.innotel.us` has to answer with Jellyfin's web client plus the Gizmo
-# splash. The watch door is deliberately not a redirect — TV and native clients cannot
-# complete a browser OIDC flow — so nothing else in the estate would notice it going
-# dark, and a dead door there means a title plays nowhere.
+# The media estate's doors, from the outside: `media.innotel.us` has to answer with
+# Jellyfin's own page (published, not gated, since 2026-09-18) and `iptv.innotel.us` has to
+# answer with Jellyfin's web client plus the Gizmo splash. The watch door is deliberately
+# not a redirect — TV and native clients cannot complete a browser OIDC flow — so nothing
+# else in the estate would notice it going dark, and a dead door there means a title plays
+# nowhere. `tv.innotel.us` is Sonarr as of 2026-11-11, which is why the watch assertions
+# follow `iptv` — Jellyfin's direct 14016 publish — rather than the name they used to.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-media-doors.py --prom ${TEXTFILE_DIR}/estate-check-media-doors.prom
 
 # And that the door still opens for the people it is for: drives
