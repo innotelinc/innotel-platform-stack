@@ -29,3 +29,9 @@ blueprint.innotel.us	192.168.1.76	8787	DayZero app on blueprint's own address �
 # publish (14016) is still declared under `iptv`, which is where check-media-doors.py now
 # watches the TV client, so the watch-door assertion follows the name that still serves it.
 tv.innotel.us	192.168.1.56	14002	Sonarr — the owner's arrangement as of 2026-11-11; Jellyfin's direct door is `iptv`
+# `iptv` is the last door a TV or native client can actually finish: no OIDC in front of it,
+# just Jellyfin's own accounts on its direct publish. It stopped being a spare on 2026-11-11
+# when `tv` was pointed at Sonarr and check-media-doors.py moved its watch assertions here,
+# so the timer now depends on this forward. An unpinned vhost can drift the way `tv` did and
+# the watch door would go dark silently — which is the failure that check exists to catch.
+iptv.innotel.us	192.168.1.56	14016	Jellyfin direct publish — the watch door the estate checks, so it is pinned too
