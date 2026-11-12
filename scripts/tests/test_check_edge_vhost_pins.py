@@ -245,6 +245,11 @@ class DeclarationTest(unittest.TestCase):
         tv = next(pin for pin in loaded if pin.domain == "tv.innotel.us")
         self.assertEqual(tv.target, "192.168.1.56:14002")  # Sonarr, per the owner, 2026-11-11
         self.assertTrue(tv.note, "a pin carries the reason it is a pin")
+        # The watch door the media check now measures: if this forward drifts, the door a
+        # TV can actually finish goes dark, which is the failure that check exists for.
+        iptv = next(pin for pin in loaded if pin.domain == "iptv.innotel.us")
+        self.assertEqual(iptv.target, "192.168.1.56:14016")
+        self.assertTrue(iptv.note)
 
     def test_a_short_line_is_an_error_not_silently_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
