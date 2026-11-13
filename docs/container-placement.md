@@ -15,6 +15,72 @@ evening pass moved the edge services back onto i1, right-sized i1's CPU caps, an
 put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
 
+## Changes applied 2026-11-13 — `lms.innotel.us` folded into `atheniq.courses`
+
+The name resolved to the edge but had no service behind it, and both halves of the
+problem were invisible from the NPM UI:
+
+- **The zone had no record at all.** `A lms.innotel.us` returned only the zone `SOA`
+  (serial 676) from the public resolvers and from the edge resolver; a CNAME query was
+  empty too. Added `lms.innotel.us A 73.68.203.71`, TTL 300 — **SOA 676 → 677**,
+  confirmed by `dig @8.8.8.8`.
+- **The vhost that appeared to exist was an orphan.** `proxy_host/227.conf` sat at
+  `/data/nginx/proxy_host/227.conf` on the proxy host, but `cerulean-npm` mounts its data
+  from **`/usr/src/proxy/data`** — so the file was outside the live tree, and
+  `nginx -T | grep -c "server_name lms.innotel.us"` was **0**. 443 therefore fell through
+  to the default server, which has `ssl_reject_handshake on`; the client symptom was
+  `TLS alert, unrecognized name`, not a 502.
+- **Replaced with redirection host `36`**, built from the `apps.lms` template (`35`) and
+  its own certificate `npm-83` (already issued for this name):
+  `return 301 https://atheniq.courses$request_uri`. `nginx -t` passed, then `nginx -s reload`.
+
+Verified live: `lms.innotel.us` → **301 → `https://atheniq.courses/`**, follow-through
+**200** at `/catalog/`; `:80` → 301 https; certificate `CN=lms.innotel.us`, Let's Encrypt,
+valid to 2027-01-15. Neighbours unchanged in the same pass: `ai.lms` 301,
+`apps.lms` 301, `mail` 307, `oasis` 307, `meilisearch.lms` 200.
+
+The landing is not arbitrary: `atheniq.courses/` itself 301s to **`/catalog/`**
+(*"AthenIQ — Programs and courses"*), `/learn` and `/home` are **404**, and the orphan
+vhost's own upstream — `192.168.1.59:8092` — serves that same catalog application. So the
+redirect preserves what the name used to reach instead of inventing a new destination.
+**Legacy paths are mapped, not left to 404.** The passthrough alone left the prefixes that
+404 on the app serving dead links from a name that is retired rather than broken, so
+redirection host `36` carries two regex locations ahead of `location /`:
+
+| Legacy path | Maps to |
+|---|---|
+| `^/(learn\|home)(/.*)?$` | `https://atheniq.courses/catalog/` |
+| `^/(student\|my-learning)(/.*)?$` | `https://atheniq.courses/dashboard/` |
+
+Everything else keeps the `$request_uri` passthrough, so `/courses`, `/catalog` and
+`/dashboard` behave exactly as before. Verified after `nginx -t` + `nginx -s reload`:
+all four prefixes answer **301** and follow through to **200**; `ai.lms` 301,
+`apps.lms` 301, `meilisearch.lms` 200 and `mail` 307 unchanged.
+
+## Changes applied 2026-11-12 — `capstone` retired, `atheniq` and `mail` moved to `i1`
+
+- **`capstone` is retired from `i2`.** Config saved to
+  `capstone-config-before-retire-20261112.yaml`; its orphan snapshot and clone were
+  destroyed. `fast` on `i2` went **10.8 G → 26.3 G** free.
+- **`atheniq` moved `i2` → `i1` and kept `.59`.** Verified, not assumed: 12 Docker
+  containers healthy, and `ai.lms.innotel.us` → 301 → `https://atheniq.courses/authoring/home`
+  → 200. The `i2` copy was deleted only after that.
+- **`mail` moved `i2` → `i1` and kept `.15`.** Verified: ports 25/587/993 listening,
+  `mail.innotel.us` 307 → `/en` 200, `oasis.` 307, `webmail.` 307, `admin.mail.` 302, and
+  `bulwark` `Up (healthy)`. The `i2` copy was then deleted.
+- **`i2` was reclaimed to 71.8 G available**, with `atheniq` and `mail` confirmed absent
+  there before the space was counted.
+- **Method: ZFS block-level transfer, not container export.** `zfs send | zfs recv` to a
+  staging dataset outside the pool, `zfs rename` into `tank/incus/containers/<name>`,
+  `mountpoint=legacy`/`canmount=noauto`, patch `backup.yaml`'s pool, then
+  `incus admin recover` — **~18–25 min each, verified twice**. A gzip export plus
+  `incus import` was measured at ≈1.2 MB/s (≈4.5 h) and rejected.
+- **`monarch` and `ontrak` stay stopped on `i1`** (`boot.autostart=false`). The host is
+  retained for LMS, NAS and mail; `hp-capacity-plan.md` explains why more does not fit.
+- **The `mail.innotel.us` 502 was not the migration.** NPM `95.conf` proxies the name to
+  **`:3000`** (bulwark), which was refusing connections while reporting "unhealthy"; a
+  `docker restart bulwark` fixed it. No DNS, MX or vhost change was involved.
+
 ## Changes applied 2026-11-02 — `i3` is retired
 
 - **`i3` (`192.168.1.53`) no longer answers, and is not an estate host any more.**

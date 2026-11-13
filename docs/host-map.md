@@ -28,6 +28,24 @@ edge before concluding a product is unreachable:
 | radarr | `movies.innotel.us` | `192.168.1.56:14002` | 301 to the alias |
 | lidarr | `mp3.innotel.us` | `192.168.1.56:14003` | 301 to the alias |
 | whisparr | `xxx.innotel.us` | `192.168.1.56:14004` | 301 to the alias |
+| learner portal | `lms.innotel.us` | *(retired)* | **Folded into `atheniq.courses` 2026-11-13.** The name had neither a record nor a loaded vhost; `227.conf` on the proxy host was an **orphan** (NPM's live data dir is `/usr/src/proxy/data`, so nothing ever loaded that file). Fixed: `A 73.68.203.71` added to Technitium (zone `innotel.us`, SOA 676 → 677, TTL 300) and redirection host `36` 301s to `https://atheniq.courses`. Verified: `301 → https://atheniq.courses/`, follow-through **200** at `/catalog/`, LE cert `CN=lms.innotel.us` valid to 2027-01-15, `:80` → 301 https. Legacy prefixes are mapped rather than left dead: `/learn`, `/home` → `/catalog/`; `/student`, `/my-learning` → `/dashboard/` (both verified 200 after follow-through), while `/courses`, `/catalog`, `/dashboard` keep the pass-through. |
+
+`apps.lms.innotel.us` is this estate's superseded-name pattern: a **CNAME to the apex**
+(`innotel.us` → `73.68.203.71`) plus a redirection host (`35`) that 301s to
+`https://apps.atheniq.courses`. Verified 2026-11-12: the CNAME resolves and the name
+answers `301`.
+
+Two failure modes are worth knowing, because both look like "the edge is configured":
+
+1. **A record missing while the vhost exists.** The name does not resolve at all.
+2. **A vhost file that nothing loads.** `proxy_host/227.conf` sat on the proxy host for
+   `lms.innotel.us` while NPM's live data dir is `/usr/src/proxy/data` — the file was
+   outside it, so `nginx -T` never contained the name, and 443 fell through to the
+   default server, which has `ssl_reject_handshake on`. The client symptom is
+   `TLS alert, unrecognized name`, not a proxy error.
+
+Check the *loaded* configuration, not the file on disk: `nginx -T | grep server_name <name>`
+must match. `docker exec cerulean-npm nginx -T` is the only trustworthy answer.
 
 All eleven sidecars authenticate against the single Authentik provider
 **`Monarch-media` (PK 37, client `monarch-media`)**. Its redirect list is the
