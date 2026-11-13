@@ -53,8 +53,8 @@ media library is already split off the container pool is wrong: the split was cr
 and never used.
 
 Consequence: reclaiming it means **copying 534 G to a target with 534 G free**. No such
-target exists here today — `tank` has 24.8 G available, and `sdc` is 465.8 G, smaller
-than the library. That is why step 2 below is a purchase, not a maintenance task.
+target exists here today — `tank` has 24.8 G available (**20.4 G** on 2026-11-13), and
+`sdc` is 465.8 G, smaller than the library. That is why step 2 below is a purchase, not a maintenance task.
 
 ## Why it stalls — the measured evidence
 
@@ -99,8 +99,7 @@ and every LMS request competes with a 534 G media library.
    `/srv/evac/dev-critical` → `/mnt/archive`, `/srv/evac/copilotkit-fs` →
    `/mnt/archive2`, `/srv/evac/copilotkit-docker` → `/mnt/archive3`. Destroying the
    dataset deletes live bind sources. Only `dev-fs`, `dev-extra` and `dev-incus` have
-   no Incus consumer. `dev-fs` is measured at **119 MiB**; the others could not be sized
-   on the saturated spindle — see the sizing attempt below for what is and is not claimed.
+   no Incus consumer. All six directories are now sized — see the measurement table below.
 
    What can be said about them, from a metadata-only listing:
 
@@ -108,20 +107,35 @@ and every LMS request competes with a 534 G media library.
    |---|---|---|---|
    | `dev-critical` | 7 (`etc`, `root`, `opt`, `volumes`, `srv`, `home`, `data`) | **2026-11-12** | rootfs copy of a live host — the freshest thing under `/srv/evac` |
    | `copilotkit-fs` | 17 (`bin`, `lib`, `lib64`, `mnt`, `snap`, …) | 2026-08-26 | an April-era rootfs dump |
-   | `dev-fs` | 19 (`bin`, `lib`, `lib64`, `mnt`, `media`, `lost+found`) | 2026-10-26 | an April-era rootfs dump — **sized: 119 MiB** |
+   | `dev-fs` | 19 (`bin`, `lib`, `lib64`, `mnt`, `media`, `lost+found`) | 2026-10-26 | an April-era rootfs dump — **measured: 118 MiB** |
    | `dev-extra` | 1 (`local`) | 2026-08-26 | leftover mount point |
    | `dev-incus` | 1 (`incus`) | 2026-11-12 | leftover mount point |
 
-   **Sizing attempt, 2026-11-13.** `dev-fs` measured **119 MiB** — so the 31.7 G is not
-   there. Every other directory failed to size even at `nice 19` / `ionice -c3` with a
-   300 s budget, while `/proc/pressure/io` reported `some avg10 = 79 %`,
-   `full avg10 = 52 %`: the spindle cannot walk that many inodes while it is also running
-   the container pool. A second attempt at `2026-11-13` under the same priority also
-   produced no figure, at `some avg10 = 81.7 %`. The remaining directories therefore hold
-   **≈ 31.6 G combined**
-   (`tank/evac` 31.7 G minus `dev-fs` 119 MiB), but **no per-directory figure is claimed**
-   until the pool is quiet. Re-run `ionice -c3 du -sx` per directory then, and record the
-   numbers here before proposing any deletion.
+   **Measured 2026-11-13 — every directory, `du -sx --block-size=1` at `nice 19` /
+   `ionice -c3`:**
+
+   | Directory | Size | Incus consumer |
+   |---|---|---|
+   | `dev-critical` | **16.61 GiB** (17 834 354 176 B) | `workloads` → `/mnt/archive` |
+   | `dev-incus` | **8.27 GiB** (8 879 727 616 B) | none |
+   | `copilotkit-fs` | **5.06 GiB** (5 428 507 648 B) | `workloads` → `/mnt/archive2` |
+   | `copilotkit-docker` | **1.76 GiB** (1 894 828 544 B), 120 482 files | `workloads` → `/mnt/archive3` |
+   | `dev-fs` | **118 MiB** (123 891 200 B) | none |
+   | `dev-extra` | **93.8 MiB** (98 385 408 B) | none |
+   | **total** | **31.9 GiB** | — |
+
+   The three directories with no consumer — `dev-incus`, `dev-fs`, `dev-extra` — total
+   **8.5 GiB**. The three that are live bind sources total **23.4 GiB**, and none of that
+   is reclaimable while `workloads` still mounts them. The total sits slightly above
+   `tank/evac`'s 31.7 G because separate walks count shared inodes more than once.
+
+   Why the first attempts reported nothing: `du` had to fault cold metadata off a spindle
+   already at 79–82 % IO pressure and was killed at the 300 s budget. The warmer second
+   pass finished `copilotkit-docker` in **1 second** and `copilotkit-fs` in 22 s — the
+   directories were never too large to measure, only too cold to measure quickly. A
+   single `du -s /srv/evac` still exceeds 240 s because the parent re-walks all 120 482
+   files of `copilotkit-docker` plus everything under `dev-critical`; measure this tree one
+   directory at a time.
 
    **Nothing here is safe to delete on the strength of this audit.** `dev-critical` was
    written the day of the migration: it is an evacuation copy of a host that was still
