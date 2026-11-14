@@ -61,6 +61,19 @@ Run as root in the `mail` container. Steps 1–2 are read-only.
 
 **1. Preflight — record the state you are about to change.**
 
+The read-only half of this step is the setup script itself:
+
+```bash
+bash stalwart-oidc-discovery-setup.sh preflight
+```
+
+It checks the three units, the copy and its age, the leaf's SAN against the upstream the
+proxy will actually use, the anchor's expiry, the DNAT rule count, whether the provider
+answers from inside the container, both users' read access, and the bearer probe — and it
+changes nothing. Exit 0 is `PREFLIGHT OK`; exit 2 means it was not run in the container.
+Do the recording by hand as well the first time, because the recording matters as much as
+the verdict:
+
 ```bash
 systemctl is-active stalwart stalwart-oidc-proxy stalwart-oidc-redirect
 stalwart-oidc-redirect.sh status                      # every DNAT rule, current

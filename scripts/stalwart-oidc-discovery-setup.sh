@@ -5,6 +5,7 @@
 # Run as root inside the `mail` container, with the pieces beside it (a copy of
 # this file's directory, or the repo's scripts/ + systemd/):
 #   bash stalwart-oidc-discovery-setup.sh install
+#   bash stalwart-oidc-discovery-setup.sh preflight   # read-only, changes nothing
 #   bash stalwart-oidc-discovery-setup.sh rollback
 #
 # It installs from its own directory, not from /root: the 2026-10-25 /root cleanup
@@ -37,6 +38,79 @@ probe() {
     -H 'Authorization: Bearer local-discovery-probe' http://127.0.0.1:8080/jmap/session 2>/dev/null
 }
 
+# Read-only go/no-go for the ordered change in docs/mail-discovery-canonical.md.
+#
+# Every line below is a fact step 1 of that runbook asks a person to read by hand, printed
+# as one verdict — because the failure this whole change can cause is identical at every
+# half-done step (a start-up fetch cached as failed, every bearer token 500, anonymous still
+# 200), and it is cheapest to see before anything is touched. Nothing here writes, restarts
+# or refreshes. It refuses to run outside the mail container: every path is that
+# container's, so a verdict from anywhere else would be about nothing.
+preflight() {
+  if [ ! -d "$ETC" ]; then
+    echo "CANNOT RUN: $ETC is not here - this is not the mail container"
+    exit 2
+  fi
+  rc=0
+  say() { printf '  %-24s %s\n' "$1" "$2"; }
+  need() { printf '  %-24s %s\n' "$1" "$2"; rc=1; }
+
+  echo "units"
+  for unit in stalwart stalwart-oidc-proxy stalwart-oidc-redirect; do
+    state=$(systemctl is-active "$unit" 2>/dev/null || true)
+    if [ "$state" = "active" ]; then say "$unit" active; else need "$unit" "${state:-unknown}"; fi
+  done
+
+  echo "the copy"
+  if [ -s "$ETC/cache/discovery.json" ]; then
+    issuer=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["issuer"])' \
+      "$ETC/cache/discovery.json" 2>/dev/null || true)
+    if [ -n "$issuer" ]; then say "issuer served" "$issuer"; else need "issuer served" unreadable; fi
+    mtime=$(stat -c %Y "$ETC/cache/discovery.json" 2>/dev/null || echo 0)
+    age=$(( $(date +%s) - mtime ))
+    if [ "$age" -le 1800 ]; then say "copy age" "${age}s"; else need "copy age" "${age}s, past two refreshes"; fi
+  else
+    need "copy" missing
+  fi
+
+  echo "the pieces"
+  upstream=$(sed -n 's/^UPSTREAM=//p' /usr/local/bin/stalwart-oidc-discovery-proxy.py 2>/dev/null | head -1)
+  : "${upstream:=auth.cerulean.innotel.us}"
+  san=$(openssl x509 -in "$ETC/tls/server.pem" -noout -ext subjectAltName 2>/dev/null | tr -d '\n' || true)
+  case "$san" in
+    *"DNS:$upstream"*) say "leaf covers" "$upstream" ;;
+    *) need "leaf covers" "$upstream: ${san:-unreadable}" ;;
+  esac
+  expires=$(openssl x509 -in "$ETC/tls/ca.pem" -noout -enddate 2>/dev/null | cut -d= -f2)
+  say "anchor expires" "${expires:-unreadable}"
+  rules=$(/usr/local/bin/stalwart-oidc-redirect.sh status 2>/dev/null | grep -c 8443 || true)
+  if [ "${rules:-0}" -ge 2 ]; then say "dnat rules" "$rules"; else need "dnat rules" "${rules:-0}"; fi
+
+  echo "the fetch and the server"
+  code=$(curl -s -o /dev/null -w '%{http_code}' -m 10 \
+    "https://$upstream/application/o/stalwart-webui/.well-known/openid-configuration" 2>/dev/null)
+  if [ "$code" = "200" ]; then say "provider from here" 200; else need "provider from here" "${code:-no answer}"; fi
+  if su -s /bin/sh stalwart -c "test -r $ETC/ca-bundle.pem" 2>/dev/null; then
+    say "bundle readable" stalwart
+  else
+    need "bundle readable" "not by stalwart"
+  fi
+  if su -s /bin/sh oidcproxy -c "test -r $ETC/cache/discovery.json" 2>/dev/null; then
+    say "copy readable" oidcproxy
+  else
+    need "copy readable" "not by oidcproxy"
+  fi
+  bearer=$(probe)
+  if [ "$bearer" = "401" ]; then say "bearer probe" 401; else need "bearer probe" "${bearer:-no answer}"; fi
+
+  if [ "$rc" -eq 0 ]; then
+    echo "PREFLIGHT OK: every piece the switch depends on is here and working"
+  else
+    echo "PREFLIGHT NOT OK: fix the lines above before changing anything"
+  fi
+  return "$rc"
+}
+
 rollback() {
   echo "ROLLBACK: restoring the previous state"
   systemctl disable --now stalwart-oidc-proxy >/dev/null 2>&1
@@ -53,6 +127,7 @@ rollback() {
   echo "after rollback: bearer probe HTTP $(probe) (401 is healthy)"
 }
 
+if [ "$ACTION" = "preflight" ]; then preflight; exit $?; fi
 if [ "$ACTION" = "rollback" ]; then rollback; exit 0; fi
 
 set -e
