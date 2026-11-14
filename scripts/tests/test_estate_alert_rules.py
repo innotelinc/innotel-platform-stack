@@ -73,6 +73,11 @@ CHECK_SCRIPTS = [
     # standing cause), so its verdict has to be a series or it is a journal line the next
     # run overwrites — which is why it arrived with a branch rather than after one.
     "check-mail-identities",
+    # The vault pair: one asks whether the path is the vault, the other whether the disk
+    # under it is still trustworthy. Both arrived with a branch, because a check whose
+    # textfile stops arriving must not read as a quiet green.
+    "check-vault-mount",
+    "check-vault-disk",
 ]
 
 
