@@ -72,7 +72,7 @@ wallpaper `incus-ceiling-check.md` is about.
 | `agent-reaper` | 10 min | a session was skipped, or the scan could not run | no — every run writes `agent-reaper.prom`, so the run is a series, not a one-off |
 | `edge-liveness` | 5 min | the edge does not answer | no — it already carries its own mail/webhook channel, and a dead edge would buzz the topic every five minutes |
 | `estate-checks` | 30 min | cannot fail: every `ExecStart` is `-` prefixed so each check publishes even when it is unhappy; the finding is its `.prom` | no — there is nothing to wire |
-| `sync-mail-identities` | 15 min | a mailbox did not mirror | no — it retries in fifteen minutes, so a wired failure would buzz 96 times a day; **it has no metric yet, which is the open gap** |
+| `sync-mail-identities` | 15 min | a mailbox did not mirror | no — it retries in fifteen minutes, so a wired failure would buzz 96 times a day; its verdict is a **series** instead, `check-mail-identities` in `estate-checks` (2026-11-14) |
 | `stalwart-watchdog` | 5 min | the directory recovery did not take | no — `estate-checks`' `check-stalwart-oidc-cache` publishes that outcome |
 
 Serials (`memguard`, `stalwart-oidc-proxy`, `stalwart-oidc-redirect`, `wifi-powersave-off`) are

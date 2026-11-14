@@ -126,6 +126,7 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="mail_sso"}), "check", "mail_sso", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="stalwart_oidc_cache"}), "check", "stalwart_oidc_cache", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="telno_legacy_import"}), "check", "telno_legacy_import", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="mail_identities"}), "check", "mail_identities", "check", ".*")
         for: 30m
         labels:
           severity: critical

@@ -91,6 +91,10 @@ The remaining platforms are **business functions** built on top:
   deleted a script a unit exec'd, what moved to `/usr/local/sbin`, and the `/root`
   paths that stay because a container mount or root's own ssh config depends on
   them.
+- [**Applying the units on a host**](docs/unit-apply-checklist.md) — the order the
+  pieces go on in (script before unit, env file before `enable --now`), which host
+  each scheduled unit belongs to, and the one command per piece that proves it
+  landed rather than that it was copied.
 
 - [**Host map**](docs/host-map.md) — the addresses that actually answer, what runs
   on each, the env file every re-apply needs, and the placement errors this pass

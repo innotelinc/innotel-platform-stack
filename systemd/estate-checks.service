@@ -15,8 +15,16 @@ WorkingDirectory=/opt/innotel/estate-checks
 # extensions/monitoring/docker-compose.host.yml). Each check writes its own file there;
 # the collector turns them into the metrics `prometheus/rules/estate-checks.yml` alerts
 # on. The default is the Cerulean edge, which already runs the per-host metrics stack.
+#
+# It is deliberately not under /root. It used to be, because the Authentik dump beside it
+# was, and a `/root` cleanup would have taken every series in the estate with it silently
+# — the rules key on series that exist, so their absence is exactly the silence they were
+# written for. The path is node-exporter's own conventional one, which is also what the
+# compose file mounts when TEXTFILE_DIR is unset; `docs/root-paths.md` carries the ordered
+# re-apply, because the dump's own writer lives in the Cerulean repo and has to name the
+# same directory.
 EnvironmentFile=-/etc/innotel/estate-checks.env
-Environment=TEXTFILE_DIR=/root/cerulean-backup/authentik
+Environment=TEXTFILE_DIR=/var/lib/node_exporter/textfile
 
 # `-` on each ExecStart so a failing check does not stop the ones after it: all of them
 # must publish every run, or a check that is merely unhappy today would take the others'
@@ -203,3 +211,12 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-deploy-door.py --pr
 # the node through `incus exec` because the container has no sshd, and it asks the running
 # image's own importer rather than reimplementing what "present" means here.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-telno-legacy-import.py --prom ${TEXTFILE_DIR}/estate-check-telno-legacy-import.prom
+
+# The one scheduled job that retries faster than anything here reports, and the reason it
+# gets a series instead of a notification: `sync-mail-identities` runs every fifteen
+# minutes (`docs/estate-alerts-ntfy.md` explains why it is not wired to `OnFailure=`), so a
+# failure there is a standing condition measured in days, not an event. This reads the
+# timer's own verdict inside the `mail` container — the same `incus exec` hop
+# `check-alert-delivery.py` uses — so a mailbox with no identity to sign in is a page
+# rather than a journal line the next run overwrites.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-identities.py --prom ${TEXTFILE_DIR}/estate-check-mail-identities.prom
