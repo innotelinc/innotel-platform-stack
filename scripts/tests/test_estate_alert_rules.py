@@ -156,6 +156,15 @@ class RuleCase(unittest.TestCase):
             "and therefore a branch in EstateCheckAbsent",
         )
 
+    def test_no_two_scripts_claim_one_check_name(self):
+        # Everything here is keyed on the label value, so two scripts that declare the same
+        # `CHECK` are one series: whichever wrote its textfile last would supply both
+        # verdicts, and one door going dark would read as the other one's green. A
+        # copy-paste is how this happens, and nothing else in the estate would notice it.
+        names = [_load(name).CHECK for name in CHECK_SCRIPTS]
+        shared = sorted({name for name in names if names.count(name) > 1})
+        self.assertEqual(shared, [], "two checks publishing one series")
+
     def test_every_listed_check_is_run_by_the_unit(self):
         # And the last direction: a name in this list with no ExecStart passes the branch
         # test while the check never runs, so its branch can never fire either. The unit
