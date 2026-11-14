@@ -31,9 +31,15 @@
 # Copy `.env.host.example` to `.env.host` first; it is gitignored.
 #
 # On `.71` the same stack carries the estate's backup alerts: set
-# TEXTFILE_DIR=/root/cerulean-backup/authentik so node-exporter's textfile
+# TEXTFILE_DIR=/var/lib/node_exporter/textfile so node-exporter's textfile
 # collector picks up the dump's `status.prom`, and `./prometheus/rules/`
-# (mounted by the service below) is what turns it into alerts.
+# (mounted by the service below) is what turns it into alerts. That is also the
+# default the `volumes:` line below falls back to, and the value
+# `systemd/estate-checks.service` ships, so the three agree without anyone
+# remembering the path. It is deliberately not under `/root`: it used to be,
+# beside the Authentik dump, and a `/root` cleanup would have taken every series
+# in the estate with it while the rules above kept keying on series that no
+# longer existed. `docs/root-paths.md` has the ordered move.
 #
 # Alerts do not stop at the host they were evaluated on: `prometheus.host.yml`
 # carries the `alerting:` section that sends them to the estate's one Alertmanager

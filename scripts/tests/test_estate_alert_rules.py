@@ -68,6 +68,11 @@ CHECK_SCRIPTS = [
     "check-mail-sso",
     "check-stalwart-oidc-cache",
     "check-telno-legacy-import",
+    # The mailbox -> identity mirror. It is the one job here that retries every fifteen
+    # minutes and is deliberately not wired to `OnFailure=` (96 messages a day for one
+    # standing cause), so its verdict has to be a series or it is a journal line the next
+    # run overwrites — which is why it arrived with a branch rather than after one.
+    "check-mail-identities",
 ]
 
 

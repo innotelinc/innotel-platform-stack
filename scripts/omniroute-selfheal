@@ -64,7 +64,7 @@ STATE_FILE = os.environ.get(
 # nobody is told about is the default failure and this file is the fix for it.
 METRICS_FILE = os.environ.get(
     "OMNIROUTE_SELFHEAL_METRICS",
-    "/root/cerulean-backup/authentik/omniroute-selfheal.prom",
+    "/var/lib/node_exporter/textfile/omniroute-selfheal.prom",
 )
 # An active connection is re-probed this often, and only when it already carries
 # an error signal — probing healthy ones every ten minutes is upstream traffic
