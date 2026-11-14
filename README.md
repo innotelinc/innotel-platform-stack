@@ -99,6 +99,10 @@ The remaining platforms are **business functions** built on top:
   ordered apply for the directory node-exporter's textfile collector mounts, the
   dump writer in another repo that has to move first, and the before/after series
   snapshot that distinguishes a move from a loss.
+- [**The identity host**](docs/identity-hosts.md) — `auth.innotel.us` is canonical,
+  the other name is the same authentik reporting itself as a second issuer, and the
+  one consumer that cannot simply be renamed because its trust anchor lives on the
+  mail container.
 
 - [**Host map**](docs/host-map.md) — the addresses that actually answer, what runs
   on each, the env file every re-apply needs, and the placement errors this pass

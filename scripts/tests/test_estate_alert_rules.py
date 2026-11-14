@@ -78,6 +78,10 @@ CHECK_SCRIPTS = [
     # textfile stops arriving must not read as a quiet green.
     "check-vault-mount",
     "check-vault-disk",
+    # The Orion NAS door: the proxy's issuer, that issuer's discovery and the redirect the
+    # door emits are three statements of one fact, and its failure mode is a 500 at the
+    # callback that a bogus code produces too. It arrived with a branch.
+    "check-orion-signin",
 ]
 
 

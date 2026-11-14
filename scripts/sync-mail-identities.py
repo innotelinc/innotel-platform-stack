@@ -26,7 +26,7 @@ in to. `--include-all` syncs every addressable account instead.
 Usage (needs both management APIs; credentials are read from the environment):
 
     STALWART_URL=http://127.0.0.1:8080 STALWART_ADMIN=admin:password \\
-    AUTHENTIK_API_URL=https://auth.cerulean.innotel.us AUTHENTIK_TOKEN=... \\
+    AUTHENTIK_API_URL=https://auth.innotel.us AUTHENTIK_TOKEN=... \\
         ./scripts/sync-mail-identities.py                # dry run, the default
         ./scripts/sync-mail-identities.py --apply        # create the missing users
 
@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
 
     stalwart_url = os.environ.get("STALWART_URL", "http://127.0.0.1:8080")
     stalwart_admin = os.environ.get("STALWART_ADMIN", "")
-    api = os.environ.get("AUTHENTIK_API_URL", "https://auth.cerulean.innotel.us")
+    api = os.environ.get("AUTHENTIK_API_URL", "https://auth.innotel.us")
     token = os.environ.get("AUTHENTIK_TOKEN", "")
     if not stalwart_admin or not token:
         print("sync-mail-identities: STALWART_ADMIN and AUTHENTIK_TOKEN are required",

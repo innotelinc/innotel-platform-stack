@@ -37,6 +37,9 @@ def _load():
 check = _load()
 
 AUTH = "https://auth.cerulean.innotel.us/application/o/authorize/?client_id=x"
+#: The canonical identity host (`docs/identity-hosts.md`): the same gate on the other name,
+#: which this check has to catch just as loudly.
+AUTH_INNOTEL = "https://auth.innotel.us/application/o/authorize/?client_id=x"
 JELLYFIN_PAGE = b"<!doctype html><html><head><title>Jellyfin</title></head></html>"
 SPLASH = b"\x89PNG\r\n\x1a\n" + b"0" * 60_000
 
@@ -78,6 +81,14 @@ class FrontPage(unittest.TestCase):
         # The gate itself was the outage: a TV client cannot complete an OIDC webview flow.
         result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(media=(302, {"Location": AUTH}, b"")))
+        self.assertFalse(result.ok)
+        self.assertEqual(codes(result), ["gate-restored"])
+
+    def test_the_gate_is_caught_on_the_canonical_brand_too(self):
+        # The estate serves one authentik under two names, so an assertion that only knows
+        # one of them is an assertion that stops working the day a gate moves.
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
+                             probe=probe_for(media=(302, {"Location": AUTH_INNOTEL}, b"")))
         self.assertFalse(result.ok)
         self.assertEqual(codes(result), ["gate-restored"])
 

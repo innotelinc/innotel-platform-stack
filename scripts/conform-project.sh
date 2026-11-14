@@ -782,8 +782,11 @@ OMNIROUTE_BASE_URL=http://10.10.2.1:20128/v1
 OMNIROUTE_API_KEY=change-me-omniroute-api-key
 OMNIROUTE_MODEL=auto
 
-# --- Authentik (OIDC identity provider — Cerulean's Authentik) --------------
-OIDC_ISSUER_URL=https://auth.cerulean.innotel.us/application/o/${name}/
+# --- Authentik (OIDC identity provider — the estate's Authentik) ------------
+# The canonical identity host is auth.innotel.us (docs/identity-hosts.md). Both names are
+# the same instance and each reports ITSELF as the issuer, so this must be the brand the
+# provider was created under — not whichever one a template happened to carry.
+OIDC_ISSUER_URL=https://auth.innotel.us/application/o/${name}/
 OIDC_CLIENT_ID=${name}
 OIDC_CLIENT_SECRET=change-me-oidc-client-secret
 OIDC_REDIRECT_URI=https://${domain}/api/auth/callback

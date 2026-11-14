@@ -107,7 +107,8 @@ class DashboardCase(unittest.TestCase):
         # `check-vault-mount` (2026-11-14) took the unit to 25 and the number was left
         # at 24 — the exact drift this test exists to catch, and it did: a threshold one
         # short is a green panel that tolerates one silent check. `check-mail-identities`
-        # took it to 26 the same day, and both are counted now.
+        # took it to 26 the same day, `check-vault-disk` to 27, and `check-orion-signin` to
+        # 28; all four are counted now.
         unit = UNIT.read_text(encoding="utf-8")
         checks = set(re.findall(r"/opt/innotel/estate-checks/(check-[a-z0-9-]+)\.py", unit))
         self.assertTrue(checks, "the unit must run the checks")
