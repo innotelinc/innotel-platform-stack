@@ -148,3 +148,22 @@ Keep the id equal to the provider's `client_id`; while `oauthClientId` is set, s
 through Stalwart's own authorization server answers `Unknown client id` unless an
 `OAuthClient` with that id also exists, and the full scope keeps the console's access.
 `oauthScopes` carries it so the application keeps full access through either path.
+
+Storing the fields is not enough. Stalwart caches the rendered console index, so `/admin/`
+kept answering `<meta name="oauth-client-id" content="" />` — the exact input the WebUI
+reads — even though `x:Application/get` already returned the id. The browser therefore
+showed the same refusal after the change. `systemctl restart stalwart` re-rendered it:
+
+```
+<meta name="oauth-client-id" content="stalwart-webui" />
+<meta name="oauth-scopes" content="urn:stalwart:oauth:scope:full" />
+```
+
+Every later change to `oauthClientId` or `oauthScopes` needs that restart too. Verify with
+the meta tag, not the JMAP read-back, because the read-back succeeds while the page is
+still stale:
+
+```
+curl -sk -H 'Host: admin.mail.innotel.us' https://127.0.0.1/admin/ \
+  | grep -o '<meta name="oauth[^>]*>'
+```
