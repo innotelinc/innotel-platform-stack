@@ -1,0 +1,13 @@
+[Unit]
+Description=Check the vault disk's SMART health daily
+
+[Timer]
+# Daily, plus shortly after boot: the 2026-11-14 incident was visible at the moment the
+# drive re-enumerated, and a day of silence after a reconnect is a day of not knowing.
+OnBootSec=10m
+OnCalendar=*-*-* 06:20:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

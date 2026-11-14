@@ -1,0 +1,14 @@
+[Unit]
+Description=Vault disk health — SMART attributes of the drive behind /srv/vault
+Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/vault-replica-restore.md
+After=network-online.target
+# The drive is `nofail`: the check must still run (and say the disk is absent) when it
+# is not there, so this deliberately does not require the mount.
+OnFailure=estate-notify@%n
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vault-disk-health
+# The log is the audible part; the exit status is what the timer's OnFailure reads.
+StandardOutput=journal
+StandardError=journal
