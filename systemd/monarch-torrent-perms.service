@@ -1,0 +1,13 @@
+[Unit]
+# Repairs the ownership of monarch's Transmission folders, because deleting them
+# leaves the stack recreating them as root:root 755 while the daemon runs as
+# uid 1000 - every write then fails with "Permission denied (13)".
+# Installed by scripts/monarch-torrent-perms.sh's header. On i1 only.
+Description=Repair monarch torrent folder ownership for Transmission (uid 1000)
+Documentation=file:///usr/src/projects/complete/platform-stack/scripts/monarch-torrent-perms.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/monarch-torrent-perms.sh
+Nice=10
+IOSchedulingClass=idle
