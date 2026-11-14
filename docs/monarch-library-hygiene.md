@@ -70,3 +70,30 @@ that came from the old skeleton rather than the library copy.
 The stack writes to it continuously, so the file count moves: it read **259** at cutover,
 **264** twenty minutes later and **265** after the purge, because the *arr apps import as
 they run. A count that grows is the permission fix working, not drift.
+
+## The orphan watcher
+
+`scripts/media-orphans.sh` asks Sonarr and Radarr what they claim and names everything in
+the library that neither does. It runs inside `monarch` — where the library is
+`/data/media` and the APIs listen on 127.0.0.1 — driven from i1 by
+`media-orphans.timer`: daily at 04:20 and 20 minutes after boot.
+
+```bash
+systemctl list-timers media-orphans.timer
+journalctl -u media-orphans.service -n 20 --no-pager
+```
+
+Exit 0 means every entry holding media is claimed, 1 names unclaimed media, 2 means an
+API could not be read. That last case is never reported as clean: a mistyped key or a
+dead Sonarr shows up as `CANNOT RUN`, not as a tidy library. Verified by breaking
+Radarr's key on purpose and watching it exit 2 instead of 0.
+
+Only media counts as an orphan. A folder left behind by a purge usually still holds
+`.nfo`, `.srt` or poster files, which Sonarr deliberately does not claim; those are
+reported as `debris (no media, unclaimed)` and do not fail the check. Today that is
+`American Hostage` (3 `.nfo`) and `Lanterns` (2 `.nfo`) — five files, 7 KB, left by the
+quarantine purge. Removing them is optional and was not done here.
+
+There is **no notification channel**: ntfy is not running anywhere on the estate, so a
+failure is visible only as a failed unit and in the journal. On i1, `systemctl --failed`
+is the place to look, not an inbox.
