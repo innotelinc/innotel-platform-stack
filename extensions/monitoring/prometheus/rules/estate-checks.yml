@@ -130,6 +130,11 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="vault_mount"}), "check", "vault_mount", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="vault_disk"}), "check", "vault_disk", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="orion_signin"}), "check", "orion_signin", "check", ".*")
+          # Since 2026-09-18, and never named here until the test that reads the scripts on disk
+          # was written: this check has published into the family since the media doors were
+          # split into `media` and `iptv`, so a textfile that stopped arriving alerted on
+          # nothing — the exact silence this rule exists for, one branch short.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="media_doors"}), "check", "media_doors", "check", ".*")
         for: 30m
         labels:
           severity: critical

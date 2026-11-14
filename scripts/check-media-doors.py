@@ -71,6 +71,16 @@ WATCH_DOOR = "https://iptv.innotel.us"
 #: exists for, one rename later.
 AUTH_HOSTS = ("auth.cerulean.innotel.us", "auth.innotel.us")
 SPLASH_PATH = "/Branding/Splashscreen"
+
+# What this check is called in the shared family, and why it is a constant here at all:
+# it used to publish `check="media-doors"` as an inline literal — the only check in the
+# estate with no `CHECK`, and therefore the only one invisible to the hand-typed list that
+# ties a script to its `EstateCheckAbsent` branch. A check whose absence nothing can name
+# is the failure that rule exists for, and this one guards the watch door that nothing else
+# in the estate looks at. The hyphen was the only one in the family too; the series is
+# `media_doors` like every other. The textfile keeps its `estate-check-media-doors.prom`
+# name, because that is a path in the unit, not a label.
+CHECK = "media_doors"
 WEB_PATH = "/web/"
 DEFAULT_SPLASH_MIN = 50_000
 USER_AGENT = "innotel-estate-check/1.0 (+media doors)"
@@ -207,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.prom:
             return
         try:
-            write_prom(args.prom, "media-doors", result, ran_ok=ran)
+            write_prom(args.prom, CHECK, result, ran_ok=ran)
         except OSError as error:
             print(f"check-media-doors: could not write {args.prom}: {error}", file=sys.stderr)
 
