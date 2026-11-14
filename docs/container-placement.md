@@ -57,6 +57,26 @@ Everything else keeps the `$request_uri` passthrough, so `/courses`, `/catalog` 
 all four prefixes answer **301** and follow through to **200**; `ai.lms` 301,
 `apps.lms` 301, `meilisearch.lms` 200 and `mail` 307 unchanged.
 
+## Changes applied 2026-11-14 — `auvik` removed, `copilotkit` listed
+
+- **`auvik` (`.72`) is gone.** The Auvik collector container was deleted on `i1` (512 MiB /
+  2 CPU, no snapshots, no custom volumes, no on-disk backup) and its row is out of
+  `scripts/check-container-addresses.py`. Nothing dialled `.72` — none of the edge's
+  `proxy_host` blocks names it and no A record points there — so the row was the only thing
+  still asserting the address, and `check-address-latency.py`, which reads that table,
+  failed on the dark address every run. The stuck-process allowlist's entry for its log
+  tail went with it, since that process no longer exists to be excused.
+- **`atheniq` (`.59`) and `mail` (`.15`) are listed on `i1`**, where the 2026-11-12 move put
+  them. The table had not followed the move, so every run reported "i2 atheniq: not present"
+  and nothing else noticed.
+- **`copilotkit` (`.114`) joins `i2`**, created 2026-11-14 00:48: the self-hosted dashboard
+  behind `cpk.lab.innotel.us`, `cpk-api.…` and `cpk-ws.…`. It arrived on a DHCP lease and was
+  pinned statically the same day (`99-static.yaml` beside the LXC default: `dhcp4: false`,
+  `.114/24`, default via `.1`, DNS `.1`) — a renumber is exactly how the 2026-10-01 outage
+  happened, and three names here are reached by address. `netplan apply` cannot run inside a
+  container (it calls `udevadm`, which has no daemon there), so the pin is applied with
+  `netplan generate` then `systemctl restart systemd-networkd`.
+
 ## Changes applied 2026-11-12 — `capstone` retired, `atheniq` and `mail` moved to `i1`
 
 - **`capstone` is retired from `i2`.** Config saved to
@@ -872,23 +892,24 @@ that table is a bug in one of them.
 
 | Host | Container | IP | Role | Mem (cap) | CPU cap |
 |---|---|---|---|---|---|
+| i1 | `atheniq` | `.59` | AthenIQ LMS (Tutor / Open edX) | 3.61 GiB (5.25 GiB) | 6 |
 | i1 | `atlas` | `.90` | Gitea + convex + postgres + dashboard | 824 MiB (896 MiB) | 2 |
-| i1 | `auvik` | `.72` | Auvik collector (`auviknetworks/collector`) | 188 MiB (512 MiB) | 2 |
+| i1 | `auvik` | ~~`.72`~~ | **removed 2026-11-14** — the Auvik collector container and its disks were deleted; nothing dialled `.72` (no vhost, no A record) | — | — |
 | i1 | `blueprint` | `.76` | DayZero app server (`dayzero.service`) | 81 MiB (512 MiB) | 2 |
 | i1 | `clearpath` | `.83` | Clearpath (`app.denovocredit.com`) | 64 MiB (256 MiB) | 2 |
 | i1 | `genesis` | `.66` | BusinessOps — intake + assisted EIN filing | 196 MiB (512 MiB) | 2 |
 | i1 | `genie-preview` | `.24` | the Genie preview (`innotel/ontrak-genie:main`) | 155 MiB (512 MiB) | 2 |
+| i1 | `mail` | `.15` | mail (SMTP/IMAP) | 438 MiB (4 GiB) | 2 |
 | i1 | `monarch` | `.56` | media (Jellyfin etc.) | 4.79 GiB (8 GiB) | 2 |
 | i1 | `nas` | `.89` | **the NAS desktop** (`nas.innotel.us`) — Orion SPA + API | 86 MiB (256 MiB) | 2 |
 | i1 | `ontrak` | `.21` | Ontrak family stack + Ontrak Sync | 1.50 GiB (2.13 GiB) | 2 |
 | i1 | `regcache` | `.79` | Docker registry mirror (`registry:2`) | 107 MiB (384 MiB) | 2 |
 | i1 | `rizzaura` | `.62` | Rizz Aura (5 svc) | 208 MiB (512 MiB) | 2 |
 | i1 | `www` | ~~`.80`~~ | **retired 2026-10-29** — the public landing page moved to `ord-atheniq` (`104.238.162.5:8086`); stopped since 2026-10-28 with an empty volume | — | — |
-| i2 | `atheniq` | `.59` | AthenIQ LMS (Tutor / Open edX) | 3.61 GiB (5.25 GiB) | 6 |
 | i2 | `capstone` | `.30` | Zeus / capstone telephony | 4.34 GiB (uncapped) | 2 |
+| i2 | `copilotkit` | `.114` | CopilotKit's self-hosted dashboard (`cpk.lab.innotel.us`, `cpk-api.…`, `cpk-ws.…`) | 1.29 GiB (10 GiB) | 6 |
 | i2 | `distro` | `.61` | distro control plane | 204 MiB (1 GiB) | 2 |
 | i2 | `magnate` | `.57` | Magnate | 181 MiB (1 GiB) | 2 |
-| i2 | `mail` | `.15` | mail (SMTP/IMAP) | 438 MiB (4 GiB) | 2 |
 | i2 | `monitor` | `.88` | SigNoz — traces, metrics, logs | — | 2 |
 | i2 | `onyx` | `.60` | Onyx (RAG) | 291 MiB (1 GiB) | 2 |
 | i2 | `pi` | `.70` | pi | 193 MiB (1 GiB) | 2 |

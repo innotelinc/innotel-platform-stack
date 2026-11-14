@@ -112,8 +112,10 @@ class ShapeCase(unittest.TestCase):
 
 class AllowlistCase(unittest.TestCase):
     def test_a_command_that_is_long_lived_by_design_is_not_a_finding(self):
-        command = "tail -F /usr/share/auvik/agent/logs/AuvikAgent.log"
-        self.assertEqual(stuck.by_design(command), "the Auvik agent's own log tail, started by its entrypoint")
+        # The Auvik collector's log tail was the case this was written for; it was
+        # removed with the container on 2026-11-14, so the Vault wrapper carries it now.
+        command = "/vault/bootstrap/entrypoint.sh"
+        self.assertEqual(stuck.by_design(command), "the Vault bootstrap wrapper")
         self.assertIsNone(stuck.stuck_kind(_process(99999, command)))
 
 
