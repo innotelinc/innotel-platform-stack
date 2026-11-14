@@ -75,6 +75,20 @@ possibly deleted folders by accident. `zfs list -t snapshot` on
 from the pool; the three affected torrents can only be re-downloaded. This is a loss to
 record, not a reclaim to count.
 
+### Update, 2026-11-14 02:05 — the library left the container pool
+
+`tank/incus/containers/monarch` is **58.0 G** (from 175 G) and the media lives in its own
+dataset: `tank/media-downloads`, **121 G**, mounted at `/data/media` inside the container.
+`tank` stands at **417 G used / 402 G available**. The copy was verified on byte total, file
+count and two checksums before the rootfs originals were deleted, so this is a move, not
+another deletion. `monarch` no longer competes with mail, LMS and Docker for the same
+spindle at 67 % of the pool, and there is now **402 G** of headroom where the plan assumed
+24.8 G.
+
+What is still true: there is **one** spindle. The media dataset shares it with everything
+else, so streaming still contends for IO; the move removes the capacity risk, not the
+bandwidth one, and the second-disk reasoning below stands.
+
 ### What the 534 G actually is (checked 2026-11-12)
 
 `zfs list -o used,usedbydataset,usedbysnapshots,usedbychildren` on
