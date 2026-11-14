@@ -125,7 +125,9 @@ class LiveCase(unittest.TestCase):
 ####################################################################################
 
 ADDRESS_ROWS = {
-    I1: [("atlas", "192.168.1.90"), ("auvik", "192.168.1.72"),
+    I1: [("atheniq", "192.168.1.59"), ("atlas", "192.168.1.90"),
+         # atheniq and mail came here from i2 on 2026-11-12 and kept their addresses.
+         ("mail", "192.168.1.15"),
          # blueprint and clearpath moved here from i2 on 2026-10-30; their
          # addresses are pinned in their own netplan, so they travelled with them.
          ("blueprint", "192.168.1.76"), ("clearpath", "192.168.1.83"),
@@ -133,13 +135,15 @@ ADDRESS_ROWS = {
          ("genie-preview", "192.168.1.24"), ("monarch", "192.168.1.56"),
          ("nas", "192.168.1.89"), ("ontrak", "192.168.1.21"),
          ("regcache", "192.168.1.79"), ("rizzaura", "192.168.1.62")],
-    I2: [("atheniq", "192.168.1.59"), ("capstone", "192.168.1.30"),
+    I2: [("capstone", "192.168.1.30"),
+         # copilotkit joined i2 on 2026-11-14 (the dashboard behind the cpk names).
+         ("copilotkit", "192.168.1.114"),
          # proxy was recreated here on 2026-10-26 and keeps the edge address.
          ("proxy", "192.168.1.71"),
          # i3 was retired on 2026-11-02 and these eight were copied here; every
          # address is pinned inside its container, so only the host key changed.
          ("distro", "192.168.1.61"), ("magnate", "192.168.1.57"),
-         ("mail", "192.168.1.15"), ("monitor", "192.168.1.88"),
+         ("monitor", "192.168.1.88"),
          ("onyx", "192.168.1.60"), ("pi", "192.168.1.70"),
          ("signara", "192.168.1.44"), ("subscribe", "192.168.1.58")],
     # i4 holds six satellites (sage, telno, telno-turn, terminal, vault, vpn); the edge

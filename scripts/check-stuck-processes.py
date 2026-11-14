@@ -97,8 +97,6 @@ PROBE_PATTERNS: tuple[tuple[str, str], ...] = (
 #: Long-lived by design, each with the reason it is allowed to be old. Checked before
 #: the probe patterns: an allowlisted process is a correct state, not a finding.
 ALLOWLIST: tuple[tuple[str, str], ...] = (
-    (r"tail -F /usr/share/auvik/agent/logs/AuvikAgent\.log",
-     "the Auvik agent's own log tail, started by its entrypoint"),
     (r"/vault/bootstrap/entrypoint\.sh", "the Vault bootstrap wrapper"),
     (r"^sleep\s+43200$", "the Vault 12-hour rotation sleep"),
 )
