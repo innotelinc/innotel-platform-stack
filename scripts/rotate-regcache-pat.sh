@@ -97,7 +97,7 @@ esac
 # sed is used to substitute the token later, so a token that sed would mangle is
 # refused here rather than written into a broken environment file.
 case "$NEW_PAT" in
-  *'|'*|*'&'*|*'\'*) cannot "$PAT_FILE holds |, & or a backslash, which this script cannot substitute safely" ;;
+  *'|'*|*'&'*|*"\\"*) cannot "$PAT_FILE holds |, & or a backslash, which this script cannot substitute safely" ;;
 esac
 
 VCMD="timeout 60 incus exec $INCUS -- docker"
@@ -152,6 +152,7 @@ fi
 IMG="$($VCMD inspect -f '{{.Config.Image}}' "$CONTAINER" | tr -d '\r')"
 RESTART="$($VCMD inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$CONTAINER" | tr -d '\r')"
 NETMODE="$($VCMD inspect -f '{{.HostConfig.NetworkMode}}' "$CONTAINER" | tr -d '\r')"
+# shellcheck disable=SC2016  # a Go template: $p and $c are the template's variables, not the shell's
 PORTS="$($VCMD inspect -f '{{range $p, $c := .HostConfig.PortBindings}}{{$p}}={{range $c}}{{.HostPort}}{{end}} {{end}}' "$CONTAINER" | tr -d '\r')"
 BINDS="$($VCMD inspect -f '{{range .HostConfig.Binds}}{{.}} {{end}}' "$CONTAINER" | tr -d '\r')"
 ENV_LINES="$($VCMD inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" | tr -d '\r')"
@@ -211,9 +212,11 @@ rollback() {
   log "rolling back to the previous container"
   $VCMD rm -f "$CONTAINER" >/dev/null 2>&1 || true
   ARGS=(); build_args "$OLD_ENV_FILE"
-  $VCMD "${ARGS[@]}" >/dev/null 2>&1 \
-    && log "old container is back" \
-    || log "WARNING: rollback failed -- recreate $CONTAINER from $OLD_ENV_FILE by hand"
+  if $VCMD "${ARGS[@]}" >/dev/null 2>&1; then
+    log "old container is back"
+  else
+    log "WARNING: rollback failed -- recreate $CONTAINER from $OLD_ENV_FILE by hand"
+  fi
 }
 
 trap 'if [ $? -ne 0 ] && [ "$ROLLED_BACK" -eq 0 ]; then rollback; fi' EXIT

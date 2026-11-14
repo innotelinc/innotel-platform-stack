@@ -43,20 +43,6 @@ LOG=${LOG:-/var/log/swap-ceiling-check.log}
 
 say() { printf '%s %s %s\n' "$(date -Is)" "$(hostname)" "$*"; }
 
-# incus reports limits as sizes ("2GiB", "8053063680"); normalise to bytes
-to_bytes() {
-  case "$1" in
-    '' ) echo 0 ;;
-    *GiB) awk -v v="${1%GiB}" 'BEGIN{printf "%.0f", v*1073741824}' ;;
-    *MiB) awk -v v="${1%MiB}" 'BEGIN{printf "%.0f", v*1048576}' ;;
-    *KiB) awk -v v="${1%KiB}" 'BEGIN{printf "%.0f", v*1024}' ;;
-    *GB)  awk -v v="${1%GB}"  'BEGIN{printf "%.0f", v*1000000000}' ;;
-    *MB)  awk -v v="${1%MB}"  'BEGIN{printf "%.0f", v*1000000}' ;;
-    *[0-9]) echo "$1" ;;
-    *) echo 0 ;;
-  esac
-}
-
 # cgroup v2 writes "max" for unlimited; that is not a ceiling of zero bytes.
 cgroup_num() {
   case "${1:-}" in

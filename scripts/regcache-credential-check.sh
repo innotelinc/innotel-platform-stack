@@ -49,7 +49,7 @@ user=$(printf '%s\n' "$env_lines" | sed -n 's/^REGISTRY_PROXY_USERNAME=//p' | he
 user=${user:-$USERNAME}
 [ -n "$pass" ] || { echo "CANNOT RUN: no REGISTRY_PROXY_PASSWORD in $source"; exit 2; }
 case "$pass" in
-  *'"'*|*'\'*) echo "CANNOT RUN: the stored token has a quote or backslash; refusing to re-express it"; exit 2 ;;
+  *'"'*|*"\\"*) echo "CANNOT RUN: the stored token has a quote or backslash; refusing to re-express it"; exit 2 ;;
 esac
 
 token_file="${TMPDIR:-/tmp}/regcache-token.$$"
