@@ -129,14 +129,28 @@ CHECK = "container_address"
 #: (`60-<name>.yaml`, `dhcp4: false`).
 EXPECTED: dict[str, dict[str, str]] = {
     "i1": {
+        # `atheniq` (.59) and `mail` (.15) were still listed under `i2`, where neither
+        # has run for as long as the table has been wrong — every run reported "i2
+        # atheniq: not present" until 2026-11-14. Both pin the address in their own
+        # netplan, so only the host key moves. `mail` is what `check-mail-relay`,
+        # `check-mail-sso` and `check-stalwart-oidc-cache` read, by address rather than
+        # by host, which is why the check was the only thing that noticed.
+        "atheniq": "192.168.1.59",
         "atlas": "192.168.1.90",
-        "auvik": "192.168.1.72",
+        # `auvik` (`.72`) is **not** a row any more (2026-11-14). The container is
+        # STOPPED with `boot.autostart: false` and nothing dials `.72` — none of the
+        # edge's proxy_host blocks names it — so the row was asserting an address the
+        # estate does not serve. `check-address-latency`, which reads this table, failed
+        # on it every run: a dark address with no door in front of it is not an outage,
+        # it is a row outliving its service. Re-add the row with its address the day the
+        # container is started again.
         # Moved from i2 on 2026-10-30 (stopped, copied, started, then deleted there).
         # Each keeps the address pinned in its own netplan, so only the host key moved.
         "blueprint": "192.168.1.76",
         "clearpath": "192.168.1.83",
         "genesis": "192.168.1.66",
         "genie-preview": "192.168.1.24",
+        "mail": "192.168.1.15",
         "monarch": "192.168.1.56",
         "nas": "192.168.1.89",
         "ontrak": "192.168.1.21",
@@ -153,10 +167,14 @@ EXPECTED: dict[str, dict[str, str]] = {
     # reads this table, failed every run on a deliberately stopped container. Re-add the
     # row with the address the day it is placed on a host that can hold it.
     "i2": {
-        "atheniq": "192.168.1.59",
+        # CopilotKit's self-hosted dashboard, on `.114` since 2026-11-14 (its
+        # `cpk.lab.innotel.us`, `cpk-api.…` and `cpk-ws.…` names forward here). Its
+        # address comes from DHCP in its own netplan, so rule 3 warns about it until
+        # that is pinned — and it is the 2026-10-01 failure waiting to happen: a
+        # recreated container can come up elsewhere and take the dashboard with it.
+        "copilotkit": "192.168.1.114",
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
-        "mail": "192.168.1.15",
         # Running since before the table was written; the check kept reporting it as
         # "running and not in the table" on every run until 2026-10-28.
         "monitor": "192.168.1.88",
