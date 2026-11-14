@@ -103,6 +103,15 @@ The remaining platforms are **business functions** built on top:
   the other name is the same authentik reporting itself as a second issuer, and the
   one consumer that cannot simply be renamed because its trust anchor lives on the
   mail container.
+- [**Moving the mail server's discovery to `auth.innotel.us`**](docs/mail-discovery-canonical.md)
+  — the name is a trust anchor on that container, not a setting: the both-SAN leaf,
+  the private `hosts` file, the DNAT and the directory issuer, in the order that
+  keeps every half-done step from being the 2026-11-06 cached-500 again — plus what
+  rollback is not.
+- [**Applying the Orion issuer change on the edge**](docs/orion-issuer-apply.md) —
+  what to re-run, why a restart is not enough (`force-recreate`), and why the
+  redirect the running proxy emits is the proof rather than the env file it was just
+  written from.
 
 - [**Host map**](docs/host-map.md) — the addresses that actually answer, what runs
   on each, the env file every re-apply needs, and the placement errors this pass
