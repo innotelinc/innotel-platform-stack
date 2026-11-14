@@ -53,8 +53,8 @@ media library is already split off the container pool is wrong: the split was cr
 and never used.
 
 Consequence: reclaiming it means **copying 534 G to a target with 534 G free**. No such
-target exists here today — `tank` has 24.8 G available (**20.4 G** on 2026-11-13), and
-`sdc` is 465.8 G, smaller than the library. That is why step 2 below is a purchase, not a maintenance task.
+target exists here today — `tank` has 24.8 G available (**31.2 G** on 2026-11-13 evening,
+see the drift note), and `sdc` is 465.8 G, smaller than the library. That is why step 2 below is a purchase, not a maintenance task.
 
 ## Why it stalls — the measured evidence
 
@@ -117,7 +117,7 @@ and every LMS request competes with a 534 G media library.
    | Directory | Size | Incus consumer |
    |---|---|---|
    | `dev-critical` | **16.61 GiB** (17 834 354 176 B) | `workloads` → `/mnt/archive` |
-   | `dev-incus` | **8.27 GiB** (8 879 727 616 B) | none |
+   | `dev-incus` | **8.27 GiB** (8 879 727 616 B) | none — **retirement started 2026-11-13** |
    | `copilotkit-fs` | **5.06 GiB** (5 428 507 648 B) | `workloads` → `/mnt/archive2` |
    | `copilotkit-docker` | **1.76 GiB** (1 894 828 544 B), 120 482 files | `workloads` → `/mnt/archive3` |
    | `dev-fs` | **118 MiB** (123 891 200 B) | none |
@@ -129,6 +129,21 @@ and every LMS request competes with a 534 G media library.
    is reclaimable while `workloads` still mounts them. The total sits slightly above
    `tank/evac`'s 31.7 G because separate walks count shared inodes more than once.
 
+   **`dev-incus` is being retired (2026-11-13).** It was a copy of an Incus var
+   directory: its `containers/` entries were symlinks pointing at the *live*
+   `/var/lib/incus` paths, and its storage pool held rootfs copies of `aidev`, `dev-smoke`
+   and `omarchy-apple` — none of which exist as live containers. Checked before deleting:
+   no container config referenced it (`workloads` has three evac binds, none of them this
+   one), nothing in `/etc/fstab`, systemd or `/etc/incus`, and no process cwd or root
+   pointed at it. A manifest of its top three levels is kept at
+   `i1:/root/dev-incus-manifest.txt`.
+
+   Removal runs detached (`setsid nohup rm -rf`) at `nice 19` / `ionice -c3`, because it
+   is hundreds of thousands of small files on a 93 %-full spindle: it freed roughly 0.4 G
+   in the first quarter hour, so `tank/evac` will fall gradually rather than at once. Watch
+   it with `pgrep -f 'rm -rf /srv/evac/dev-incus'` and `zfs list tank/evac`; when it
+   finishes, `tank/evac` should settle near **23.4 G**.
+
    Why the first attempts reported nothing: `du` had to fault cold metadata off a spindle
    already at 79–82 % IO pressure and was killed at the 300 s budget. The warmer second
    pass finished `copilotkit-docker` in **1 second** and `copilotkit-fs` in 22 s — the
@@ -136,6 +151,15 @@ and every LMS request competes with a 534 G media library.
    single `du -s /srv/evac` still exceeds 240 s because the parent re-walks all 120 482
    files of `copilotkit-docker` plus everything under `dev-critical`; measure this tree one
    directory at a time.
+
+   **Space drift, same evening.** `tank` showed 20.4 G available at the start of this
+   measurement and **31.2 G** by the end of it: the pool *gained* space during the day
+   rather than losing it. `tank/incus/containers/workloads` fell from 44.1 G to 30.4 G
+   between two readings, and nothing on the host explains that locally — there is no prune
+   timer or cron, `journalctl` since midnight holds no prune or reclaim record, and the
+   only file over 100 M written since 2026-11-12 is a 141 M Incus image. Read the day's
+   swings in available space as a busy pool being measured at different moments, not as
+   consumption that needs chasing.
 
    **Nothing here is safe to delete on the strength of this audit.** `dev-critical` was
    written the day of the migration: it is an evacuation copy of a host that was still
