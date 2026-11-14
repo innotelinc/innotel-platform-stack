@@ -58,11 +58,12 @@ UPSTREAM_REPO=bulwarkmail/webmail
 # is built on BUILD_HOST instead and streamed back, and a local build has to be
 # asked for explicitly.
 BUILD_HOST=${BUILD_HOST:-root@192.168.1.54}
-# No default: a committed password is a leaked password. Export it, or set
-# BUILD_HOST_PASS in the environment the cron/CI job runs under.
-BUILD_HOST_PASS=${BUILD_HOST_PASS:?set BUILD_HOST_PASS before running this}
+# No default: a committed password is a leaked password. It is required only by the
+# bulwark half, so it is checked there rather than at load time — the weekly timer runs
+# `--only stalwart`, and dying on a variable that half never reads is how a Stalwart
+# updater declares itself broken every Sunday.
+BUILD_HOST_PASS=${BUILD_HOST_PASS:-}
 BUILD_DIR=/root/loomix-build
-BUILD_SSH="sshpass -p $BUILD_HOST_PASS ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=20"
 
 STALWART_REPO=stalwartlabs/stalwart
 STALWART_ASSET=stalwart-x86_64-unknown-linux-gnu.tar.gz
@@ -74,6 +75,12 @@ BACKUP=$BACKUP_ROOT/$TS
 MODE=apply
 ONLY=both
 ALLOW_MAJOR=0
+
+# Resolved per component; the summary prints "-" for whichever half `--only` skipped,
+# which used to crash on `set -u` instead (a weekly unit failing after printing its table).
+STALWART_CURRENT=""; STALWART_TARGET=""; STALWART_NEEDS=0; STALWART_SERIES=""
+STALWART_BLOCKED=""
+BULWARK_CURRENT=""; BULWARK_TARGET=""; BULWARK_NEEDS=0
 
 log()  { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
 warn() { printf '[%s] WARN  %s\n' "$(date '+%F %T')" "$*" >&2; }
@@ -171,6 +178,17 @@ stalwart_resolve() {
       || die "cannot resolve the newest 0.16.x release"
     STALWART_TARGET=$target
     STALWART_SERIES="0.16 patch line (major upgrades need --allow-stalwart-major)"
+
+    # A newer major exists but this script will not cross the 1.0 store boundary on its
+    # own. Name it: "current" alone reads as "nothing to do", and nothing to do is how a
+    # server sits on a release line for months without anyone deciding about it.
+    local overall
+    overall=$(newest_tag "$STALWART_REPO" '^v[0-9]+\.[0-9]+\.[0-9]+$') || overall=""
+    if [ -n "$overall" ] \
+       && [ "$(printf '%s\n%s\n' "$cur" "$overall" | sort -V | tail -1)" = "$overall" ] \
+       && [ "${overall%%.*}" -gt "$major" ]; then
+      STALWART_BLOCKED=$overall
+    fi
   else
     target=$(newest_tag "$STALWART_REPO" '^v[0-9]+\.[0-9]+\.[0-9]+$') \
       || die "cannot resolve the newest release"
@@ -253,6 +271,15 @@ bulwark_resolve() {
 bulwark_apply() {
   local tag=$BULWARK_TARGET build=$BULWARK_SRC-build-$BULWARK_TARGET
   local newimg=$IMAGE_REPO:$tag-loomix patch=$BACKUP/loomix-worktree.patch
+  local BUILD_SSH
+
+  # Checked here, not at load time: the Stalwart half has no build host and must keep
+  # working when the password is absent.
+  [ -n "$BUILD_HOST_PASS" ] || {
+    warn "BUILD_HOST_PASS is not set — cannot reach $BUILD_HOST to build; nothing changed"
+    return 1
+  }
+  BUILD_SSH="sshpass -p $BUILD_HOST_PASS ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=20"
 
   log "bulwark: $BULWARK_CURRENT -> $BULWARK_TARGET ($newimg)"
 
@@ -392,11 +419,15 @@ log "==================== mail stack: $MODE ===================="
 [ "$ONLY" = stalwart ] || bulwark_resolve
 
 printf '\n  %-10s %-12s %-12s %s\n' COMPONENT CURRENT AVAILABLE ACTION
-printf '  %-10s %-12s %-12s %s\n' stalwart "$STALWART_CURRENT" "$STALWART_TARGET" \
-  "$([ "${STALWART_NEEDS:-0}" -eq 1 ] && echo update || echo current)"
-printf '  %-10s %-12s %-12s %s\n\n' bulwark "$BULWARK_CURRENT" "$BULWARK_TARGET" \
+printf '  %-10s %-12s %-12s %s\n' stalwart "${STALWART_CURRENT:--}" "${STALWART_TARGET:--}" \
+  "$([ "${STALWART_NEEDS:-0}" -eq 1 ] && echo update || { [ -n "$STALWART_BLOCKED" ] && echo blocked || echo current; })"
+printf '  %-10s %-12s %-12s %s\n\n' bulwark "${BULWARK_CURRENT:--}" "${BULWARK_TARGET:--}" \
   "$([ "${BULWARK_NEEDS:-0}" -eq 1 ] && echo update || echo current)"
-log "stalwart tracks: $STALWART_SERIES"
+log "stalwart tracks: ${STALWART_SERIES:-not checked (--only bulwark)}"
+if [ -n "$STALWART_BLOCKED" ]; then
+  warn "stalwart $STALWART_BLOCKED exists but crosses the 1.0 store boundary this script will not cross"
+  warn "  it is a copy migration with a maintenance window, not a binary swap: docs/stalwart-1-1-migration.md"
+fi
 
 if [ "${STALWART_NEEDS:-0}" -eq 0 ] && [ "${BULWARK_NEEDS:-0}" -eq 0 ]; then
   log "nothing to do"

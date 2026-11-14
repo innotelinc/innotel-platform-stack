@@ -81,3 +81,39 @@ SMART cannot see and this check therefore does not claim to.
 That 43 °C reading is worth keeping: a 2.5" drive that has already sat two degrees under
 its own threshold in a fanless enclosure will do it again in summer. It is a warning
 line, not a failure, and the log keeps it.
+
+## 3. Both of them on the dashboard
+
+A guard whose verdict lives in a textfile nobody opens is a guard in name only, so both
+are now series the estate dashboard draws, and the disk's numbers are published rather
+than only judged:
+
+| Piece | What it does |
+|---|---|
+| `scripts/check-vault-disk.py` | half-hourly, from the edge: reads SMART on `i1` by `LABEL=VAULT`, `-d sat`, and publishes `innotel_estate_check_*{check="vault_disk"}` |
+| published gauges | `innotel_estate_vault_disk_temperature_celsius`, `…_power_on_hours`, `…_attribute_5/187/197/198/199` labelled with model and serial |
+| dashboard | `extensions/monitoring/grafana/dashboards/estate-checks.json`: **Vault mounted**, **Vault disk health**, **Vault disk temperature** (warn 50 °C, fail 55 °C) |
+| alert branches | `vault_mount` and `vault_disk` added to `EstateCheckAbsent`, so a textfile that stops arriving is not silence |
+
+`check-vault-disk.py` is a separate check from the host timer on purpose: the timer
+reports to a person and a log, this one reports to Prometheus, and both read the same
+attributes. It fails on health not `PASSED` and on any reallocated, pending, offline or
+reported-uncorrectable sector; it warns on UDMA CRC errors (the enclosure link) and on
+temperature at 50 °C. A missing label or an unreadable bridge is **exit 2** — never a
+green.
+
+### Verification
+
+| Case | Result |
+|---|---|
+| live disk | `ok ST500LT012-1DG142 (S3P00014) at /dev/sdc: health PASSED, 37 C`, rc 0 |
+| textfile | `innotel_estate_check_last_status{check="vault_disk"} 1`, temperature 37, power-on hours 5511 |
+| full `estate-checks.service` | `Result=success`, `ExecMainStatus=0` |
+| Prometheus | `innotel_estate_check_last_status{check="vault_disk"} 1`, `…{check="vault_mount"} 1`, `innotel_estate_vault_disk_temperature_celsius 37` |
+| rules loaded | `EstateCheckAbsent` carries both `vault_mount` and `vault_disk` branches |
+| Grafana | provisioned dashboard file replaced; container reads `/var/lib/grafana/dashboards/estate-checks.json` |
+
+The temperature parse needed one correction found by this check: Seagate appends extra
+numbers to some raw cells (`35 (207 0 0)`), and reading the *last* token reported 0 °C.
+The raw cell is the first number after the WHEN_FAILED column, which is what both the
+shell timer and this check now read.

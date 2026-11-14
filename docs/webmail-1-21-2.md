@@ -63,22 +63,34 @@ worth knowing before the next upgrade.
 | public door | `https://mail.innotel.us/` → **200**, `/login` → **200** |
 | logs | `Admin dashboard initialized`, `version-check: ran {"ok":true,"severity":"none"}` |
 
-## The updater is paused on purpose
+## CI published it, and the updater is back on
 
-`bulwark-update.timer` is **stopped**. It compares the running revision with `:latest`;
-the local build's revision is the merge commit, `:latest` is still `sha-13ea806`, so the
-next run would have pulled the container **back to 1.21.0** and looked like an upgrade.
+The local build was a stopgap. CI still published `:latest` = `sha-13ea806` (1.21.0), so
+the hourly updater was stopped rather than allowed to "upgrade" backwards.
 
-Two ways to end that, in order of preference:
+Pushed on 2026-11-14: `396a93116` (the 1.21.2 merge) and `692b42464`, which merges the
+commits `main` had taken since 1.21.0 — the rigless-spec skips and the policy fix that
+reserves the header Loomix writes its labels in. The one conflict was a BIMI test
+asserting `x-bulwark-bimi` against `x-loomix-bimi`; both are true of this fork, so it
+asserts the rebranded header and keeps the cache-control expectation. The merge commit
+again used `--no-verify` for the same `tsc` core dump, with the Docker build's own
+type-check as the proof.
 
-1. push `webmail-work` `main` (`396a93116`) to `innotelinc/webmail`; CI publishes
-   `:sha-396a931` and `:latest`, then `systemctl start bulwark-update.timer` resumes the
-   normal path with nothing pinned by hand;
-2. leave it stopped and keep the pin, which means no security updates until someone
-   remembers.
+CI then built `:sha-692b424` and moved `:latest` to the same digest
+(`sha256:564394e5…`), which is what makes a hand pin unnecessary:
 
-Rollback is a one-liner: restore the `.bak-1.21.2-…` compose file and `docker compose -p
-bulwark up -d`; `sha-13ea806` is still in the local image store.
+| Item | Value |
+|---|---|
+| image | `ghcr.io/innotelinc/webmail-release:sha-692b424`, pulled from ghcr rather than loaded from a local build |
+| revision label | `692b42464d6864058a44c710196f5ab1141c38a1` |
+| container | `bulwark`, `Up (healthy)`, `{"status":"healthy"}` |
+| version | `/app/package.json` → `loomix-mail 1.21.2` |
+| public door | `https://mail.innotel.us/` → **200**, `/login` → **200** |
+| updater | `bulwark-update.timer` **running**; `bulwark-update.py --check` reports current |
+
+Rollback is still the `.bak-1.21.2-…` compose file plus `docker compose -p bulwark up -d`;
+`sha-13ea806` remains in the local image store, and the CI tag can be rolled back to any
+`sha-` build the same way.
 
 ## What was not verified
 

@@ -47,6 +47,10 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-host-disk.py --prom
 # right fstab option and `mountpoint` cannot tell "absent" from "fine"; a sentinel file on
 # the filesystem can. This reads the mount, the sentinel and the ro view in one ssh call.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-vault-mount.py --prom ${TEXTFILE_DIR}/estate-check-vault-mount.prom
+# SMART on the disk that carries the vault: the mount check proves the path is the
+# vault, this one asks whether the disk under it is still trustworthy. Same host, same
+# label-addressed device (the letter changed once and would again).
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-vault-disk.py --prom ${TEXTFILE_DIR}/estate-check-vault-disk.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-alert-delivery.py --prom ${TEXTFILE_DIR}/estate-check-alert-delivery.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-auth.py --prom ${TEXTFILE_DIR}/estate-check-mail-auth.prom
 # The mail server is reached at its own address (`mail`, 192.168.1.15, in the container
