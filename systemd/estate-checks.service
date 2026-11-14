@@ -102,6 +102,16 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-authentik-privilege
 # every gated name's callback and reads each proxy block's buffer.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --prom ${TEXTFILE_DIR}/estate-check-sso-callbacks.prom
 
+# And whether a sign-in on the Orion NAS door can actually finish (2026-11-14). The proxy
+# trusts an issuer, the estate serves one authentik under two names, and each name reports
+# ITSELF — so the failure with no external signature is "the proxy trusts a different name
+# than the one it sends people to". The login completes at the provider and dies at the
+# callback with a generic 500, which is also what a bogus code produces, so probing the
+# callback proves nothing. This reads the proxy's own env file on the edge, the issuer's
+# discovery document, and the redirect the door emits, and names which of the three
+# disagrees. `docs/identity-hosts.md` says why the brand question is a warning.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-orion-signin.py --prom ${TEXTFILE_DIR}/estate-check-orion-signin.prom
+
 # The other half of the mail story: `check-mail-auth` proves the records are in the
 # zone, this reads the reports receivers send back and says which sending streams do
 # not align — the evidence behind tightening `_dmarc` to `p=reject`, which fails

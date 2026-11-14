@@ -260,7 +260,7 @@ Every conformant repo that reads runtime env has a `.env.example` that is:
   (`openssl rand -base64 …` / `openssl rand -hex …`).
 - Never contains real secrets. Placeholder values like `change-me`, empty, or obviously fake.
 - Documents the *shared platform services* the repo consumes, with the canonical example values
-  where they exist (e.g. `OIDC_ISSUER_URL=https://auth.cerulean.innotel.us/application/o/<app>/`,
+  where they exist (e.g. `OIDC_ISSUER_URL=https://auth.innotel.us/application/o/<app>/`,
   `MAGNATE_URL=https://magnate.innotel.us`, `CERULEAN_DNS_API_URL=http://127.0.0.1:3003`).
 - States the secrets posture: production secrets come from **Cerulean Vault** (SecretOps,
   KV v2), with `vault://<mount>/<path>#<key>` as the reference form. `.env` is local-only

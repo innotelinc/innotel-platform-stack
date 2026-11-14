@@ -28,7 +28,7 @@ notices until somebody wants to watch something:
 WHAT IT ASSERTS
 ---------------
   1. FRONT PAGE — `media.innotel.us/` answers 200 naming Jellyfin, or one app-relative
-     hop to that (`302 web/`). A redirect to `auth.cerulean.innotel.us` is a failure: the
+     hop to that (`302 web/`). A redirect to either identity host is a failure: the
      OIDC gate is not allowed in front of this name. 5xx is a failure, no answer is a
      failure, and a 200 that is not Jellyfin is a failure.
   2. WATCH — `iptv.innotel.us/web/` answers 200 and its body is Jellyfin's web client (the
@@ -65,7 +65,11 @@ from estate_check import Audit, Finding, write_prom  # noqa: E402
 
 MEDIA_DOOR = "https://media.innotel.us/"
 WATCH_DOOR = "https://iptv.innotel.us"
-AUTH_HOST = "auth.cerulean.innotel.us"
+#: Both names the estate's authentik answers on (`docs/identity-hosts.md`). The regression
+#: is "a gate is back in front of this name", not one particular brand — asserting a single
+#: host would let the other one back in silently, which is the failure this assertion
+#: exists for, one rename later.
+AUTH_HOSTS = ("auth.cerulean.innotel.us", "auth.innotel.us")
 SPLASH_PATH = "/Branding/Splashscreen"
 WEB_PATH = "/web/"
 DEFAULT_SPLASH_MIN = 50_000
@@ -117,10 +121,11 @@ def audit(media: str, watch: str, *, probe=fetch, splash_min: int = DEFAULT_SPLA
     if status is None:
         result.findings.append(Finding(
             "front-unreachable", "fail", f"{media} did not answer — DNS, TLS or the edge is down"))
-    elif 300 <= status < 400 and AUTH_HOST in location:
+    elif 300 <= status < 400 and any(host in location for host in AUTH_HOSTS):
         result.findings.append(Finding(
             "gate-restored", "fail",
-            f"{media} redirects to {AUTH_HOST}: the OIDC gate is back in front of the "
+            f"{media} redirects to {next(h for h in AUTH_HOSTS if h in location)}: the OIDC "
+            "gate is back in front of the "
             "front page, and a TV client in a webview cannot complete that flow (Jellyfin "
             "serves its own sign-in; see monarch docs/operations.md §Jellyfin and Seerr)"))
     elif 300 <= status < 400 and location and not location.startswith("http"):

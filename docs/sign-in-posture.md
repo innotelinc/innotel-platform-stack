@@ -61,6 +61,13 @@ what `authentik-conform-providers.py` writes; the fifth is what it verifies.
 | **`issuer_mode: per_provider`** | see below — this is the one that fails most quietly |
 | **every public name the provider serves, as a `strict` redirect URI** (`https://<name>/oauth2/callback`) | Authentik refuses the request **before** the user sees anything: `GET /application/o/authorize/` answers **HTTP 400** and the gateway never gets a code. A gateway can be perfectly configured — right issuer, right gateway, answering 302 — and still be unreachable because its name was added to DNS and NPM but not to the provider. Measured on `grafana.capstone.innotel.us`, whose row was missing while its four sibling gateways worked |
 
+**The canonical identity host is `auth.innotel.us`** (`docs/identity-hosts.md`). The estate
+runs one authentik that answers to both `auth.innotel.us` and `auth.cerulean.innotel.us`,
+and each name reports **itself** in `iss` — so the examples below say
+`auth.cerulean.innotel.us` because that is the brand they were measured on, not because a
+new consumer should copy it. A relying party has to name the brand its provider was created
+under, and the estate's own doors use `auth.innotel.us`.
+
 **`issuer_mode` is not a preference.** Authentik has two modes, and they put
 different values in the id_token's `iss`:
 
