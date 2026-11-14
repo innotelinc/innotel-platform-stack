@@ -22,6 +22,31 @@ repoint the device" — is **wrong on this host**, and acting on it would lose t
 > **2775** (setgid, so files inherit the group); the seeding step must create them that
 > way or the fault returns on the next deletion.
 >
+> **Update, 2026-11-14 02:05 — done, and served from the dataset.** The copy ran at
+> 22–50 MB/s and finished at **124 478 317 052 bytes / 259 files**; the destination agreed on
+> both totals exactly, and the two largest files (the `WWE Raw` episode, >4 G) matched by
+> md5. Only then were the originals deleted and the device repointed:
+> `downloads: {path: /data/media, source: /tank/media-downloads}`. `monarch`'s dataset went
+> **175 G → 58.0 G**, `tank/media-downloads` now holds the library, and `tank` has **402 G**
+> available. The stack came back on its own and torrents resumed mid-transfer.
+>
+> Two things the procedure above did not anticipate:
+>
+> 1. **`rsync` exits 23 on this container, and it is benign.** `monarch` is unprivileged, so
+>    container uid 1000 is host **1001000** and the dataset root (owned by host 1000) appears
+>    inside as `nobody`. `rsync -a` therefore fails `chown "/mnt/downloads/."` and reports
+>    "some files/attrs were not transferred" while transferring every file. Fix the root
+>    **from the host** — `chown 1001000:1001000 /tank/media-downloads` plus mode `2775` —
+>    not from inside the container, where the chown is denied by the ID mapping.
+> 2. **`for rel in $(find …)` splits on the spaces in this library's names.** `WWE Raw/…`
+>    broke the checksum gate on the first attempt. Use `while IFS= read -r rel; do … done`.
+>    The gate refusing to continue is what kept the originals intact.
+>
+> The 15 untracked tv/movie files quarantined the same night (**37.11 G**) live at
+> `/data/stale-quarantine` **inside** the container, deliberately outside `/data/media`, so
+> they were not part of the copy and did not consume the destination. Restore with
+> `incus exec monarch -- sh -c 'cp -a /data/stale-quarantine/. /data/media/'`.
+>
 > **Update, 2026-11-13:** `tank/incus/containers/monarch` is **394 G**, not 534 G, and
 > `tank` has **183 G** available. `tank/media-downloads` is still empty (160 K), so the
 > library is still plain files in the rootfs and every conclusion below still stands — but
