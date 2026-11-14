@@ -31,6 +31,14 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-limits.py
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-inventory.py --prom ${TEXTFILE_DIR}/estate-check-estate-inventory.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-address-latency.py --prom ${TEXTFILE_DIR}/estate-check-address-latency.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-host-disk.py --prom ${TEXTFILE_DIR}/estate-check-host-disk.prom
+
+# And that a mountpoint is still the thing it is named for. On 2026-11-14 the vault's USB
+# drive dropped off the bus and came back as a different device node: `srv-vault.mount`
+# went inactive, `/srv/vault` stayed as an empty directory, and the read-only view, the
+# nginx `:8080` door and the NFS export all kept answering from nothing. `nofail` is the
+# right fstab option and `mountpoint` cannot tell "absent" from "fine"; a sentinel file on
+# the filesystem can. This reads the mount, the sentinel and the ro view in one ssh call.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-vault-mount.py --prom ${TEXTFILE_DIR}/estate-check-vault-mount.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-alert-delivery.py --prom ${TEXTFILE_DIR}/estate-check-alert-delivery.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-auth.py --prom ${TEXTFILE_DIR}/estate-check-mail-auth.prom
 # The mail server is reached at its own address (`mail`, 192.168.1.15, in the container

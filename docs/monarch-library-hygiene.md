@@ -153,6 +153,14 @@ result: all 33 entries holding media are claimed; 2 leftover item(s) with no med
 exit 0
 ```
 
+Ownership is not the same as an import, so both records were asked what they actually
+hold. Lidarr artist 6 reports **12 albums, 43 tracks, 43 files** (1.4 G): the three FLAC
+releases on disk are fully imported, and the other nine album rows carry no track
+metadata and no files, which is the metadata provider's list rather than a failed scan.
+Whisparr series 10 reports **528 metadata episodes, 8 episode files**, `percentOfEpisodes
+100`, 18.5 GiB — the eight scenes on disk, all claimed. Both read with the *arr APIs
+rather than from the filesystem, because "the file is there" was never the question.
+
 The rule this leaves behind: an unclaimed folder gets an **owner**, and deletion is only
 for debris that holds no media. Adopting costs one API call per folder and is reversible
 (delete the artist/series record; the files are untouched). Deleting 17 G to make a check

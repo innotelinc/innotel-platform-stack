@@ -76,6 +76,8 @@ unit was "loaded", and `/srv/vault` was a directory that existed. Only asking th
 and the *exec result* — not the unit's existence — showed the truth. The exec half now
 reaches a topic: `vault-replica-sync.service` carries `OnFailure=estate-notify@%n` (see
 `estate-alerts-ntfy.md`), so the next 203/EXEC is announced instead of sitting in a journal
-nobody reads. The mount half is still not a unit failure, by design — the script exits 0 with
-`SKIP: /srv/vault is not a mountpoint` when the drive is absent, which is what protects the
-replica, so an absent drive stays visible only in that log line.
+nobody reads. The mount half was the remaining hole, and it is closed on 2026-11-14: a
+sentinel file on the filesystem, a guard in `vault-ro-mount.sh` that refuses to publish an
+empty view, and a half-hourly `check-vault-mount` in `estate-checks.service`. See
+`vault-guard-and-disk-health.md` — including why `mountpoint` and `nofail` together cannot
+tell an absent drive from a healthy one.
