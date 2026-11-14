@@ -18,14 +18,17 @@
 #   update-mail-stack.sh --install-timer      install the weekly systemd timer
 #   update-mail-stack.sh --only stalwart|bulwark
 #
-# The 1.0 guard
-# -------------
-# Stalwart 1.0 does not open a data store created by a pre-1.0 release; it stops
-# with "The data store was created by a Stalwart version prior to 1.0". Moving
-# this server from 0.16.x to 1.x is therefore a documented migration (export,
-# new deployment, import), not a binary swap, and no script should pretend
-# otherwise. Without --allow-stalwart-major this script stays inside the 0.16
-# patch line, where replacing the binary is safe.
+# The store boundary
+# ------------------
+# Stalwart 1.0 cannot open a data store written by a pre-1.0 release. That move
+# happened here on 2026-11-14 (0.16.27 -> 1.1.0) as a copy migration with
+# `stalwart-migrate`, not a binary swap: docs/stalwart-1-1-migration.md. The live
+# store is now /var/lib/stalwart-v1 and the 0.16 store is kept untouched beside
+# it, so the pre-1.0 branch below only still matters for rolling the binary back.
+#
+# From 1.x on, patch releases share the store format and this script follows the
+# 1.1 line on purpose. A later minor (1.2) is a store change of its own and must
+# not be picked up just because it is newer than the installed release.
 #
 # What is backed up before anything is touched
 # --------------------------------------------
@@ -44,6 +47,8 @@ set -uo pipefail
 STALWART_BIN=/usr/local/bin/stalwart
 STALWART_CFG=/etc/stalwart
 STALWART_DATA=/var/lib/stalwart
+STALWART_V1_CFG=/etc/stalwart-v1
+STALWART_V1_DATA=/var/lib/stalwart-v1
 STALWART_SVC=stalwart
 
 COMPOSE_DIR=/opt/bulwark
@@ -135,9 +140,22 @@ bulwark_running_tag() {
 }
 
 bulwark_running_version() {
-  local tag
+  local tag ver
   tag=$(bulwark_running_tag) || return 1
-  printf '%s\n' "${tag##*:}" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' | head -1
+  ver=$(printf '%s\n' "${tag##*:}" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  # Since 2026-11-14 the image is pinned to a CI tag (`sha-692b424`), not a
+  # version tag. The running container still knows its version, so ask it
+  # instead of declaring the whole stack unreadable over a tag name.
+  if [ -z "$ver" ]; then
+    ver=$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' bulwark 2>/dev/null)
+  fi
+  # That label is `main` on this image, so the last word comes from the image
+  # itself: the Next.js app ships its package.json.
+  case "$ver" in
+    ''|*[!0-9.]*) ver=$(docker exec bulwark node -p "require('/app/package.json').version" 2>/dev/null) ;;
+  esac
+  [ -n "$ver" ] || return 1
+  printf '%s\n' "$ver" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' | head -1
 }
 
 bulwark_healthy() {
@@ -156,6 +174,12 @@ backup_all() {
   tar -C "$(dirname "$STALWART_CFG")" -czf "$BACKUP/stalwart-etc.tar.gz" "$(basename "$STALWART_CFG")" 2>/dev/null \
     || warn "config backup failed"
   cp -a "$STALWART_BIN" "$BACKUP/stalwart-binary" 2>/dev/null || warn "binary backup failed"
+  # The live store since 2026-11-14 is the v1 one. Backing up only the 0.16
+  # directory would have preserved the wrong data and called it a backup.
+  tar -C "$(dirname "$STALWART_V1_DATA")" -czf "$BACKUP/stalwart-v1-store.tar.gz" "$(basename "$STALWART_V1_DATA")" 2>/dev/null \
+    || warn "v1 store backup failed"
+  tar -C "$(dirname "$STALWART_V1_CFG")" -czf "$BACKUP/stalwart-v1-etc.tar.gz" "$(basename "$STALWART_V1_CFG")" 2>/dev/null \
+    || warn "v1 config backup failed"
   cp -a "$COMPOSE_FILE" "$BACKUP/compose.yml" 2>/dev/null || warn "compose backup failed"
   if [ -d "$BULWARK_SRC/.git" ]; then
     git -C "$BULWARK_SRC" diff > "$BACKUP/loomix-worktree.patch" 2>/dev/null || true
@@ -173,7 +197,14 @@ stalwart_resolve() {
   major=${cur%%.*}
   STALWART_CURRENT=$cur
 
-  if [ "$major" -lt 1 ] && [ "$ALLOW_MAJOR" -eq 0 ]; then
+  if [ "$major" -ge 1 ]; then
+    # The store is v1. Follow 1.1 deliberately: "newest overall" would one day
+    # install a minor whose store layout needs its own migration tool run.
+    target=$(newest_tag "$STALWART_REPO" '^v1\.1\.[0-9]+$') \
+      || die "cannot resolve the newest 1.1.x release"
+    STALWART_TARGET=$target
+    STALWART_SERIES="1.1 patch line (store format v1; a 1.2 store change needs its own migration)"
+  elif [ "$major" -lt 1 ] && [ "$ALLOW_MAJOR" -eq 0 ]; then
     target=$(newest_tag "$STALWART_REPO" '^v0\.16\.[0-9]+$') \
       || die "cannot resolve the newest 0.16.x release"
     STALWART_TARGET=$target

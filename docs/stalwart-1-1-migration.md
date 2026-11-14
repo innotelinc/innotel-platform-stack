@@ -1,102 +1,121 @@
-# Moving Stalwart off 0.16.27
+# Stalwart 0.16.27 → 1.1.0
 
-Status: **planned, not started.** The server runs 0.16.27 and the updater is deliberately
-held there. This is the document the hold points at.
+Status: **executed on 2026-11-14**, 18:07–18:10 EST. The server runs 1.1.0 on a v1 store
+at `/var/lib/stalwart-v1`; the 0.16.27 binary and its store are kept untouched beside it.
 
-## Why it cannot be a version bump
+Measured result of the cutover:
 
-Stalwart 1.0 does not open a data store written by a pre-1.0 release. Started against one
-it stops with:
+| Thing | Value |
+|---|---|
+| Accounts copied and compared | **62**, 0 mismatches, 0 unexplained |
+| Emails | 2,043 |
+| Blobs | 2,057 (61,406,846 bytes) |
+| Objects written | 2,421 (+ 2,974 registry rows) |
+| Errors | **0** in the bulk copy, **0** in the final run, **0** in the v1 log since start |
+| Dropped | 12 legacy `x:SpamTag` objects (no v1 equivalent) |
+| Warnings | 61, all schema removals (`requireScopes`, OIDC provider fields, removed role permissions) |
+| v1 store | 52 MB (`/var/lib/stalwart-v1`); 0.16 store still 53 MB and unmodified |
+| Downtime | ~40 s of the final run, plus the cutover restart |
 
-```
-The data store was created by a Stalwart version prior to 1.0 (schema version <N>)
-and cannot be opened by this version.
-```
+## Why it could not be a version bump
 
-There is no in-place upgrade and no `--upgrade-store` flag. Upstream ships a separate
-tool, `stalwart-migrate`, which copies a whole 0.16 deployment into a **new, empty** 1.x
-store. The copy reads the old store read-only, so 0.16 stays runnable throughout and
-afterwards — which is also the rollback.
+Stalwart 1.0 does not open a data store written by a pre-1.0 release. There is no in-place
+upgrade and no `--upgrade-store` flag. Upstream ships `stalwart-migrate`
+(`stalwartlabs/stalwart-migrate`, v1.0.8 here), which copies a 0.16 deployment into a
+**new, empty** 1.x store while reading the old one read-only. That read-only property is
+also the rollback: the 0.16 store was never written.
 
-`update-mail-stack.sh` refuses to cross this boundary: without `--allow-stalwart-major`
-it only ever offers 0.16.x tags, and it now reports the 1.x release by name instead of
-calling the server "current".
+## What was done
 
-## What the estate actually has
+1. **Snapshot and backup.** `incus snapshot create mail pre-stalwart-1.1.0` on `i1`, plus
+   `/root/mail-backups/<ts>-pre110/` with `stalwart-store.tar.gz`, `stalwart-etc.tar.gz`,
+   the 0.16.27 binary and `SHA256SUMS`.
+2. **Target store.** `/etc/stalwart-v1/config.json` =
+   `{"@type":"RocksDb","path":"/var/lib/stalwart-v1/"}`, directory empty, owned
+   `stalwart:stalwart`. v1 does read JSON: it names the same data-store schema as v0.16.
+3. **`prepare`** with a terminal (`script -qec`, because it refuses piped answers): 2,974
+   objects to write, 12 dropped, 61 warnings, 0 errors, 6 questions answered on their
+   recommended defaults. The one that matters for sign-in: the Authentik OIDC directory
+   keeps audience `stalwart-webui`, keeps UserInfo validation for opaque tokens, and gets
+   **interoperable** scopes for tokens that carry no Stalwart scopes.
+4. **Bulk copy while 0.16 served mail** (`run`, no `--final`): 62 accounts, 2,043 emails,
+   2,057 blobs, 0 errors. Repeatable; a second run would copy only deltas.
+5. **Window.** Stopped `stalwart.service`, ran `run --final --yes --verify-full`: 0 objects
+   changed, 3 global records, `verify: 62 accounts checked, 0 mismatches, 0 not explained`.
+   The migration is marked `final_done 2026-11-14T23:09:06Z`.
+6. **Cutover.** Installed 1.1.0 as `/usr/local/bin/stalwart` (keeping
+   `stalwart-0.16.27`), and pointed the unit at the v1 store with a drop-in:
+   `/etc/systemd/system/stalwart.service.d/v1.conf` → `--config /etc/stalwart-v1/config.json`.
+7. **Verified.** Listeners on 25, 443, 465, 587, 993, 995, 4190, 8080; `220
+   mail.innotel.us Stalwart ESMTP`; `* OK ... IMAP4rev2 ... AUTH=PLAIN AUTH=OAUTHBEARER
+   AUTH=XOAUTH2`; `https://mail.innotel.us/` and `/login` 200; `/jmap/session` 200 with the
+   real Host header; webmail container `healthy` and `/api/health` healthy; `check-mail-relay`
+   rc 0 (`mailjet in-v3.mailjet.com:587`, queue empty); `check-mail-sso` 0 failures;
+   `check-mail-traffic` 0 failures.
 
-| Thing | Value | Where it comes from |
-|---|---|---|
-| Stalwart | 0.16.27, native binary | `/usr/local/bin/stalwart --config /etc/stalwart/config.json` |
-| Newest releases | 1.1.0 (latest), 1.0.3, 1.0.2, 1.0.1, 1.0.0 | GitHub releases, `stalwartlabs/stalwart` |
-| Data store | 54 MB | `du -sh /var/lib/stalwart` |
-| Free space in `mail` | 430 GB of 440 GB | `df -h /` |
-| Container | `mail`, 1024 MiB memory cap, on `i1` | `incus config show mail` |
-| Config | `/etc/stalwart/config.json`, plus `/etc/stalwart-oidc/` | |
-| OIDC | Authentik directory through a local discovery cache | `/etc/stalwart-oidc/hosts` bound over `/etc/hosts` for Stalwart only |
-| Client | Loomix Mail 1.21.2 (`bulwark`, image pinned `:1.21.2-loomix`) | `/opt/bulwark/docker-compose.yml` |
-| Backups | `/root/mail-backups/<ts>/stalwart-store.tar.gz`, `stalwart-etc.tar.gz`, `stalwart-binary` | written by `update-mail-stack.sh` before any change |
+## Three things that only showed up by running it
 
-Two consequences of the numbers: the "second copy of the store" that upstream requires is
-**54 MB**, not a capacity problem, and the migration tool can run inside the container as
-long as it is given a terminal for `prepare` (it refuses piped answers).
+- **Ownership.** `stalwart-migrate` ran as root, so the new store was root-owned and the
+  service (`User=stalwart`) failed on `LOCK: Permission denied`. It rolled back to 0.16.27
+  on the first attempt, which is why that rollback path is known-good. Fix:
+  `chown -R stalwart:stalwart /var/lib/stalwart-v1`.
+- **v1 routes the field differently.** `x:MtaRoute` names the relay `host`, not `address`.
+  `check-mail-relay.py` read only the old name and reported the working Mailjet route as
+  direct-to-MX delivery; it now accepts either, with a regression test.
+- **v1 answers 502 without a known Host.** `curl https://127.0.0.1/...` is not a failure;
+  with `Host: mail.innotel.us` every endpoint is 200. Probes must carry the vhost.
 
-## What changes for people, not just files
+## What changes for people
 
-- IMAP UIDs, account and message identifiers and change history are preserved, so mail
+- OAuth sign-ins are lost: Authentik users sign in to the webmail again once. Password and
+  app-password clients keep working — v1 also advertises `AUTH=PLAIN`, which 0.16.27 did not.
+- CalDAV/CardDAV/WebDAV clients fetch their data once more (entity tags change); their sync
+  tokens stay valid. IMAP UIDs, UIDVALIDITY and change history are preserved, so IMAP
   clients do not re-download.
-- OAuth sign-ins are lost: everyone using Authentik sign-in to the webmail signs in again
-  once. Password/app-password clients keep working.
-- The full-text index is rebuilt in the background after the switch, so search is thin
-  for a while.
-- The webmail depends on Stalwart's session and capabilities. Loomix 1.21.2 predates
-  1.0.2, and upstream already has a branch for "public keys and encryption at rest on
-  Stalwart 1.0.2+" — budget for a webmail release alongside the server move, and do not
-  pin the server to 1.1.0 without checking that fix is in the image.
+- The full-text index is rebuilt in the background after the switch; search is thin until
+  it finishes.
 
-## Procedure (agreed shape, to be rehearsed)
+## The updater now follows 1.1, not 0.16
 
-The tool needs a terminal for `prepare`; the final copy needs 0.16 **stopped**. Plan for a
-short maintenance window, not a long one: the bulk copy can run while 0.16 serves mail.
+`update-mail-stack.sh` used to stay inside the 0.16 line and call the 1.x gap `blocked`.
+With `major >= 1` it now resolves the **1.1 patch line** on purpose: 1.x patch releases
+share the store format, while a later minor (1.2) is its own migration and must not arrive
+just because it is newer. `--check` reports `stalwart 1.1.0 / 1.1.0 / current`.
 
-1. **Back up by hand first**, outside the script's rotation:
-   `update-mail-stack.sh --check` (expect `blocked 1.1.0`), then take
-   `/root/mail-backups/<ts>/` and copy it off the host.
-2. **Get `stalwart-migrate`** onto the container (`stalwartlabs/stalwart-migrate:<ver>`,
-   or the release binary). It converts settings and copies data; it does not need the
-   server stopped except for the final run.
-3. **`prepare`** with a terminal attached:
-   `stalwart-migrate prepare --source /etc/stalwart/config.json --state /var/lib/stalwart-migrate`
-   Answer the conversion questions (blob store reuse, data categories). Read
-   `prepare-report.txt` in the state directory: every dropped object and changed setting
-   is listed there, and this is the step that decides whether the move is acceptable.
-4. **Create the empty 1.x store and config** at `/etc/stalwart-v1/config.json`. It must be
-   empty when the first run starts.
-5. **Bulk copy while 0.16 runs** (repeatable, incremental):
-   `stalwart-migrate run --source ... --target /etc/stalwart-v1/config.json --state ...`
-6. **Window:** stop `stalwart.service`, run the same command with `--final --yes`, confirm
-   it reports completion, then start 1.x on the new store with the config the migration
-   wrote.
-7. **Verify before declaring it done:** `:25` and `:993` listening, IMAP login with a real
-   mailbox, one message delivered end-to-end, the webmail's `/api/health`, Authentik
-   sign-in, and `check-mail-relay.py` / `check-mail-sso.py` from the edge. A migration is
-   not "done" because the process started.
-8. **Move the updater's ceiling** only after that: the script follows 0.16 today;
-   `--allow-stalwart-major` opens *all* releases, so after 1.x is proven, pin the target
-   series in the script (1.0.x, or 1.1.x on purpose) rather than leaving it open-ended.
+Backups changed with it: the live store is `/var/lib/stalwart-v1`, so the weekly run now
+also writes `stalwart-v1-store.tar.gz` and `stalwart-v1-etc.tar.gz`. Backing up only the
+0.16 directory would have preserved the wrong data and called it a backup.
+
+Two smaller repairs found while running the updater against the result:
+
+- the full `--check` died with `FATAL cannot read the running Bulwark version` because the
+  webmail is pinned to a CI tag (`sha-692b424`). It now falls back to the image's
+  `package.json` version (`1.21.2`); the `org.opencontainers.image.version` label is
+  literally `main` and was no help.
+- `v1.conf`-style restarts are drop-in only; the 0.16 unit file is unchanged.
 
 ## Rollback
 
-Nothing the tool writes touches the 0.16 store, so rollback is: stop 1.x, restore
-`/usr/local/bin/stalwart` from the backup, restore `/etc/stalwart` if `prepare` or a later
-step changed it, start `stalwart.service`, and keep the 0.16 data directory as it was.
-Because mail queued during the window is the only new data, expect to re-run the
-incremental copy rather than to lose messages.
+The 0.16 store and binary are untouched. To go back:
 
-## Why this is written down and not scheduled
+```sh
+systemctl stop stalwart
+rm -f /etc/systemd/system/stalwart.service.d/v1.conf
+install -m 0755 /usr/local/bin/stalwart-0.16.27 /usr/local/bin/stalwart
+systemctl daemon-reload
+systemctl start stalwart
+```
 
-The estate's rule is that an unreachable or unknown state is never a pass. "Stalwart is
-current" was that failure in a different shape: the server is *correctly* held on 0.16
-while the newest release is 1.1.0, and a green check that says nothing about the gap reads
-as health. The updater now names the gap (`blocked 1.1.0 — migration required`), this
-document carries the procedure, and the migration itself stays a decision with a window
-and a person in it.
+Or restore the whole container: `incus restore mail pre-stalwart-1.1.0` (the snapshot was
+taken before anything was written). v1's own `stalwart-migrate rollback` can also copy the
+v1 store into a fresh 0.16 store if mail has already moved into v1 — necessary only if the
+v1 store must be the source of truth, which it is not yet.
+
+## Notes for the next mail change
+
+- Mail queued during the window is the only new data; senders retry, and the final run
+  copied the v0.16 queue before v1 started, so nothing was delivered twice.
+- `stalwart-migrate status/report --state /var/lib/stalwart-migrate` still answers, and
+  `/var/lib/stalwart-migrate/final-report.txt` holds the full report.
+- `/etc/stalwart` (0.16 config, TLS, env) is still read for certs by the migrated settings;
+  do not delete it until a v1-specific TLS setup exists.

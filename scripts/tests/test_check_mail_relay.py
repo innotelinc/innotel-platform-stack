@@ -81,6 +81,18 @@ class RuleCase(unittest.TestCase):
         self.assertEqual(result.failures, [])
         self.assertEqual(result.warnings, [])
 
+    def test_a_v1_route_names_its_host_instead_of_an_address(self):
+        # v1 renamed the relay field `address` -> `host`. Reading only the old name made
+        # the live Mailjet route look like direct-to-MX delivery on 2026-11-14.
+        answers = dict(WIRED, **{
+            "x:MtaOutboundStrategy/get": {"list": [{"route": {"else": "'mailjet'"}}]},
+            "x:MtaRoute/get": {"list": [{"name": "mailjet", "host": "in-v3.mailjet.com", "port": 587}]},
+        })
+        result = _audit(answers)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.failures, [])
+        self.assertIn("in-v3.mailjet.com:587", " ".join(f.message for f in result.findings))
+
     def test_a_strategy_naming_no_route_is_a_failure(self):
         answers = dict(WIRED, **{"x:MtaOutboundStrategy/get": {"list": [{"route": {"else": "'direct'"}}]}})
         result = _audit(answers)

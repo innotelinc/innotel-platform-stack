@@ -6,9 +6,10 @@ release is upstream Bulwark 1.21.2 (2026-11-13): a security review of sign-in,
 multi-account actions, plugin installs, themes and the deploy files, plus date-grouped
 message lists, attachment rename, coloured tags and account-directory scoping.
 
-The mail engine is **not** part of this: Stalwart stays on `0.16.27`. Stalwart's latest is
-`1.1.0`, and 1.0.0 introduced a new database layout that *cannot* be upgraded in place —
-it is a migration, not a version bump, and nothing here changes it.
+The mail engine was separate from this release, and then moved the same day: Stalwart was
+migrated from `0.16.27` to `1.1.0` a few hours later, because 1.0 introduced a database
+layout that cannot be upgraded in place. That was a copy migration, not a version bump —
+see `docs/stalwart-1-1-migration.md`.
 
 ## Why the hourly updater could not do it
 
