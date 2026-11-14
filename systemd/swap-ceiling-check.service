@@ -1,0 +1,13 @@
+[Unit]
+Description=Flag Incus instances approaching their memory or swap ceiling
+Documentation=file:///root/estate-audit-2026-10-10.md
+After=incus.service
+Wants=incus.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/swap-ceiling-check
+# The check prints nothing when everything is comfortable, so this file only ever
+# grows when something is worth reading.
+StandardOutput=append:/var/log/swap-ceiling-check.log
+StandardError=append:/var/log/swap-ceiling-check.log

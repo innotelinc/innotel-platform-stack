@@ -122,7 +122,38 @@ What the widened run found on 2026-11-14, first time all four owners were asked:
 | ORPHAN | `/data/media/xxx/Brown Bunnies` — **16 G**, 16 files, no Whisparr series claims it |
 | debris | `American Hostage` (3 `.nfo`), `Lanterns` (2 `.nfo`) — unchanged, 7 KB |
 
-Both are real: exact-path matching against what the apps report. `Brown Bunnies` is also
-configured in Whisparr as a **root folder**, which explains why it exists but not why a
-root folder should hold 16 G that no series record points at — a root folder is not a
-claim. Neither was deleted; the timer is red until an owner decides.
+Both were real: exact-path matching against what the apps report. Neither was deleted.
+
+### The decision: give each one an owner (2026-11-14)
+
+Both folders were adoptable. Two assumptions had to be dropped first:
+
+- Whisparr v2 models a **studio as a series**, so `Brown Bunnies` is a series record
+  (`tvdbId 794`, network Bang Bros) and its files are already named
+  `Brown Bunnies - <date> - <title> [WEBDL-1080p]`. The studio disambiguation that v3
+  added is not required to claim these files.
+- The earlier note here that `Brown Bunnies` was configured as a Whisparr **root folder**
+  did not reproduce: the root-folder list reports one entry, `/data/media/xxx`. Nothing
+  had to be removed; a root folder would not have been a claim anyway.
+
+| folder | owner given | settings |
+|---|---|---|
+| `/data/media/music/Drake` | Lidarr artist **id 6**, `foreignArtistId 9fff2f8a-21e6-47de-a2b8-7f449929d43f` | `monitored: false`, `addOptions.monitor: none`, no missing-album search — three albums (HABIBTI, ICEMAN, MAID OF HONOUR) were already on disk as FLAC |
+| `/data/media/xxx/Brown Bunnies` | Whisparr series **id 10** (`tvdbId 794`) | `monitored: false`, `addOptions.monitor: none`, no missing-episode search, then `RescanSeries` — 8 scene files, 16 G |
+
+Nothing was renamed, moved or searched for; the folder path the app reports is the folder
+that was already there, which is the only reason the claim matches exactly.
+
+The re-run is the evidence that the library is honest now:
+
+```
+sonarr: 24   radarr: 23   lidarr: 11   whisparr: 4
+claimed paths: 62
+result: all 33 entries holding media are claimed; 2 leftover item(s) with no media
+exit 0
+```
+
+The rule this leaves behind: an unclaimed folder gets an **owner**, and deletion is only
+for debris that holds no media. Adopting costs one API call per folder and is reversible
+(delete the artist/series record; the files are untouched). Deleting 17 G to make a check
+green is not reversible.
