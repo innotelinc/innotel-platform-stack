@@ -5,7 +5,9 @@ Documentation=file:///usr/local/sbin/estate-notify.sh
 # Started by another unit's OnFailure=, with %i set to that unit's name, e.g.
 #
 #   [Unit]
-#   OnFailure=estate-notify@%n.service
+#   OnFailure=estate-notify@%n
+#
+# %n already carries the type suffix; the .service is added back below.
 #
 # Nothing here restarts or repairs the failed unit: the whole job is to make the
 # failure visible. The channel is ntfy in `proxy` (192.168.1.71:2586, topic

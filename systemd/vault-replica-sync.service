@@ -1,11 +1,14 @@
 [Unit]
 Description=Mirror the USB artifact vault onto the internal zfs replica
-Documentation=file:///root/estate-vault-plan.md
+Documentation=file:///usr/src/projects/complete/platform-stack/docs/vault-replica-restore.md
 After=local-fs.target
 # The script lives in /usr/local/sbin, not /root: /root was cleaned on 2026-10-25
 # and took the script with it, leaving this unit failing at exec for three weeks.
 # It refuses to run when /srv/vault is not a mountpoint, so a missing drive can
 # never rsync --delete the replica away.
+# Nothing else watches this job: a nightly mirror that stops running looks exactly
+# like a nightly mirror with nothing to do. A failed run has to say so.
+OnFailure=estate-notify@%n
 
 [Service]
 Type=oneshot

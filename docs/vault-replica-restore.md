@@ -73,6 +73,9 @@ where a `/root` cleanup cannot reach it.
 
 Three separate signals were green while the vault was half-broken: the timer existed, the
 unit was "loaded", and `/srv/vault` was a directory that existed. Only asking the *mount*
-and the *exec result* — not the unit's existence — showed the truth. Both are now covered by
-`OnFailure=estate-notify@%n` on the unit, so the next 203/EXEC reaches a topic instead of a
-journal nobody reads.
+and the *exec result* — not the unit's existence — showed the truth. The exec half now
+reaches a topic: `vault-replica-sync.service` carries `OnFailure=estate-notify@%n` (see
+`estate-alerts-ntfy.md`), so the next 203/EXEC is announced instead of sitting in a journal
+nobody reads. The mount half is still not a unit failure, by design — the script exits 0 with
+`SKIP: /srv/vault is not a mountpoint` when the drive is absent, which is what protects the
+replica, so an absent drive stays visible only in that log line.

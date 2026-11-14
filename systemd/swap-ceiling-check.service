@@ -1,8 +1,12 @@
 [Unit]
 Description=Flag Incus instances approaching their memory or swap ceiling
-Documentation=file:///root/estate-audit-2026-10-10.md
+Documentation=file:///usr/src/projects/complete/platform-stack/docs/incus-ceiling-check.md
 After=incus.service
 Wants=incus.service
+# Deliberately not OnFailure=estate-notify: this exits 1 on a *standing* condition
+# and the timer runs every ten minutes, so wiring it would buzz the topic once per
+# run for as long as the condition lasts - the wallpaper this check just stopped
+# being (docs/incus-ceiling-check.md). The log line is the alert.
 
 [Service]
 Type=oneshot

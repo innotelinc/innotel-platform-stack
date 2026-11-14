@@ -6,7 +6,11 @@
 # Wired as a systemd template, so no unit has to know how the channel works:
 #
 #   [Unit]
-#   OnFailure=estate-notify@%n.service
+#   OnFailure=estate-notify@%n
+#
+# (%n already ends in .service. Writing `%n.service` there instantiates
+# estate-notify@foo.service.service, which systemd starts happily and which names a
+# unit that does not exist - the notification then carries no verdict and no journal.)
 #
 # and the template's ExecStart calls this with `%i`, the unit that just failed.
 # It reads the unit's own verdict (`systemctl show`), takes the last lines of its
