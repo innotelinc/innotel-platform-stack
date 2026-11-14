@@ -6,6 +6,22 @@ repoint the device" — is **wrong on this host**, and acting on it would lose t
 
 ## Measured state
 
+> **Update, 2026-11-14 00:30 — the destination question is answered, and the plan is
+> smaller than written.** `monarch` is **175 G** and the library itself is **151 G**
+> (`/data/media`: tv 112 G, xxx 28 G, movies 7.5 G, music 4.5 G). `tank` has **407 G**
+> available. The missing space was **deleted, not moved**: the container's torrent
+> workspace `/data/torrents` now holds **30 K**, and `tank/media-downloads` is still 160 K.
+> No snapshots exist on the dataset, so nothing is recoverable from the pool. The move
+> itself is therefore **151 G into a 407 G destination** — it can run on this host without
+> buying anything, which was not true when this page was written.
+>
+> A related fault, found the same night: deleting the download folders left
+> `monarch-seed` recreating `/data/torrents/<category>` as `root:root 755`, while
+> Transmission runs as **PUID 1000**. Every category folder then refused writes and the
+> WebUI reported `Permission denied (13)`. Fixed with `chown -R 1000:1000` and mode
+> **2775** (setgid, so files inherit the group); the seeding step must create them that
+> way or the fault returns on the next deletion.
+>
 > **Update, 2026-11-13:** `tank/incus/containers/monarch` is **394 G**, not 534 G, and
 > `tank` has **183 G** available. `tank/media-downloads` is still empty (160 K), so the
 > library is still plain files in the rootfs and every conclusion below still stands — but
@@ -47,8 +63,14 @@ it needs a destination with **534 G free plus headroom** (call it 600 G).
 On 2026-11-12 no such destination existed: `tank` had **24.8 G** available and `sdc` is
 465.8 G — smaller than the library and reserved as a backup target. **Do not start a copy
 before the destination exists**; filling `tank` to 100 % takes mail and the LMS down with
-it. On 2026-11-13 evening `tank` has **183 G** and `monarch` is 394 G, so a run needs a
-fresh calculation rather than a new assumption — and the unfound ≈140 G answered first.
+it.
+
+That precondition is now met, but the size changed under the plan: on 2026-11-14 the
+library is **151 G** and `tank` has **407 G** available, so `tank/media-downloads`
+(160 K, 407 G avail, no quota) can hold it with roughly 250 G to spare. The copy is no
+longer blocked on hardware; it is a normal `rsync` whose free-space floor is satisfied
+before it starts. Re-measure both numbers on the day, because this library has lost
+~220 G to deletion in two days and the figure is not stable.
 
 ## Pre-flight (all must be true)
 
