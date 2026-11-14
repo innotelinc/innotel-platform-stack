@@ -27,10 +27,11 @@
 # Options:
 #   --pat-file PATH        file holding the new token (required; a trailing
 #                          newline is stripped, nothing else is accepted)
-#   --vault-token-file P   Vault token allowed to write the path; without it the
-#                          Vault step is skipped and said so out loud
+#   --vault-token-file P   Vault token allowed to write the path (the
+#                          `regcache-writer` policy token); without it the Vault
+#                          step is skipped and said so out loud
 #   --vault-path PATH      default cerulean/regcache
-#   --vault-addr URL       default https://127.0.0.1:8200
+#   --vault-addr URL       default http://192.168.1.71:8200 (Cerulean Vault, i2)
 #   --username NAME        Hub account, default innotel
 #   --container NAME       Docker container, default registry
 #   --incus NAME           Incus container holding it, default regcache
@@ -51,7 +52,7 @@ set -uo pipefail
 PAT_FILE=""
 VAULT_TOKEN_FILE=""
 VAULT_PATH="cerulean/regcache"
-VAULT_ADDR_DEFAULT="https://127.0.0.1:8200"
+VAULT_ADDR_DEFAULT="http://192.168.1.71:8200"
 VAULT_ADDR_ARG=""
 USERNAME="innotel"
 CONTAINER="registry"
@@ -119,22 +120,29 @@ fi
 # ── 2. Vault, when a token that may write the path is supplied ────────────────
 if [ -n "$VAULT_TOKEN_FILE" ]; then
   [ -r "$VAULT_TOKEN_FILE" ] || cannot "cannot read $VAULT_TOKEN_FILE"
-  command -v vault >/dev/null 2>&1 || cannot "no vault CLI here; store the token on the host that has one, then re-run with --vault-token-file"
   VAULT_ADDR="${VAULT_ADDR_ARG:-$VAULT_ADDR_DEFAULT}"
-  export VAULT_ADDR
   VAULT_TOKEN="$(tr -d '\r\n' < "$VAULT_TOKEN_FILE")"
-  export VAULT_TOKEN
-  caps="$(vault token capabilities "secret/data/$VAULT_PATH" 2>/dev/null | tr -d '\n')"
-  case " $caps " in
-    *" create "*|*" update "*) log "vault: token may write $VAULT_PATH (caps:$caps)" ;;
-    *) cannot "this Vault token cannot write secret/data/$VAULT_PATH (caps: ${caps:-none}) -- nothing was changed" ;;
+  [ -n "$VAULT_TOKEN" ] || cannot "$VAULT_TOKEN_FILE is empty"
+  # The API is used directly, not the `vault` CLI: i1 holds `regcache` and has no
+  # Vault CLI installed, so a CLI-based check made the rotation unrunnable there.
+  caps="$(curl -sS --max-time 20 -H "X-Vault-Token: $VAULT_TOKEN" -X POST \
+    -d "{\"paths\":[\"secret/data/$VAULT_PATH\"]}" \
+    "$VAULT_ADDR/v1/sys/capabilities-self" 2>/dev/null)"
+  case "$caps" in
+    *'"create"'*|*'"update"'*) log "vault: token may write $VAULT_PATH (caps: $caps)" ;;
+    *) cannot "this Vault token cannot write secret/data/$VAULT_PATH (response: ${caps:-none}) -- nothing was changed" ;;
   esac
   if [ "$DRY_RUN" -eq 1 ]; then
     log "dry run: would write username/password to $VAULT_PATH"
   else
-    vault kv put "$VAULT_PATH" username="$USERNAME" password="$NEW_PAT" >/dev/null \
-      || die "vault write to $VAULT_PATH failed -- nothing was changed"
-    log "vault: stored $VAULT_PATH"
+    code="$(curl -sS -o /tmp/vault-put.$$ -w '%{http_code}' --max-time 25 \
+      -H "X-Vault-Token: $VAULT_TOKEN" -X POST \
+      -d "{\"data\":{\"username\":\"$USERNAME\",\"password\":\"$NEW_PAT\"}}" \
+      "$VAULT_ADDR/v1/secret/data/$VAULT_PATH" 2>/dev/null)"
+    case "$code" in
+      200|204) rm -f "/tmp/vault-put.$$"; log "vault: stored $VAULT_PATH" ;;
+      *) rm -f "/tmp/vault-put.$$"; die "vault write to $VAULT_PATH failed (HTTP ${code:-none}) -- nothing was changed" ;;
+    esac
   fi
 else
   log "vault: skipped (no --vault-token-file); the token is rotated but not recorded in Vault"

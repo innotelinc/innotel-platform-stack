@@ -28,7 +28,8 @@ Two blockers, both outside the estate's reach that day.
    `/v2/users/login` route needs the account password. No copy of that password exists on
    the host: a search of `/srv`, `/root` and `/etc` finds only scripts that name the
    variable, not a value.
-2. **No token on the estate may create the secret path.** Vault holds fifteen product
+2. **No token on the estate may create the secret path.** (Fixed on 2026-11-14 — see the
+   update below.) Vault holds fifteen product
    tokens under `/vault/token/*.token` (mode 0600, read by `sage-deploy.sh` and
    `sage-vault-fix.sh`). All fifteen return **`deny`** for
    `vault token capabilities secret/data/cerulean/regcache`, including `cerulean` — whose
@@ -40,7 +41,45 @@ Two blockers, both outside the estate's reach that day.
    "No value found".
 
 The `cerulean` token is healthy — policy `[cerulean default]`, expires 2026-12-15 — it is
-simply not permitted to invent a path.
+simply not permitted to invent a path. That is still true; what changed is that a token
+which *is* permitted now exists.
+
+## Update, 2026-11-14 — the Vault half is runnable
+
+Blocker 2 is gone. Vault carries a dedicated policy and a token scoped to exactly one path:
+
+| | |
+|---|---|
+| policy | `regcache-writer`: `create`/`update`/`read` on `secret/data/cerulean/regcache`, `read` on its metadata |
+| token | `/vault/token/regcache.token` inside `cerulean-vault` (mode 600); copy at `/root/vault.token` on **i1** (mode 600); TTL 768 h, renewable |
+| address from i1 | `http://192.168.1.71:8200` — Cerulean Vault runs in `cerulean-vault` inside the `proxy` container on i2 |
+
+Created once with the instance root token kept in `/vault/init/init.json` (mode 600, inside
+the container; it was read there and never copied off the host). The grant was then proven
+from **i1**, the host that must run the rotation, not from inside Vault:
+
+```bash
+curl -s -H "X-Vault-Token: $T" -X POST \
+  -d '{"paths":["secret/data/cerulean/regcache"]}' \
+  http://192.168.1.71:8200/v1/sys/capabilities-self
+# {"secret/data/cerulean/regcache":["create","read","update"], ...}
+```
+
+The script no longer requires a `vault` CLI — **i1 has none**, and that alone made the Vault
+step impossible there. Capability check and write now go through the HTTP API with `curl`,
+so the Vault half is one flag away:
+
+```bash
+bash platform-stack/scripts/rotate-regcache-pat.sh \
+  --pat-file /root/new-hub-pat \
+  --vault-token-file /root/vault.token
+```
+
+A dry run on i1 (`--dry-run --skip-hub-check`) passes the capability gate and stops before
+writing anything to Vault or to the registry.
+
+**The only remaining blocker is the Docker Hub PAT itself**, which needs the `innotel`
+account. Nothing on this estate can mint it, and no amount of Vault work substitutes for it.
 
 ## Rotating it: one command
 

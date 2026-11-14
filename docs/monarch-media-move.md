@@ -27,7 +27,8 @@ repoint the device" — is **wrong on this host**, and acting on it would lose t
 > both totals exactly, and the two largest files (the `WWE Raw` episode, >4 G) matched by
 > md5. Only then were the originals deleted and the device repointed:
 > `downloads: {path: /data/media, source: /tank/media-downloads}`. `monarch`'s dataset went
-> **175 G → 58.0 G**, `tank/media-downloads` now holds the library, and `tank` has **402 G**
+> **175 G → 58.0 G** (41.5 G once the quarantine purge in `monarch-library-hygiene.md`
+> followed), `tank/media-downloads` now holds the library, and `tank` had **402 G**
 > available. The stack came back on its own and torrents resumed mid-transfer.
 >
 > Two things the procedure above did not anticipate:
@@ -42,10 +43,11 @@ repoint the device" — is **wrong on this host**, and acting on it would lose t
 >    broke the checksum gate on the first attempt. Use `while IFS= read -r rel; do … done`.
 >    The gate refusing to continue is what kept the originals intact.
 >
-> The 15 untracked tv/movie files quarantined the same night (**37.11 G**) live at
+> The 15 untracked tv/movie files quarantined the same night (**37.11 G**) sat at
 > `/data/stale-quarantine` **inside** the container, deliberately outside `/data/media`, so
-> they were not part of the copy and did not consume the destination. Restore with
-> `incus exec monarch -- sh -c 'cp -a /data/stale-quarantine/. /data/media/'`.
+> they were not part of the copy and did not consume the destination. They were purged on
+> 2026-11-14 after the owner confirmed them unwanted; the reasoning and the rules that let
+> them go are in `monarch-library-hygiene.md`.
 >
 > **Update, 2026-11-13:** `tank/incus/containers/monarch` is **394 G**, not 534 G, and
 > `tank` has **183 G** available. `tank/media-downloads` is still empty (160 K), so the
