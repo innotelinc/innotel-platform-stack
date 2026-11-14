@@ -47,8 +47,18 @@ probe() {
 # or refreshes. It refuses to run outside the mail container: every path is that
 # container's, so a verdict from anywhere else would be about nothing.
 preflight() {
-  if [ ! -d "$ETC" ]; then
-    echo "CANNOT RUN: $ETC is not here - this is not the mail container"
+  # A directory is not proof of a container. The first version of this check tested only
+  # `$ETC`, and the machine it was written on has one: a stale copy, the cerulean issuer,
+  # an anchor to 2036, no units and nothing listening on 8080. It answered NOT OK, which
+  # is a verdict about a system that is not the mail container — the one thing this verb
+  # must never do. The file the install path edits and the unit it restarts are both
+  # required, so a host that merely carries the directory is told so.
+  if [ ! -d "$ETC" ] || [ ! -f /etc/stalwart/stalwart.env ]; then
+    echo "CANNOT RUN: $ETC and /etc/stalwart/stalwart.env are not both here - this is not the mail container"
+    exit 2
+  fi
+  if ! systemctl cat stalwart.service >/dev/null 2>&1; then
+    echo "CANNOT RUN: this host does not run stalwart.service"
     exit 2
   fi
   rc=0
