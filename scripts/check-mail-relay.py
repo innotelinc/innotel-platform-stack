@@ -132,7 +132,9 @@ def audit() -> Audit:
         out.findings.append(Finding("route-wrong", "fail",
                                     f"non-local recipients route to {primary!r}, which is not a configured route"))
     else:
-        host, port = chosen.get("address"), chosen.get("port")
+        # v0.16 called the relay's host `address`; v1 calls it `host`. Reading only the
+        # old name made a working Mailjet route look like direct-to-MX delivery.
+        host, port = chosen.get("host") or chosen.get("address"), chosen.get("port")
         if not host or not port:
             out.findings.append(Finding("route-direct", "fail",
                                         f"non-local recipients route through {primary!r}, which has no smarthost "
@@ -160,7 +162,7 @@ def audit() -> Audit:
         out.findings.append(Finding("retry-missing", "fail",
                                     f"no {fallback!r} route exists; a retry has nowhere to go"))
     else:
-        host, port = sm.get("address"), sm.get("port")
+        host, port = sm.get("host") or sm.get("address"), sm.get("port")
         out.findings.append(Finding("retry-present", "note",
                                     f"retry route {fallback} is {host}:{port}"))
         if not host or not port:
