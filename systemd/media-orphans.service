@@ -3,6 +3,9 @@ Description=Report library entries that no Sonarr/Radarr record claims
 Documentation=file:///usr/local/sbin/media-orphans.sh
 After=network-online.target incus.service
 Wants=network-online.target
+# A run that finds unclaimed media, or cannot read an API, is a fact nobody is
+# looking at otherwise: this host's only other channel is the journal.
+OnFailure=estate-notify@%n
 
 [Service]
 Type=oneshot

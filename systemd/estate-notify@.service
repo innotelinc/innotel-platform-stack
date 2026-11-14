@@ -1,0 +1,24 @@
+[Unit]
+Description=Announce a failed unit on the estate's notification channel
+Documentation=file:///usr/local/sbin/estate-notify.sh
+
+# Started by another unit's OnFailure=, with %i set to that unit's name, e.g.
+#
+#   [Unit]
+#   OnFailure=estate-notify@%n.service
+#
+# Nothing here restarts or repairs the failed unit: the whole job is to make the
+# failure visible. The channel is ntfy in `proxy` (192.168.1.71:2586, topic
+# `estate-alerts`); the credential is in /etc/innotel/ntfy.env on the host that
+# runs the timer. A host without that file fails this unit with
+# "CANNOT RUN", which is deliberate: a notification that cannot be sent must not
+# look like one that was.
+
+[Service]
+Type=oneshot
+# %i is the failed unit's name without its type suffix (`estate-notify@%n` from
+# `OnFailure=` puts `media-orphans` here for `media-orphans.service`), so the
+# suffix is added back. Writing `%n.service` in OnFailure instead produces
+# `estate-notify@media-orphans.service.service`, which systemd still starts but
+# with a unit name that does not exist -- the notification then says nothing.
+ExecStart=/usr/local/sbin/estate-notify.sh %i.service

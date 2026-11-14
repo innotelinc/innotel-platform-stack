@@ -73,10 +73,23 @@ they run. A count that grows is the permission fix working, not drift.
 
 ## The orphan watcher
 
-`scripts/media-orphans.sh` asks Sonarr and Radarr what they claim and names everything in
-the library that neither does. It runs inside `monarch` — where the library is
+`scripts/media-orphans.sh` asks **all four** owners what they claim and names everything
+in the library that none of them does. It runs inside `monarch` — where the library is
 `/data/media` and the APIs listen on 127.0.0.1 — driven from i1 by
 `media-orphans.timer`: daily at 04:20 and 20 minutes after boot.
+
+| library | owner | endpoint |
+|---|---|---|
+| `tv` | Sonarr | `/api/v3/series` |
+| `movies` | Radarr | `/api/v3/movie` |
+| `music` | Lidarr | `/api/v1/artist` — Lidarr never left API v1 |
+| `xxx` | Whisparr | `/api/v3/series` |
+
+Whisparr is the trap. `ghcr.io/hotio/whisparr:v2-develop` (2.2.0.404) is built on
+**Sonarr**, not Radarr: it answers `series`/`episode` and returns **404 for
+`/api/v3/movie`**, which is why its library was previously written off as "unparseable"
+and left alone. `/api/v3/movie` still 404s today; `/api/v3/series` returns its three
+records with `path` values under `/data/media/xxx`.
 
 ```bash
 systemctl list-timers media-orphans.timer
@@ -94,6 +107,22 @@ reported as `debris (no media, unclaimed)` and do not fail the check. Today that
 `American Hostage` (3 `.nfo`) and `Lanterns` (2 `.nfo`) — five files, 7 KB, left by the
 quarantine purge. Removing them is optional and was not done here.
 
-There is **no notification channel**: ntfy is not running anywhere on the estate, so a
-failure is visible only as a failed unit and in the journal. On i1, `systemctl --failed`
-is the place to look, not an inbox.
+A failure is announced: `OnFailure=estate-notify@%n` puts the unit's verdict and the tail
+of its journal on the estate's ntfy topic (`docs/estate-alerts-ntfy.md`). That claim is
+new as of 2026-11-14 — the earlier text here said there was no channel at all, which was
+wrong: ntfy runs in `proxy` on **i2** at `192.168.1.71:2586`, and the probe that "proved"
+otherwise had asked `:8080`, where nginx answers.
+
+What the widened run found on 2026-11-14, first time all four owners were asked:
+
+| | |
+|---|---|
+| claimed paths | **60** — sonarr 24, radarr 23, lidarr 10, whisparr 3 |
+| ORPHAN | `/data/media/music/Drake` — **1.4 G**, 43 files, no Lidarr artist claims it |
+| ORPHAN | `/data/media/xxx/Brown Bunnies` — **16 G**, 16 files, no Whisparr series claims it |
+| debris | `American Hostage` (3 `.nfo`), `Lanterns` (2 `.nfo`) — unchanged, 7 KB |
+
+Both are real: exact-path matching against what the apps report. `Brown Bunnies` is also
+configured in Whisparr as a **root folder**, which explains why it exists but not why a
+root folder should hold 16 G that no series record points at — a root folder is not a
+claim. Neither was deleted; the timer is red until an owner decides.

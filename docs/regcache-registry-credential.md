@@ -142,13 +142,72 @@ Measured, not guessed:
 | hit share | ≈ **72 %** of successful requests served without an upstream fetch, i.e. (2846 − 791) / 2846 |
 | live check | `prom/prometheus:v3.13.3` 200 in 0.39 s, `grafana/grafana:13.2.2` 200 in 0.20 s, unknown tag 404 |
 
-The 123 `500`s are not a cache fault. The sampled error is
-`toomanyrequests: You have reached your unauthenticated pull rate limit`, which means the
-proxy is reaching Docker Hub **anonymously**. The container does carry
-`REGISTRY_PROXY_USERNAME/PASSWORD`, but that password is the expired PAT this page is
-about. Until the rotation runs, any image the cache has not already got can fail on Hub's
-anonymous limit — 2 to 15 such errors a day. Images already cached keep working, which is
-why this stayed invisible.
+The 123 `500`s are real, and the earlier explanation for them on this page — "the
+password is the expired PAT" — **is not supported by measurement on 2026-11-14**:
+
+| test | result |
+|---|---|
+| token request with the stored credential | **200**, token claims `pull_limit: 200`/6 h and `username: innotel` — i.e. an **authenticated** token |
+| the same request with a deliberately wrong secret | **401** `incorrect username or password` |
+| the same request with no credentials | **200**, but `pull_limit: 100` — the anonymous tier |
+| `401`/`authorization failed` anywhere in the registry log | **0** |
+
+Two facts sit together and do not fully explain each other:
+
+- **Now** the stored credential yields an authenticated token (`pull_limit: 200`), no
+  request has ever been refused upstream, and there were **no** rate-limit errors in the
+  last 24 h.
+- **Then** every one of the 123 errors names the *unauthenticated* limit, and all of them
+  predate the container's current start: `registry` was created 2026-10-20 and started
+  **2026-11-13 11:51**; the last error is **2026-11-12 04:22:11**.
+
+So the anonymous behaviour belongs to the previous incarnation. Distribution reaches the
+Hub through a token exchange that falls back to anonymous when the configured credential
+is not accepted, and logs no 401 for it — consistent with what is here, and offered as
+the likely mechanism rather than proof, because the log cannot show which token the old
+container held.
+
+Shapes, so the next occurrence is recognisable: **~100 errors in 45 minutes on
+2026-11-04** (04:15–05:00, one heavy pull of uncached images), then **2 a day at 04:22**
+on 11-09 through 11-12 (a scheduled puller, most likely Watchtower on `monarch`), plus
+single hits on 10-25, 10-26, 10-28, 10-30 and 11-01.
+
+The lesson is not which token expired. It is that **a restart repaired it silently**, and
+nothing recorded that the cache had been serving some pulls anonymously for three weeks —
+hence the check below.
 
 Hit share is a log-derived estimate: every upstream fetch logs `Adding new scheduler
 entry`, and that is the only miss signal the registry exposes at info level.
+
+## Watching the credential, 2026-11-14
+
+An expired or unapplied token does not take the cache down — cached images keep serving —
+so nothing in the estate noticed 123 failures. `scripts/regcache-credential-check.sh` is
+the unit that notices:
+
+| piece | path |
+|---|---|
+| script | `scripts/regcache-credential-check.sh` → `/usr/local/sbin/` |
+| service | `systemd/regcache-credential.service`, `OnFailure=estate-notify@%n` |
+| timer | `systemd/regcache-credential.timer` — daily 06:10, 30 min after boot |
+
+It reads the credential from `/root/registry.env` in `regcache` when that exists and from
+the container's `Config.Env` when it does not (which is the current state), asks
+`auth.docker.io` for a `library/alpine` token, and **decodes the token's own claims**
+before judging: `pull_limit: 200` means the credential was applied, `100` means the Hub
+handed out an anonymous token. A plain `200` is not enough — the same endpoint answers
+`200` to a request with no credentials at all, which is exactly how a review of this
+check first "proved" a dead token was alive.
+
+Exit **0** credential applied and no `toomanyrequests` in 24 h; **1** dead token, an
+anonymous token, or uncached pulls already failing on the limit — which pages through
+`estate-notify`; **2** could not run (no `incus`, no container, no readable credential),
+never a pass. It pulls no layers and writes nothing.
+
+```bash
+systemctl start regcache-credential.service   # run now
+journalctl -u regcache-credential.service -n 10 --no-pager
+```
+
+Run on 2026-11-14 with the tightened test: `HTTP 200, pull_limit 200/6h`, 0 anonymous
+rate-limit errors in 24 h, exit 0.

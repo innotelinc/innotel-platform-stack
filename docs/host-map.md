@@ -1,6 +1,8 @@
 # Host map — the addresses that answer
 
-Verified live on **2026-11-07** over SSH to each address. This page records where
+Verified live on **2026-11-07** over SSH to each address, with the `proxy` row corrected on
+**2026-11-14** (it was listed on `i1`; `incus list` there has no such instance, and the
+edge, its vault and `ntfy` all run in the container on `i2`). This page records where
 each product actually runs, because a placement written in a roadmap is only worth
 what a login to that host confirms.
 
@@ -9,7 +11,7 @@ what a login to that host confirms.
 | `192.168.1.51` | `i1` | Incus host (bare metal) | `ontrak` container: the OnTrak family, 17 containers healthy (`training` on `:3000`, Genie on `:3400`). Other estate containers sit on the same host. | `incus exec ontrak` |
 | `192.168.1.56` | `monarch` | container on `i1` | 36 containers: project `monarch` (Monarch landing/health/recs, the media services and 11 `*-sso` oauth2-proxy sidecars) and project `innotel-metrics` (grafana `127.0.0.1:3301`, prometheus, node-exporter). | SSH, `docker ps` |
 | `192.168.1.61` | `distro` | container | project `distro`: `distro-control-plane` on `:20140` (`/health` → 200). | SSH, `docker ps` |
-| `192.168.1.71` | `proxy` | container on `i1` | 23 containers: `cerulean`, `npm-edge` (project `proxy`, profile `npm`), `innotel-gateway` (omniroute + gateway-sso + redis), `innotel-metrics`, `ntfy`, `orion-sso`, `orion-locker-sso`, `innotel-deploy`. | SSH, `docker ps` |
+| `192.168.1.71` | `proxy` | container on **`i2`** | containers: `cerulean`, `npm-edge` (project `proxy`, profile `npm`), `innotel-gateway` (omniroute + gateway-sso + redis), `innotel-metrics`, `ntfy`, `orion-sso`, `orion-locker-sso`, `innotel-deploy`. `ntfy` is host-networked and answers on **`:2586`** (`:8080` on this address is nginx — see `docs/estate-alerts-ntfy.md`). | SSH, `docker ps` |
 
 Every one of these addresses is reached as **root over SSH** with the estate
 credential held in the operator store. The credential itself never belongs in this
