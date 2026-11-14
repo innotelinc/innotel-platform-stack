@@ -70,9 +70,12 @@ all four prefixes answer **301** and follow through to **200**; `ai.lms` 301,
   them. The table had not followed the move, so every run reported "i2 atheniq: not present"
   and nothing else noticed.
 - **`copilotkit` (`.114`) joins `i2`**, created 2026-11-14 00:48: the self-hosted dashboard
-  behind `cpk.lab.innotel.us`, `cpk-api.…` and `cpk-ws.…`. Its address comes from DHCP in its
-  own netplan, so rule 3 warns about it — pinning it to `.114` is still to do, and until then
-  a recreated container can come up elsewhere and take the dashboard's three names with it.
+  behind `cpk.lab.innotel.us`, `cpk-api.…` and `cpk-ws.…`. It arrived on a DHCP lease and was
+  pinned statically the same day (`99-static.yaml` beside the LXC default: `dhcp4: false`,
+  `.114/24`, default via `.1`, DNS `.1`) — a renumber is exactly how the 2026-10-01 outage
+  happened, and three names here are reached by address. `netplan apply` cannot run inside a
+  container (it calls `udevadm`, which has no daemon there), so the pin is applied with
+  `netplan generate` then `systemctl restart systemd-networkd`.
 
 ## Changes applied 2026-11-12 — `capstone` retired, `atheniq` and `mail` moved to `i1`
 

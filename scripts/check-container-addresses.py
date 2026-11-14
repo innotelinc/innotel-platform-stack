@@ -168,10 +168,10 @@ EXPECTED: dict[str, dict[str, str]] = {
     # row with the address the day it is placed on a host that can hold it.
     "i2": {
         # CopilotKit's self-hosted dashboard, on `.114` since 2026-11-14 (its
-        # `cpk.lab.innotel.us`, `cpk-api.…` and `cpk-ws.…` names forward here). Its
-        # address comes from DHCP in its own netplan, so rule 3 warns about it until
-        # that is pinned — and it is the 2026-10-01 failure waiting to happen: a
-        # recreated container can come up elsewhere and take the dashboard with it.
+        # `cpk.lab.innotel.us`, `cpk-api.…` and `cpk-ws.…` names forward here). It
+        # arrived on a DHCP lease; pinned statically the same day in its own netplan
+        # (`99-static.yaml`, `dhcp4: false`), because a renumber is how the 2026-10-01
+        # outage happened and three names here are reached by address.
         "copilotkit": "192.168.1.114",
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
