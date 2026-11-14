@@ -2,9 +2,14 @@
 # Install the local discovery document for Stalwart's OIDC directory, prove it,
 # and undo everything if the mail host does not come back healthy.
 #
-# Run as root inside the `mail` container:
+# Run as root inside the `mail` container, with the pieces beside it (a copy of
+# this file's directory, or the repo's scripts/ + systemd/):
 #   bash stalwart-oidc-discovery-setup.sh install
 #   bash stalwart-oidc-discovery-setup.sh rollback
+#
+# It installs from its own directory, not from /root: the 2026-10-25 /root cleanup
+# deleted a script a unit exec'd and left that unit failing at exec for three weeks
+# (docs/vault-replica-restore.md). Preflight below refuses to start half-armed.
 #
 # The pieces are deliberately small and each one is reversible:
 #   /etc/stalwart-oidc/            cache, trust anchor, private hosts file
@@ -16,6 +21,16 @@ set -u
 ETC=/etc/stalwart-oidc
 UNIT_DIR=/etc/systemd/system
 ACTION=${1:-install}
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# Where each piece we install may live: beside this script, or in the repo's
+# systemd/ directory one level up from scripts/.
+src() {
+  for p in "$HERE/$1" "$HERE/../systemd/$1"; do
+    [ -f "$p" ] && { printf '%s\n' "$p"; return 0; }
+  done
+  return 1
+}
 
 probe() {
   curl -s -o /dev/null -w '%{http_code}' -m 5 \
@@ -41,6 +56,21 @@ rollback() {
 if [ "$ACTION" = "rollback" ]; then rollback; exit 0; fi
 
 set -e
+
+# Install only, and before anything is changed: the pieces have to be here, or
+# the run would get halfway and leave the container with a proxy unit and no
+# script to serve. Rollback above deliberately does not need them.
+PIECES="stalwart-oidc-redirect.sh stalwart-oidc-discovery-proxy.py stalwart-oidc-proxy.service stalwart-oidc-redirect.service"
+missing=""
+for piece in $PIECES; do
+  src "$piece" >/dev/null || missing="$missing $piece"
+done
+if [ -n "$missing" ]; then
+  echo "CANNOT RUN: missing$missing"
+  echo "looked in $HERE and $(cd "$HERE/.." 2>/dev/null && pwd)/systemd"
+  echo "copy the repo's scripts/ and systemd/ together, or run from a checkout"
+  exit 1
+fi
 id oidcproxy >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin oidcproxy
 install -d -m 0755 -o root -g root "$ETC"
 install -d -m 0750 -o root -g oidcproxy "$ETC/tls"
@@ -83,10 +113,10 @@ grep -q 'auth.cerulean.innotel.us' "$ETC/hosts" 2>/dev/null || {
 }
 chmod 0644 "$ETC/hosts"
 
-install -m 0755 /root/stalwart-oidc-redirect.sh /usr/local/bin/stalwart-oidc-redirect.sh
-install -m 0755 /root/stalwart-oidc-discovery-proxy.py /usr/local/bin/stalwart-oidc-discovery-proxy.py
-install -m 0644 /root/stalwart-oidc-proxy.service "$UNIT_DIR/stalwart-oidc-proxy.service"
-install -m 0644 /root/stalwart-oidc-redirect.service "$UNIT_DIR/stalwart-oidc-redirect.service"
+install -m 0755 "$(src stalwart-oidc-redirect.sh)" /usr/local/bin/stalwart-oidc-redirect.sh
+install -m 0755 "$(src stalwart-oidc-discovery-proxy.py)" /usr/local/bin/stalwart-oidc-discovery-proxy.py
+install -m 0644 "$(src stalwart-oidc-proxy.service)" "$UNIT_DIR/stalwart-oidc-proxy.service"
+install -m 0644 "$(src stalwart-oidc-redirect.service)" "$UNIT_DIR/stalwart-oidc-redirect.service"
 
 install -d "$UNIT_DIR/stalwart.service.d"
 cat > "$UNIT_DIR/stalwart.service.d/hosts.conf" <<'EOF'

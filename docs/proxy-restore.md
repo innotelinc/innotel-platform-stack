@@ -37,8 +37,8 @@ than 18 G of files read while Docker writes to them.
 ## Taking one
 
 ```sh
-# on i2, as root
-bash /root/backup-proxy.sh --offsite root@192.168.1.51:/var/backups/estate/proxy
+# on i2, as root — the script is installed there by hosts/i2/README.md's step
+bash /usr/local/sbin/backup-proxy.sh --offsite root@192.168.1.51:/var/backups/estate/proxy
 ```
 
 The script checks its own work before claiming it has any: `zstd -t` on all four
@@ -90,7 +90,7 @@ exists, and a run that dies partway removes what it wrote.
 
 ```sh
 # on i2, as root
-bash /root/restore-proxy.sh /var/lib/incus/backups/proxy/<stamp> --replace
+bash /usr/local/sbin/restore-proxy.sh /var/lib/incus/backups/proxy/<stamp> --replace
 ```
 
 It refuses to touch an existing `proxy` without `--replace`, verifies the

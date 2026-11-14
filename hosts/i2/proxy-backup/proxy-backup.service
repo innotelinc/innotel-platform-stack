@@ -1,8 +1,15 @@
 [Unit]
 Description=proxy restore point (edge backup, local + offsite to i1)
-Documentation=file:///root/backup-proxy.sh
+Documentation=file:///usr/local/sbin/backup-proxy.sh
 After=network-online.target incus.service
 Wants=network-online.target
+# Installed from the repo, not run out of /root: a /root cleanup on 2026-10-25
+# deleted the vault mirror's script and left its unit failing at exec for three
+# weeks (docs/vault-replica-restore.md). Install step: hosts/i2/README.md.
+#
+# A missed week is invisible otherwise - the unit is the only thing that knows a
+# restore point was not written, and it writes nothing when it succeeds.
+OnFailure=estate-notify@%n
 
 [Service]
 Type=oneshot
@@ -10,7 +17,7 @@ Type=oneshot
 # the slack the script requires. The script itself secures space before writing
 # and gives up the oldest point rather than starting an export it cannot finish,
 # so a full dataset shows up as a failed unit, never as a half-written directory.
-ExecStart=/root/backup-proxy.sh --keep 3 --offsite root@192.168.1.51:/var/backups/estate/proxy
+ExecStart=/usr/local/sbin/backup-proxy.sh --keep 3 --offsite root@192.168.1.51:/var/backups/estate/proxy
 # The export copies 18G and the offsite copy is another 11G over the LAN; both
 # are IO-heavy but must not be killed partway for being slow.
 TimeoutStartSec=3h
