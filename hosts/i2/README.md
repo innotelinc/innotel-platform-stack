@@ -22,8 +22,8 @@ parameter that no container can set.
 | `innotel-site/reconcile.sh` | `/usr/src/innotel-deploy/reconcile.sh` on the host, mounted into `proxy` |
 | `innotel-site/innotel-site.service` | `/etc/systemd/system/innotel-site.service` inside `proxy` |
 | `innotel-site/innotel-site-reconcile.{service,timer}` | `/etc/systemd/system/` inside `proxy` |
-| `../../scripts/backup-proxy.sh` | run in place on i2 (`/root/backup-proxy.sh`) |
-| `../../scripts/restore-proxy.sh` | run in place on i2 (`/root/restore-proxy.sh`) |
+| `../../scripts/backup-proxy.sh` | `/usr/local/sbin/backup-proxy.sh` on i2 (executed by `proxy-backup.service`) |
+| `../../scripts/restore-proxy.sh` | `/usr/local/sbin/restore-proxy.sh` on i2 (run by hand when restoring) |
 | `proxy-backup/proxy-backup.service` | `/etc/systemd/system/proxy-backup.service` on i2 (host) |
 | `proxy-backup/proxy-backup.timer` | `/etc/systemd/system/proxy-backup.timer` on i2 (host) |
 
@@ -32,6 +32,8 @@ parameter that no container can set.
 ```sh
 install -m 0644 modules-load.d/br_netfilter.conf /etc/modules-load.d/br_netfilter.conf
 install -m 0644 sysctl.d/99-bridge-nf-off.conf   /etc/sysctl.d/99-bridge-nf-off.conf
+install -m 0755 ../../scripts/backup-proxy.sh     /usr/local/sbin/backup-proxy.sh
+install -m 0755 ../../scripts/restore-proxy.sh    /usr/local/sbin/restore-proxy.sh
 modprobe br_netfilter                              # no-op when already loaded
 sysctl -p /etc/sysctl.d/99-bridge-nf-off.conf
 lsmod | grep '^br_netfilter'                       # must list the module
@@ -96,8 +98,8 @@ verifies the result (address, NPM host-conf count, `docker ps`, the innotel-site
 units, and `https://innotel.us/` answering 200).
 
 ```sh
-bash /root/backup-proxy.sh --offsite root@192.168.1.51:/var/backups/estate/proxy
-bash /root/restore-proxy.sh /var/lib/incus/backups/proxy/<stamp> --replace
+bash /usr/local/sbin/backup-proxy.sh --offsite root@192.168.1.51:/var/backups/estate/proxy
+bash /usr/local/sbin/restore-proxy.sh /var/lib/incus/backups/proxy/<stamp> --replace
 ```
 
 Restore points land in `/var/lib/incus/backups/proxy` on this host and in
@@ -109,8 +111,9 @@ root key for i1 for that copy, marked `backup@i2`. Full detail:
 
 `proxy-backup.timer` writes one every Sunday at 03:30 (+ up to 45 min of jitter),
 `Persistent=true`, so a weekend when i2 was down produces a point at the next boot
-rather than a silent gap. It calls `/root/backup-proxy.sh --keep 3 --offsite
-root@192.168.1.51:/var/backups/estate/proxy`.
+rather than a silent gap. It calls `/usr/local/sbin/backup-proxy.sh --keep 3 --offsite
+root@192.168.1.51:/var/backups/estate/proxy`, and carries
+`OnFailure=estate-notify@%n` so a missed point is announced rather than journaled.
 
 ```sh
 systemctl list-timers proxy-backup.timer

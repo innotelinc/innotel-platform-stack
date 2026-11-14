@@ -13,10 +13,10 @@
 # kept, so DNS answers and NPM's ingress are unchanged after the move.
 #
 # Usage (on i4): bash platform-stack/scripts/move-proxy-i4-to-i2.sh
-#        Log:   /root/move-proxy-i4-to-i2.log
+#        Log:   /var/log/move-proxy-i4-to-i2.log
 
 set -u
-LOG=/root/move-proxy-i4-to-i2.log
+LOG=/var/log/move-proxy-i4-to-i2.log
 I2=root@192.168.1.52
 SRC=/var/lib/incus/storage-pools/tank/containers/proxy/rootfs/
 DST=/var/lib/incus/storage-pools/fast/containers/proxy/rootfs/

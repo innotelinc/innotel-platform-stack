@@ -87,10 +87,32 @@ The remaining platforms are **business functions** built on top:
 - [**Ambient environment precedence**](docs/env-precedence.md) — why a variable
   exported for one stack can retarget another, which scripts are guarded
   against it, and the guard to copy when adding a new one.
+- [**What may live in `/root`**](docs/root-paths.md) — the 2026-10-25 cleanup that
+  deleted a script a unit exec'd, what moved to `/usr/local/sbin`, and the `/root`
+  paths that stay because a container mount or root's own ssh config depends on
+  them.
 
 - [**Host map**](docs/host-map.md) — the addresses that actually answer, what runs
   on each, the env file every re-apply needs, and the placement errors this pass
   corrected.
+
+### Estate incidents and the checks they left behind
+
+- [**Estate alerts — ntfy**](docs/estate-alerts-ntfy.md) — the notification channel
+  the estate already had, the `OnFailure=estate-notify@%n` a unit opts in with, and
+  every scheduled unit's wired/not-wired verdict with its reason.
+- [**The Incus ceiling check**](docs/incus-ceiling-check.md) — a check that was red
+  on i1 for three weeks against a limit nothing enforced, and what it measures now.
+- [**Vault mirror, and the drive that vanished**](docs/vault-replica-restore.md) — the
+  nightly mirror that had not run since 2026-10-24, and the USB drive that came back
+  as a different device leaving a dead mount under a served directory.
+- [**Vault tokens and the day they all expire**](docs/vault-token-expiry.md) — one
+  cohort expiring 2026-12-16 that cannot be renewed, and the replace procedure.
+- [**Monarch library hygiene**](docs/monarch-library-hygiene.md) — the orphans a
+  two-app watcher could not see, and the four-*arr watcher that named them.
+- [**Registry cache credential**](docs/regcache-registry-credential.md) — the expired
+  PAT behind a cache that logged anonymous pulls, and the daily check that asks the
+  Hub for the real quota instead of accepting a 200.
 
 ## Central shared library — `scripts/stack-lib.sh`
 

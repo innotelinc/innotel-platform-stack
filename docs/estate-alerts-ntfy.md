@@ -54,14 +54,30 @@ high priority. The password goes to `curl` through a config file on stdin, so it
 appears in `ps`. A host with no `ntfy.env` fails the unit with `CANNOT RUN` instead of
 pretending to have notified anyone.
 
-Units wired today: `media-orphans.service`, `monarch-torrent-perms.service`,
-`regcache-credential.service`, `vault-replica-sync.service`.
+## Every scheduled unit, and why it is or is not wired
 
-`swap-ceiling-check.service` is deliberately **not** wired: it exits 1 on a standing
-condition and its timer runs every ten minutes, so `OnFailure` would put a high-priority
-message on the topic once per run for as long as the condition lasted — the wallpaper that
-check exists to stop being. Repeated conditions stay in `/var/log/swap-ceiling-check.log`;
-this channel is for a job that failed once and will not try again on its own.
+The rule, which is the reason half of the table says no: **wire a job whose failure needs a
+person and whose next attempt is far away or never.** A job that retries on its own needs a
+metric or a log — a topic that buzzes every run for as long as the cause lasts is the
+wallpaper `incus-ceiling-check.md` is about.
+
+| unit | cadence | a failure means | wired |
+|---|---|---|---|
+| `media-orphans` | daily 04:20 | unclaimed media, or an *arr API that could not be read | **yes** |
+| `regcache-credential` | daily 06:10 | the Docker Hub token is dead | **yes** |
+| `vault-replica-sync` | nightly 03:20 | the mirror did not run; the next attempt is 24 h away | **yes** |
+| `proxy-backup` (i2) | weekly, Sun 03:30 | no restore point was written; the next attempt is a week away | **yes** |
+| `monarch-torrent-perms` | 5 min | the ownership repair did not stick | **yes** |
+| `swap-ceiling-check` | 10 min | a usage threshold was crossed and is still crossed | no — the log line |
+| `agent-reaper` | 10 min | a session was skipped, or the scan could not run | no — every run writes `agent-reaper.prom`, so the run is a series, not a one-off |
+| `edge-liveness` | 5 min | the edge does not answer | no — it already carries its own mail/webhook channel, and a dead edge would buzz the topic every five minutes |
+| `estate-checks` | 30 min | cannot fail: every `ExecStart` is `-` prefixed so each check publishes even when it is unhappy; the finding is its `.prom` | no — there is nothing to wire |
+| `sync-mail-identities` | 15 min | a mailbox did not mirror | no — it retries in fifteen minutes, so a wired failure would buzz 96 times a day; **it has no metric yet, which is the open gap** |
+| `stalwart-watchdog` | 5 min | the directory recovery did not take | no — `estate-checks`' `check-stalwart-oidc-cache` publishes that outcome |
+
+Serials (`memguard`, `stalwart-oidc-proxy`, `stalwart-oidc-redirect`, `wifi-powersave-off`) are
+not scheduled checks: `memguard` is restart-managed, and the other three are enable-time or
+long-running units whose state is their own running state.
 
 ## What was proven, and how
 
