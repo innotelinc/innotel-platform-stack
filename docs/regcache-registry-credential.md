@@ -127,3 +127,28 @@ bash platform-stack/scripts/rotate-regcache-pat.sh \
 
 Until the Hub account is available, the exposed token stays valid. That part cannot be
 fixed from this host, and no amount of Vault work substitutes for it.
+
+## Cache health, 2026-11-14
+
+Measured, not guessed:
+
+| | |
+|---|---|
+| build | `registry:2` (distribution 2.8.3) on `192.168.1.79:5000` |
+| storage | `/srv/registry`, **57 MB**, 131 blobs, on a 430 G volume with 700 MB used (1 %) |
+| upstream TTL | 168 h — a cached tag is re-fetched after a week |
+| requests | 2 846 success, 123 `500`, 91 `404` over the logged period |
+| cache fills | 791 upstream fetches |
+| hit share | ≈ **72 %** of successful requests served without an upstream fetch, i.e. (2846 − 791) / 2846 |
+| live check | `prom/prometheus:v3.13.3` 200 in 0.39 s, `grafana/grafana:13.2.2` 200 in 0.20 s, unknown tag 404 |
+
+The 123 `500`s are not a cache fault. The sampled error is
+`toomanyrequests: You have reached your unauthenticated pull rate limit`, which means the
+proxy is reaching Docker Hub **anonymously**. The container does carry
+`REGISTRY_PROXY_USERNAME/PASSWORD`, but that password is the expired PAT this page is
+about. Until the rotation runs, any image the cache has not already got can fail on Hub's
+anonymous limit — 2 to 15 such errors a day. Images already cached keep working, which is
+why this stayed invisible.
+
+Hit share is a log-derived estimate: every upstream fetch logs `Adding new scheduler
+entry`, and that is the only miss signal the registry exposes at info level.

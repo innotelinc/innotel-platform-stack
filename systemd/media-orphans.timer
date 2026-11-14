@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily check for library entries no Sonarr/Radarr record claims
+
+[Timer]
+OnBootSec=20min
+# Early morning, after the *arr RSS syncs have settled and before anyone watches.
+OnCalendar=*-*-* 04:20:00
+RandomizedDelaySec=10min
+Persistent=true
+Unit=media-orphans.service
+
+[Install]
+WantedBy=timers.target

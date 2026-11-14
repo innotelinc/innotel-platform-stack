@@ -1,0 +1,12 @@
+[Unit]
+Description=Report library entries that no Sonarr/Radarr record claims
+Documentation=file:///usr/local/sbin/media-orphans.sh
+After=network-online.target incus.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# The script runs inside monarch, where the library is /data/media and the *arr
+# APIs listen on 127.0.0.1. Exit 1 = unclaimed files found, 2 = an API could not
+# be read (never treated as clean, so a broken key cannot look like a tidy library).
+ExecStart=/bin/sh -c 'exec incus exec monarch -- sh -s < /usr/local/sbin/media-orphans.sh'
