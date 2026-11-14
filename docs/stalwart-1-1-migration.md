@@ -119,3 +119,32 @@ v1 store must be the source of truth, which it is not yet.
   `/var/lib/stalwart-migrate/final-report.txt` holds the full report.
 - `/etc/stalwart` (0.16 config, TLS, env) is still read for certs by the migrated settings;
   do not delete it until a v1-specific TLS setup exists.
+
+## Post-cutover: the WebUI could not start a sign-in
+
+The admin console loaded and then refused to sign in with:
+
+> Sign-in is not configured: the identity provider does not support client metadata
+> documents and no OAuth client id is configured for this application.
+
+WebUI 2.x (the bundle a v1 server installs) has no built-in OAuth client id. It uses the
+Application's `oauthClientId` when set, and otherwise its Client ID Metadata Document at
+`/<prefix>/oauth-client.json` — which only works when the provider advertises
+`client_id_metadata_document_supported`. Authentik does not, and the migrated Application
+still had `oauthClientId: null`, so sign-in could not be constructed. This is not a
+permissions problem and re-logging in does not change it.
+
+Authentik already had a **public** provider `Stalwart WebUI` (client id `stalwart-webui`,
+pk 50) with `https://admin.mail.innotel.us/admin/oauth/callback` and
+`.../account/oauth/callback` registered, so only the link was missing:
+
+```
+Application jcqush7uaaab:
+  oauthClientId = stalwart-webui
+  oauthScopes   = urn:stalwart:oauth:scope:full
+```
+
+Keep the id equal to the provider's `client_id`; while `oauthClientId` is set, sign-in
+through Stalwart's own authorization server answers `Unknown client id` unless an
+`OAuthClient` with that id also exists, and the full scope keeps the console's access.
+`oauthScopes` carries it so the application keeps full access through either path.
