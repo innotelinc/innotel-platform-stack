@@ -55,7 +55,13 @@ appears in `ps`. A host with no `ntfy.env` fails the unit with `CANNOT RUN` inst
 pretending to have notified anyone.
 
 Units wired today: `media-orphans.service`, `monarch-torrent-perms.service`,
-`regcache-credential.service`.
+`regcache-credential.service`, `vault-replica-sync.service`.
+
+`swap-ceiling-check.service` is deliberately **not** wired: it exits 1 on a standing
+condition and its timer runs every ten minutes, so `OnFailure` would put a high-priority
+message on the topic once per run for as long as the condition lasted — the wallpaper that
+check exists to stop being. Repeated conditions stay in `/var/log/swap-ceiling-check.log`;
+this channel is for a job that failed once and will not try again on its own.
 
 ## What was proven, and how
 
