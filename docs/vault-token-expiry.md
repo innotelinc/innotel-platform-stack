@@ -51,7 +51,12 @@ still work.
 
 ## Why this is manual
 
-A timer could run the audit, but there is no notification channel: ntfy is not running
-anywhere on the estate, so a failure would be silent anyway. Replacement also invalidates
-whatever a consumer has cached, which is a change worth making deliberately rather than
-at 03:00. Run it monthly, and read the table.
+A timer could run the audit and page through the estate's notification channel — that
+channel exists (`docs/estate-alerts-ntfy.md`, ntfy on `192.168.1.71:2586`; an earlier
+version of this page said none did). It stays manual for the other reason: `--replace`
+mints a successor that whatever cached the old token does not know about, so every
+consumer holding the old one has to be restarted deliberately. A nightly job that swaps
+tokens under running services trades one silent expiry for a silent breakage.
+
+Run it monthly, and read the table. When the window opens, the run wants a person
+watching, not a timer firing at 03:00.
