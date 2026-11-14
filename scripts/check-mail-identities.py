@@ -47,7 +47,7 @@ Nothing is triggered, retried or written here. The sync belongs to its own timer
 Usage:
     ./scripts/check-mail-identities.py
     ./scripts/check-mail-identities.py --prom /path/to/textfile
-    ./scripts/check-mail-identities.py --host root@192.168.1.52 --container mail
+    ./scripts/check-mail-identities.py --host root@192.168.1.51 --container mail
 
 Exit codes: 0 = the last run succeeded and the timer is live, 1 = one of those is not true,
 2 = could not run.
@@ -69,7 +69,7 @@ CHECK = "mail_identities"
 
 #: The host the mail container runs on (`i2`, per the container address table) and the
 #: container itself. The unit that starts this check is the authority for both.
-HOST = "root@192.168.1.52"
+HOST = "root@192.168.1.51"
 CONTAINER = "mail"
 
 UNIT = "sync-mail-identities.service"
