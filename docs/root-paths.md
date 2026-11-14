@@ -47,16 +47,18 @@ So it is one change in four places, and the writer comes **first**:
    still in `/root/cerulean-backup/authentik` across, then `docker compose -p
    innotel-metrics -f docker-compose.host.yml --env-file .env.host up -d node-exporter`.
 
-What proves it, rather than the absence of a complaint:
+What proves it is not a directory listing — a moved directory and a lost one look the
+same in `ls`. It is `scripts/textfile-series-snapshot.sh`, which takes the series (name and
+every label) before and after and fails if any of them stopped existing:
 
 ```bash
-# both writers landed in one directory, and it is not /root
-ls -l /var/lib/node_exporter/textfile/{status.prom,estate-check-*.prom}
-# the backup series still exist (this is the one that goes quiet when they do not)
-curl -s 'http://127.0.0.1:9090/api/v1/query?query=cerulean_authentik_backup_last_status'
-# and node-exporter is reading that directory
-curl -s 127.0.0.1:9100/metrics | grep innotel_estate_check_last_run_timestamp | head -3
+./scripts/textfile-series-snapshot.sh --snapshot /tmp/before.txt      # before step 4
+./scripts/textfile-series-snapshot.sh --snapshot /tmp/after.txt
+./scripts/textfile-series-snapshot.sh --diff /tmp/before.txt /tmp/after.txt
 ```
+
+The ordered apply on `.71`, including the dump writer that is not in this repository and
+the two rule sets that would go quiet, is `docs/textfile-dir-move.md`.
 
 Until step 1 is applied on `.71`, a host that takes this default runs its checks into a
 directory nothing shows — which is why the unit's comment names the dependency instead of

@@ -95,6 +95,10 @@ The remaining platforms are **business functions** built on top:
   pieces go on in (script before unit, env file before `enable --now`), which host
   each scheduled unit belongs to, and the one command per piece that proves it
   landed rather than that it was copied.
+- [**Moving the textfile directory on `.71`**](docs/textfile-dir-move.md) — the
+  ordered apply for the directory node-exporter's textfile collector mounts, the
+  dump writer in another repo that has to move first, and the before/after series
+  snapshot that distinguishes a move from a loss.
 
 - [**Host map**](docs/host-map.md) — the addresses that actually answer, what runs
   on each, the env file every re-apply needs, and the placement errors this pass
