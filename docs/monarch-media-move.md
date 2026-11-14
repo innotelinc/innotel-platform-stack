@@ -6,6 +6,13 @@ repoint the device" — is **wrong on this host**, and acting on it would lose t
 
 ## Measured state
 
+> **Update, 2026-11-13:** `tank/incus/containers/monarch` is **394 G**, not 534 G, and
+> `tank` has **183 G** available. `tank/media-downloads` is still empty (160 K), so the
+> library is still plain files in the rootfs and every conclusion below still stands — but
+> ≈140 G left the rootfs between the two readings and no destination shows for it. Until
+> that is accounted for, treat this page's warning as stronger, not weaker: do not delete a
+> second copy.
+
 | Fact | Value | How it was established |
 |---|---|---|
 | `tank/incus/containers/monarch` used | **534 G** | `zfs list -o used` |
@@ -37,10 +44,11 @@ There is no dataset to `zfs rename` and no snapshot to send: the 534 G is plain 
 inside a dataset that also contains the container's OS. Any move is a **data copy**, and
 it needs a destination with **534 G free plus headroom** (call it 600 G).
 
-Today no such destination exists on the host: `tank` has **24.8 G** available and `sdc`
-is 465.8 G — smaller than the library and reserved as a backup target. **Do not start a
-copy before the destination exists**; filling `tank` to 100 % takes mail and the LMS down
-with it.
+On 2026-11-12 no such destination existed: `tank` had **24.8 G** available and `sdc` is
+465.8 G — smaller than the library and reserved as a backup target. **Do not start a copy
+before the destination exists**; filling `tank` to 100 % takes mail and the LMS down with
+it. On 2026-11-13 evening `tank` has **183 G** and `monarch` is 394 G, so a run needs a
+fresh calculation rather than a new assumption — and the unfound ≈140 G answered first.
 
 ## Pre-flight (all must be true)
 

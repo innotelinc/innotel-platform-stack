@@ -40,6 +40,25 @@ tank                     796G used / 25.1G avail     93% capacity, 54% fragmente
 `zpool list tank`: 824 G size, 773 G allocated, 50.6 G free, **frag 54 %, cap 93 %**,
 compressratio 1.13×, `ONLINE`, last scrub 2026-11-08 clean.
 
+### Update, 2026-11-13 evening — the pool changed shape
+
+`monarch` is **394 G**, not 534 G, and `tank` has **183 G** available (616 G allocated,
+74 % cap, 36 % frag). That is 151 G released between readings, from two different causes
+that must not be confused:
+
+1. **8.0 G is this reclaim.** `dev-incus` was removed after the audit showed nothing bound
+   it; `tank/evac` went 31.7 G → **23.5 G** and the other five directories are untouched.
+2. **≈140 G left `monarch`'s rootfs.** It did **not** arrive at the container's only media
+   destination: `tank/media-downloads`, mounted at `/mnt/downloads`, still holds **160 K**.
+   Deletions inside a container rootfs leave no entry in `zpool history` (checked — the
+   last commands there are incus bookkeeping for `monarch` at 20:54), so the pool cannot
+   say who removed it. The only other candidate location is `sdc` (465.8 G, unmounted,
+   not inspectable from `tank`).
+
+   **Open question for the owner:** was that material copied off-box and then deleted after
+   a verified copy, or deleted in place? `monarch` is still 395 G, so the library is not
+   finished moving either way — but this has to be answered before a second copy starts.
+
 ### What the 534 G actually is (checked 2026-11-12)
 
 `zfs list -o used,usedbydataset,usedbysnapshots,usedbychildren` on
@@ -53,8 +72,10 @@ media library is already split off the container pool is wrong: the split was cr
 and never used.
 
 Consequence: reclaiming it means **copying 534 G to a target with 534 G free**. No such
-target exists here today — `tank` has 24.8 G available (**31.2 G** on 2026-11-13 evening,
-see the drift note), and `sdc` is 465.8 G, smaller than the library. That is why step 2 below is a purchase, not a maintenance task.
+target existed on 2026-11-12 — `tank` had 24.8 G available — and `sdc` is 465.8 G, smaller
+than the library. By the evening of **2026-11-13** the pool had **183 G** available and
+`monarch` was already 140 G lighter, so the arithmetic in this section has to be redone
+before the move is called impossible again. See the update immediately below.
 
 ## Why it stalls — the measured evidence
 
@@ -117,7 +138,7 @@ and every LMS request competes with a 534 G media library.
    | Directory | Size | Incus consumer |
    |---|---|---|
    | `dev-critical` | **16.61 GiB** (17 834 354 176 B) | `workloads` → `/mnt/archive` |
-   | `dev-incus` | **8.27 GiB** (8 879 727 616 B) | none — **retirement started 2026-11-13** |
+   | `dev-incus` | **8.27 GiB** (8 879 727 616 B) — **removed 2026-11-13** | none |
    | `copilotkit-fs` | **5.06 GiB** (5 428 507 648 B) | `workloads` → `/mnt/archive2` |
    | `copilotkit-docker` | **1.76 GiB** (1 894 828 544 B), 120 482 files | `workloads` → `/mnt/archive3` |
    | `dev-fs` | **118 MiB** (123 891 200 B) | none |
@@ -129,8 +150,8 @@ and every LMS request competes with a 534 G media library.
    is reclaimable while `workloads` still mounts them. The total sits slightly above
    `tank/evac`'s 31.7 G because separate walks count shared inodes more than once.
 
-   **`dev-incus` is being retired (2026-11-13).** It was a copy of an Incus var
-   directory: its `containers/` entries were symlinks pointing at the *live*
+   **`dev-incus` was retired on 2026-11-13, and it is gone.** It was a copy of an Incus
+   var directory: its `containers/` entries were symlinks pointing at the *live*
    `/var/lib/incus` paths, and its storage pool held rootfs copies of `aidev`, `dev-smoke`
    and `omarchy-apple` — none of which exist as live containers. Checked before deleting:
    no container config referenced it (`workloads` has three evac binds, none of them this
@@ -138,11 +159,12 @@ and every LMS request competes with a 534 G media library.
    pointed at it. A manifest of its top three levels is kept at
    `i1:/root/dev-incus-manifest.txt`.
 
-   Removal runs detached (`setsid nohup rm -rf`) at `nice 19` / `ionice -c3`, because it
-   is hundreds of thousands of small files on a 93 %-full spindle: it freed roughly 0.4 G
-   in the first quarter hour, so `tank/evac` will fall gradually rather than at once. Watch
-   it with `pgrep -f 'rm -rf /srv/evac/dev-incus'` and `zfs list tank/evac`; when it
-   finishes, `tank/evac` should settle near **23.4 G**.
+   The removal ran detached (`setsid nohup rm -rf`) at `nice 19` / `ionice -c3` because it
+   is hundreds of thousands of small files on a 93 %-full spindle — it freed only 0.4 G in
+   the first quarter hour — and it finished with no errors in its log. `tank/evac` went
+   **31.7 G → 23.5 G**; all five remaining directories (`dev-critical`, `copilotkit-fs`,
+   `copilotkit-docker`, `dev-fs`, `dev-extra`) are present and untouched. The three live
+   bind sources are now the whole of what evac still has to hold.
 
    Why the first attempts reported nothing: `du` had to fault cold metadata off a spindle
    already at 79–82 % IO pressure and was killed at the 300 s budget. The warmer second
@@ -152,14 +174,18 @@ and every LMS request competes with a 534 G media library.
    files of `copilotkit-docker` plus everything under `dev-critical`; measure this tree one
    directory at a time.
 
-   **Space drift, same evening.** `tank` showed 20.4 G available at the start of this
-   measurement and **31.2 G** by the end of it: the pool *gained* space during the day
-   rather than losing it. `tank/incus/containers/workloads` fell from 44.1 G to 30.4 G
-   between two readings, and nothing on the host explains that locally — there is no prune
-   timer or cron, `journalctl` since midnight holds no prune or reclaim record, and the
-   only file over 100 M written since 2026-11-12 is a 141 M Incus image. Read the day's
-   swings in available space as a busy pool being measured at different moments, not as
-   consumption that needs chasing.
+   **Space drift, same evening — resolved.** `tank` showed 20.4 G available at the start of
+   this work and **183 G** at the end of it. Two causes, not one:
+
+   - **8.0 G is this reclaim** — `dev-incus` removed, `tank/evac` 31.7 G → 23.5 G.
+   - **≈140 G is `monarch`**, whose dataset fell 534 G → **394 G**. No `zfs destroy`
+     appears in `zpool history`; the space went away as file deletions *inside* the
+     container rootfs, which the pool keeps no record of. `tank/media-downloads` is still
+     empty, so this was not the documented move — see the owner question in the
+     2026-11-13 update above.
+
+   The earlier reading of this as "unexplained, probably noise" was wrong: the pool had
+   not regained space by measurement error, `monarch` had emptied out.
 
    **Nothing here is safe to delete on the strength of this audit.** `dev-critical` was
    written the day of the migration: it is an evacuation copy of a host that was still
