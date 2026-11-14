@@ -59,6 +59,22 @@ that must not be confused:
    a verified copy, or deleted in place? `monarch` is still 395 G, so the library is not
    finished moving either way — but this has to be answered before a second copy starts.
 
+### Update, 2026-11-14 — the missing space is accounted for, and it was deleted
+
+`monarch` is **175 G** (from 394 G) and `tank` has **407 G** available (392 G allocated,
+47 % cap, 33 % frag). The ≈140 G asked about above is answered by the same mechanism that
+took the rest: the container's **torrent workspace was emptied in place**. `/data/torrents`
+holds **30 K** today — five empty category folders, recreated 2026-11-13 23:36 — while
+`/data/media` holds **151 G** (tv 112 G, xxx 28 G, movies 7.5 G, music 4.5 G). Nothing
+arrived at `tank/media-downloads` (still 160 K), and `sdc` is not a candidate: it is an
+ext4 disk labelled `VAULT`, a backup target rather than a media destination.
+
+So the material was **deleted, not moved** — which matches the owner's own report of having
+possibly deleted folders by accident. `zfs list -t snapshot` on
+`tank/incus/containers/monarch` returns **none**, so the deleted bytes cannot be recovered
+from the pool; the three affected torrents can only be re-downloaded. This is a loss to
+record, not a reclaim to count.
+
 ### What the 534 G actually is (checked 2026-11-12)
 
 `zfs list -o used,usedbydataset,usedbysnapshots,usedbychildren` on
