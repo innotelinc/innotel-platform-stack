@@ -82,6 +82,12 @@ CHECK_SCRIPTS = [
     # door emits are three statements of one fact, and its failure mode is a 500 at the
     # callback that a bogus code produces too. It arrived with a branch.
     "check-orion-signin",
+    # And the one that was missing for two months, found by the test below the first time it
+    # ran: `check-media-doors.py` has published `media_doors` into the family since the media
+    # estate collapsed onto two names, and had no branch — so the check could have stopped
+    # reporting entirely and `EstateCheckAbsent` would not have named it. The list being
+    # typed by hand is what let that happen; the test is what stops the next one.
+    "check-media-doors",
 ]
 
 
@@ -126,6 +132,42 @@ class RuleCase(unittest.TestCase):
         # The other direction: a removed check leaves a branch that can never fire.
         named = set(re.findall(r'check="([^"]+)"', _block(self.text, "EstateCheckAbsent")))
         self.assertEqual(named - self.checks, set())
+
+    def test_every_script_that_publishes_the_family_is_listed_here(self):
+        # The tests above are exact about the two things CHECK_SCRIPTS feeds them — the
+        # `CHECK` constants and the rule's branches — and blind to the list itself, which
+        # is typed by hand. So a new `check-*.py` could publish a series that nothing can
+        # miss, which is the same silence one level up. Membership in the family is not a
+        # matter of remembering: `estate_check.write_prom` is what makes a textfile into
+        # an `innotel_estate_check_*` series, so importing it is the declaration.
+        publishers = {
+            path.stem
+            for path in sorted(SCRIPTS.glob("check-*.py"))
+            # `check-edge-liveness.py` publishes on its own channel by design (it is meant
+            # to run on a host that is not the edge, so it cannot depend on the edge's
+            # textfile directory); it names no `write_prom` call, which is what keeps this
+            # assertion honest rather than special-cased.
+            if "write_prom" in path.read_text(encoding="utf-8")
+        }
+        self.assertEqual(
+            sorted(publishers - set(CHECK_SCRIPTS)),
+            [],
+            "a script that publishes innotel_estate_check needs a line in CHECK_SCRIPTS, "
+            "and therefore a branch in EstateCheckAbsent",
+        )
+
+    def test_every_listed_check_is_run_by_the_unit(self):
+        # And the last direction: a name in this list with no ExecStart passes the branch
+        # test while the check never runs, so its branch can never fire either. The unit
+        # is the authority for what runs; the dashboard's reporting count is derived from
+        # the same file and has its own test.
+        unit = (ROOT / "systemd" / "estate-checks.service").read_text(encoding="utf-8")
+        run = set(re.findall(r"estate-checks/(check-[a-z0-9-]+)\.py", unit))
+        self.assertEqual(
+            sorted(set(CHECK_SCRIPTS) - run),
+            [],
+            "every check in CHECK_SCRIPTS must have an ExecStart, or its absence is silent",
+        )
 
     def test_each_branch_keeps_the_check_label(self):
         # Without label_replace the whole rule fires as one anonymous series, and the

@@ -191,8 +191,11 @@ class ExitCodes(unittest.TestCase):
             code, _, _ = self._run(probe_for(media=(302, {"Location": AUTH}, b"")), "--prom", str(path))
             self.assertEqual(code, 1)
             body = path.read_text()
-        self.assertIn('innotel_estate_check_last_status{check="media-doors"} 0', body)
-        self.assertIn('innotel_estate_check_failures{check="media-doors"} 1', body)
+        # The label is the script's `CHECK` constant, which is `media_doors` — the family's
+        # spelling, not the hyphenated inline literal this file used to pass. The textfile
+        # keeps its `media-doors.prom` name: that is a path in the unit, not a label.
+        self.assertIn('innotel_estate_check_last_status{check="media_doors"} 0', body)
+        self.assertIn('innotel_estate_check_failures{check="media_doors"} 1', body)
         self.assertNotIn("last_success_timestamp", body)
 
 

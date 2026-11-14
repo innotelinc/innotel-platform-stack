@@ -68,7 +68,9 @@ or worse, leave the old anchor trusting a name the config no longer uses.
 So it stays until that change is done as one piece on the mail container, in that order:
 new cert → new `hosts` entry → directory issuer → verify with `check-mail-sso.py` and
 `check-stalwart-oidc-cache.py` → only then the scripts here. Doing it in this repo first is
-the failure mode this document exists to prevent.
+the failure mode this document exists to prevent. The ordered runbook — every path, the
+proof for each step, the traps, and the rollback — is
+[mail-discovery-canonical.md](mail-discovery-canonical.md).
 
 ## How it is checked
 
@@ -76,3 +78,7 @@ the failure mode this document exists to prevent.
 on the edge, the configured issuer's discovery document, and the redirect the door actually
 emits — three statements of one fact, and it names which two disagree. `issuer_mismatch` is
 the 500-at-the-callback class; `redirect_wrong_brand` is the drift as soon as it appears.
+
+The edge side of the Orion change — what to re-run, in what order, and why the redirect the
+running process emits is what proves it rather than the env file — is
+[orion-issuer-apply.md](orion-issuer-apply.md).
