@@ -1,0 +1,588 @@
+# Estate rebalance — inventory and options, i1 / i2 / i3 / i4
+
+**Status: partially applied 2026-11-15 15:45–16:05 EST — see §11.** The inventory below is
+the **pre-change snapshot**, kept as measured. §11 records what was applied with before and
+after numbers, and **four corrections to findings in this page** — including one that would
+have deleted the production Tix database. Read §11 before acting on §4, §5, §7 or §9.
+
+Every number below was
+read live over SSH on **2026-11-15** between 20:00 and 21:30 EST, from `free`, `lsblk`,
+`zpool list`, `incus list`, `incus config show`, `docker ps`, `/proc/pressure/*` and the
+cgroup files under `/sys/fs/cgroup/lxc.payload.*`. Where a figure could not be trusted it
+says so instead of being estimated.
+
+The question this page answers: the four hosts have drifted into a shape nobody chose —
+`i3` is a fresh, empty machine, `i2` is the busiest and the tightest for disk, the only
+SSD in the estate sits in the weakest CPU, and 31 database engines run across 27
+containers. What is the best arrangement, and what does each change cost?
+
+---
+
+## 1. The four hosts as they are
+
+| | **i1** `.51` | **i2** `.52` | **i3** `.53` *(new)* | **i4** `.54` |
+|---|---|---|---|---|
+| Machine | HP Slim Desktop, **bare metal** | **QEMU guest** (Proxmox pm3) | **bare metal** *(replaced 2026-11-15)* | Surface Pro, bare metal |
+| CPU | i3-8100, **4c / 4t** @3.60 | i7-1165G7, **8 vCPU** | i3-550, **2c / 4t** @3.20 | i5-7300U, **2c / 2t** @2.60 |
+| SIMD / crypto | AVX2, AES-NI | AVX-512, AES-NI | **no AVX, no AVX2, no AES-NI** | AVX2, AES-NI |
+| VT-x / `/dev/kvm` | yes / yes | yes / yes | yes / **yes** | yes / no |
+| RAM | 15 279 MiB (**6 165 free**) | 13 419 MiB (**3 674 free**) | 15 403 MiB (**14 843 free**) | 7 341 MiB (**3 268 free**) |
+| Swap in use | 2 638 / 4 095 MiB | 893 / 12 287 MiB (4 G is zram) | **0** / 4 095 MiB | 933 / 4 095 MiB |
+| Load 1 min | 0.73 | **2.57** | **0.00** | 1.22 |
+| CPU PSI `some` 10 s | 3.5 % | **18.3 %** | — | 4.6 % |
+| Root fs | 100 G, 48 % | 50 G, **74 %** (12 G free) | 98 G, **8 %** | 155 G, 67 % (50 G free) |
+| Container storage | zfs `tank` 824 G — 374 G used, **450 G free**, 45 % cap, 37 % frag | zfs `fast` 298 G — 224 G used, **73.5 G free**, 75 % cap, **53 % frag** | **none installed**; VG has **363.76 G unallocated** | `dir` pool on the NVMe; VG has **80 G unallocated** |
+| Disk device | `ST1000DM003` **ROTA=1**; `sdb` ASM1153E USB **ROTA=1** (465.8 G, 431 G free, mounted read-only) | `QEMU HARDDISK` ×2, **ROTA=1** | `WDC WD5000AVDS` **ROTA=1** (5400-class AV drive) | `Skhynix BC501` **NVMe, ROTA=0** |
+| Incus containers | 12 running + 1 stopped | 9 running | **0** | 6 running |
+| Docker containers inside them | **68** | 57 | 0 | 13 |
+| Docker on the **host** (outside Incus) | 0 | **6** | 0 | **4** |
+| Memory caps summed | 14 848 MiB on 15 279 | **16 128 MiB on 13 419 (120 %)** | — | 7 680 MiB on 7 341 (105 %) |
+
+**The single most important line in that table is the disk-device row.** Every host in
+this estate except `i4` is on spinning rust, and `i3`'s new disk is a `WD5000AVDS` — a
+5400 rpm-class AV/surveillance drive. That is the slowest device here for small random
+writes, which is exactly what a database, a mail index and a Docker overlay do. It is
+also the only host with real headroom.
+
+> **A speed test was attempted and discarded.** A 64 MiB `fsync` harness returned
+> sub-10 ms on all four hosts including the 5400 rpm disk, which cannot be real — the
+> figure was measuring page-cache acceptance, not the platter. No throughput numbers are
+> claimed in this page. The device classes above, and the previously recorded
+> measurements (i1 `tank` 57 MB/s fsync, i4 NVMe 372 MB/s fsync, from
+> `hp-capacity-plan.md`), are what the recommendations rest on.
+
+---
+
+## 2. What is actually running
+
+27 Incus containers, 138 Docker containers inside them, 10 more Docker containers on the
+two hypervisor hosts themselves, and **31 stateful database engines**.
+
+### Per host, by weight
+
+| Host | Heaviest containers (container disk / measured RAM / cap) |
+|---|---|
+| **i1** 148 G | `ontrak` 29.9 G · 1 183/2 944 MiB · **27 Docker containers** (OnTrak family, 2 Guacamole pairs, 3 Postgres, claude-mem) — `workloads` 27.3 G · 2 048 cap (Coolify: `coolify`, `coolify-db`, `coolify-redis`, `sentinel`) — `atheniq` 26.1 G · 1 594/4 864 MiB · 22 (Tutor LMS/CMS, OpenMAIC, 2 SSO, MySQL+Mongo+Redis+Meilisearch) — `atlas` 25.3 G · 4 (Gitea + Convex) — `mail` 10.4 G · 368/1 024 (Stalwart + Bulwark) — plus `nas`, `blueprint`, `clearpath`, `genesis`, `genie-preview`, `regcache`, `rizzaura` |
+| **i2** 86 G | **`proxy` 36.1 G · 3 536/7 424 MiB · 24 Docker containers** — NPM (209+ host configs), Authentik + its Postgres, Technitium DNS, Vault, Prometheus, Grafana, OmniRoute, ntfy, MariaDB, 3 Redis, 6 oauth2-proxy sidecars — `monitor` 14.8 G · 1 400/2 944 (SigNoz) — `signara` 9.7 G · 374/1 024 · 10 — `onyx` 8.2 G · 200/768 · 14 — `magnate` 3.8 G — `copilotkit` 2.7 G · 1 286/2 176 — `distro` 2.5 G — `pi` 1.3 G — `subscribe` 1.0 G |
+| **i3** 0 | **Nothing.** 14.8 G of RAM free, 4 threads idle, 363.76 G of unallocated disk, no Incus, no Docker. |
+| **i4** 34.6 G | `terminal` 9.7 G · 303 MiB (**soft cap**) — `vault` 9.3 G · 506 MiB (**soft cap**) · 7 containers (Vaultwarden, Linkwarden + PG + Meilisearch, registrar-sso, atheniq-console) — `vpn` 5.8 G · 69 MiB (**soft cap**) — `telno` 4.5 G · `sage` 3.7 G · `telno-turn` 1.6 G |
+
+### Stateful engines, all 31
+
+| Engine | Count | Where |
+|---|---|---|
+| **Postgres** | **12** | ontrak×3 (training `:5432`, tix `:5433`, sentinel `:5434`, all 16-alpine) · openmaic 16 · gitea-db 16-alpine · coolify-db **15** · signoz-metastore 16 · authentik 16-alpine · signara · linkwarden 16.16 · **`ontrak-tix-db-1` on i4's host Docker** · **`scif-database-1` 17-alpine on i2's host Docker** |
+| Redis | 11 | tutor 7.4.10 · atheniq-sso-sessions · coolify · gateway-sso-sessions · authentik · cerulean-sso-sessions · signara · registrar-sso-sessions · bolt-sso-sessions · g0dm0d3-sso-sessions · linkwarden (`:6380`) |
+| MySQL / MariaDB | 3 | tutor `mysql:8.4.11` · npm-db `mariadb-aria` · **`fax-staging-db-1` `mariadb:11` on i4's host Docker** |
+| MongoDB | 1 | tutor `mongo:7.0.39` |
+| Meilisearch | 3 | tutor **1.36.0** · signara **1.10** · linkwarden **1.13.3** |
+| ClickHouse | 1 | signoz `25.12.5` (+ Keeper) |
+
+All twelve `oauth2-proxy` sidecars point at the **one** Authentik provider.
+
+---
+
+## 3. Seven findings that drive every option below
+
+### F1 — `i3` is the only spare capacity in the estate, and its disk is the worst in it
+14 843 MiB free, four idle threads, zero containers, 363.76 G unallocated. But
+`WDC WD5000AVDS`, rotational, single spindle. **This host is right for RAM-heavy,
+IO-light, bulk work — backups, cold data, VM images — and wrong for anything doing small
+random writes.** That single fact rules out the obvious "put the databases on the empty
+box" move.
+
+### F2 — the estate's only SSD is in its weakest CPU
+`i4` has 2 threads and 7.3 GiB (3.3 free) but the only NVMe: 50 G free plus 80 G
+unallocated in its volume group. It is the right home for small, IO-sensitive,
+RAM-light services — which is exactly what already lives in `vault` and `terminal`.
+
+### F3 — `i4`'s memory caps are not caps (measured, not inferred)
+Three of its six containers are configured `limits.memory.enforce: soft`, and the cgroup
+shows what that means:
+
+| Container | `memory.max` | `memory.high` | `memory.swap.max` |
+|---|---|---|---|
+| `terminal` | **max** | 1 610 612 736 | **max** |
+| `vault` | **max** | 2 281 701 376 | **max** |
+| `vpn` | **max** | 805 306 368 | **max** |
+| `sage` | 1 879 048 192 | max | 0 |
+
+There is **no hard ceiling and no swap ceiling** on three containers, on a 7.3 GiB host
+whose declared caps already sum to 7 680 MiB. `memory.high` throttles; it does not kill.
+A runaway in `vault` (Vaultwarden + Linkwarden + Meilisearch + Postgres) can therefore
+drive the host into swap and stall everything on it — including `vpn` and `terminal`.
+This is the cheapest real fix in this report.
+
+### F4 — `i2` is the load centre and the disk-tight host, and its edge is one failure domain
+CPU PSI **18.3 %** (the only host above 5 %), load 2.57, 3 674 MiB available of 13 419,
+root at **74 %** with 12 G free, `fast` at **75 % with 53 % fragmentation**, and memory
+caps summing to **16 128 MiB on a 13 419 MiB host (120 %)**.
+
+Inside it, `proxy` is a **single Incus container holding the entire public edge**: NPM
+with 209+ host configs, Authentik and its Postgres, Technitium (the authoritative DNS
+for the estate), Vault, Prometheus, Grafana, OmniRoute, ntfy, MariaDB, three Redis and six
+oauth2-proxy sidecars — 24 containers, 36.1 G of disk, 3 536 MiB of a 7 424 MiB cap. One
+`docker compose down` on one stack, or one container-level OOM, takes **every public name
+and DNS** down together. That is a structural risk, not a performance one.
+
+### F5 — three observability stacks, and one of them is orphaned
+- `proxy` on i2: `metrics-prometheus` + `metrics-grafana` + `node-exporter` — where the
+  estate checks publish (`innotel_estate_check`).
+- `monitor` on i2: SigNoz + ClickHouse + Keeper + otel-collector + metastore-postgres —
+  14.8 G disk, 1 400 MiB RAM, 2 944 MiB cap.
+- `monarch` on i1: recorded here as **STOPPED**. **Wrong — see §11.2.** It is running and
+  hosting a 37-container media stack, and it is the cause of an I/O storm on i1.
+
+Nothing I can find dials `192.168.1.88`: no NPM `proxy_host` or `redirection_host`
+references it, `signara-alertmanager-1`'s config contains no reference, and
+`metrics-prometheus` has no scrape target for it. `service-audit.md` already records the
+SigNoz/ClickHouse topology as **retired** (Capstone's collector converts spans to RED
+metrics and drops them). **14.8 G on the tightest disk in the estate is serving a stack
+nothing reads.** Confirm with the owner before deleting — a person may open its Grafana
+by hand — but this is the largest single reclaim available.
+
+### F6 — three services exist twice, and every duplicate sits on host-level Docker
+| Service | Copy A | Copy B |
+|---|---|---|
+| OnTrak Tix database | `ontrak-family-tix-db-1` inside `ontrak` on i1 | `ontrak-tix-db-1` on **i4's host** Docker |
+| `clearpath` | Incus container `clearpath` `.83` on i1 | container `clearpath` on **i4's host** Docker |
+| `telno` | Incus container `telno` `.95` on i4 | `christ-telno` on **i2's host** Docker |
+
+**Correction to the row above — see §11.3.** The OnTrak Tix database on i4's host Docker is
+**not the duplicate**: it holds **3 884 MB and 5 001 081 tickets**. i1's copy is 14 MB and
+empty. Deleting the i4 copy destroys production data.
+
+Host-level Docker is outside every memory cap, outside the address table, and outside
+every estate check — which is precisely how the duplicates survive unnoticed. i2's host
+also runs `scif-api-1` + `scif-database-1` (a 12th Postgres, v17), and the `christ`
+family publishing UDP `41000-41063` and `7443-7444` on the hypervisor.
+
+### F7 — disk is not the constraint; RAM and per-host IOPS are
+Free space across the estate: i1 **450 G** (`tank`) + **431 G** (`/srv/vault-ro`, read-only
+by design) · i2 **73.5 G** · i3 **363.76 G** + 86 G on `/` · i4 **50 G** + **80 G**
+unallocated. That is roughly **1.5 TB free** against ~2.1 TiB in use. Nothing needs a new
+disk for capacity. A new disk would only be worth buying to put an **SSD** where the
+databases are — and that is a different argument from this one.
+
+---
+
+## 4. Disk management — what to actually do
+
+| # | Host | Action | Gain | Risk |
+|---|---|---|---|---|
+| **D1** | i4 | `lvextend -l +100%FREE` on `ubuntu-lv` + `resize2fs` (online, ext4) | `/` 67 % → **~44 %**, +80 G | none |
+| **D2** | i4 | `docker builder prune -af` — measured **14.52 G of build cache, 13.12 G reclaimable**; plus 1.17 G unreferenced images | **~14 G** | none (rebuildable) |
+| **D3** | i2 | Delete `monitor` after owner confirmation (F5) | **+14.8 G disk, +1.4 GiB RAM**, −2 944 MiB of cap on the loaded host | loses the SigNoz UI; nothing dials it today |
+| **D4** | i3 | `lvcreate -L 350G -n incus ubuntu-vg`, then an Incus **`dir`** pool on it (or zfs if snapshots are wanted) — leave `/` at 98 G, 8 % | **350 G** of usable container/VM storage | none; disk is 5400 rpm so keep random-write work off it |
+| **D5** | i2 | `zpool` frag is **53 %** — a trim + scrub, and confirm `autotrim` is on | better allocation behaviour, no capacity change | none, but takes hours on a spinner |
+| **D6** | i1 | `tank` is healthy at 45 % / 450 G free — **leave it alone**. `/srv/vault-ro` (431 G free) is mounted read-only on purpose as the vault replica; it is *not* free space until someone decides to remount it read-write | — | changing its mode is a policy decision, not a tidy-up |
+
+After D1–D3, **no host is above 70 % on any filesystem** except i2's `fast` (still 75 %
+until more than `monitor` leaves).
+
+---
+
+## 5. The central-Postgres question — an honest answer
+
+This is the request that most deserves a straight answer, so here it is with the
+arithmetic rather than the vibe.
+
+**"One Postgres for everything" is not supportable on this hardware, and I would not do
+it even with better hardware.** Two reasons:
+
+1. **No host can carry it.** The only SSD is i4 (2 threads, 7.3 GiB, 3.3 free). The only
+   spare RAM is i3 (5400 rpm disk). A central instance on i4 makes it a single point of
+   failure for every product at once, on the estate's least powerful CPU.
+2. **The estate already decided this**, in `service-audit.md`: *"Each platform owns its
+   own application database — data isolation is the tenant boundary. A shared Postgres
+   would couple tenant data across platforms."* Reversing a documented decision because
+   it looks tidier is how a tenant boundary gets deleted by accident.
+
+But the request is still right about a real problem — there are 31 engines for 27
+containers, most of them idle. The useful split is **by what the data is**, not by
+engine:
+
+### Tier 1 — merge these (infrastructure state, not tenant data)
+
+| Merge | From → to | Saves |
+|---|---|---|
+| **Session stores** | 6 `oauth2-proxy` session Redis + `cerulean-sso-sessions`, `registrar-sso-sessions`, `bolt-sso-sessions`, `g0dm0d3-sso-sessions` → **1 Redis**, one DB index or key prefix per client | **9 containers → 1**; a flush logs people out and loses nothing |
+| **OnTrak's three module databases** | `training-db` + `tix-db` + `sentinel-db` (same image 16-alpine, same host, same product) → **1 Postgres, 3 databases + 3 roles** | **3 → 1**; no tenant boundary crossed — it is one product |
+| **`ontrak-tix-db-1`** (i4 host Docker) | → the OnTrak instance on i1, or delete if unused | removes a duplicate *and* a host-level stray |
+| **Meilisearch** (optional) | 1.10 / 1.13.3 / 1.36.0 → one current instance | 3 → 1, but **each 1.x upgrade rewrites the index**, so every consumer needs a reindex window. Medium risk; not worth doing before the rest. |
+
+### Tier 2 — leave per-application (name the reason)
+
+| Engine | Why it stays |
+|---|---|
+| `cerulean-authentik-postgres` | Identity is the trust root; its own instance is the security boundary and its upgrade cadence follows Authentik's |
+| `atlas-gitea-db` | Code plane — same reasoning |
+| `coolify-db` (15) | Coolify's own lifecycle and upgrade path own it |
+| `openmaic-postgres`, `signara-postgres`, `linkwarden-postgres` | Tenant data; each is the product's restore boundary |
+| `tutor` MySQL + Mongo | Open edX's schema, upgraded by `tutor` |
+| `signoz-metastore-postgres` | Moot — it leaves with `monitor` (D3) |
+
+**Net after Tier 1: 12 Postgres → 10, 11 Redis → 2–3, 40 Docker containers fewer on i1.**
+That is real deduplication. A single central cluster would be fewer still and worse.
+
+### The one architectural dedup worth more than any database merge
+
+**Twelve `oauth2-proxy` sidecars for one Authentik.** Authentik's own **embedded outpost**
+handles many applications behind one container, with per-provider cookie domains and
+redirect URIs. Replacing 12 sidecars with one outpost removes 11 containers, 11 images,
+11 config surfaces and 11 places a `--cookie-domain` can drift. It is a real migration
+(12 apps re-registered, one bad callback list breaks sign-in) — but it is the largest
+container-count win in the estate, and it belongs in Scenario C, not this quarter's week.
+
+---
+
+## 6. Containers out of Incus, or into their own — three patterns
+
+The request asks whether projects can leave their Incus containers. Three shapes exist
+here, and only two are good.
+
+**Pattern 1 — container → host Docker (already happened by accident; do not repeat it).**
+`i2`'s host runs the `christ` family + `scif-*`; `i4`'s host runs `fax-staging`,
+`clearpath` and a duplicate OnTrak DB. These have **no memory cap, no CPU cap, no
+address-table row and no estate check**. It is the pattern that produced the three
+duplicates in F6. Recommendation: **move them into an Incus container** (`christ`, `fax`,
+`scif`) so they get a cap and a row, rather than leaving them uncapped on the hypervisor.
+
+**Pattern 2 — one fat container → several by function (the real win).**
+`proxy` on i2 holds the entire edge. Split it into four, each with its own cap and address:
+
+| New container | Contents | Why separate |
+|---|---|---|
+| `edge` | NPM + its MariaDB + the 12 SSO sidecars (or 1 outpost) | It is the thing that must never die with anything else |
+| `identity` | Authentik + Postgres + Redis | Identity is the trust root; it deserves its own failure domain |
+| `net` | Technitium DNS + Vault + ntfy | Authoritative DNS outliving the web edge is worth a container on its own |
+| `gateway` | OmniRoute + gateway-sso + its Redis | Already has its own compose and its own secrets; today it just happens to share a cgroup |
+
+Cost, stated plainly: each split container needs a **new LAN address**, a netplan pin
+(`netplan generate` + `systemctl restart systemd-networkd` — `apply` cannot run inside a
+container), a row in `check-container-addresses.py`, and NPM/DNS follow-through. The
+2026-11-02 lesson is exact here: a container left off that table is a `FAIL` on every run
+for every host. `.64`, `.65`, `.67`, `.68`, `.72`, `.74`, `.75`, `.77`, `.78` and
+`.80`–`.87` do not answer today, so addresses exist — **but "no reply" is not proof of
+freedom**, and each must be confirmed against the table before use.
+
+**Pattern 3 — Docker container → shared Incus container.** The i4 `fax-staging` pair and
+the i2 `scif` pair are single-purpose; each is one small `docker compose` that would fit
+in a 512 MiB container and gain a cap, an address and a check. Cheap, low risk.
+
+---
+
+## 7. OnTrak's Windows requirement — where the hypervisor goes
+
+**What is there now, measured:** the `ontrak` container on i1 has `/dev/kvm` and
+`/usr/bin/qemu-system-x86_64`, capped at **2 944 MiB / 2 vCPU**, and carries **two**
+Guacamole+guacd pairs (`ontrak-family-guacamole-1`/`guacd-1` *and* `ontrak-guacamole`/
+`ontrak-guacd` — itself a duplicate). There are **no _running_ Incus VMs** and `libvirtd`
+is inactive on all four hosts. **Correction: see §11.4** — i2's `fast` pool already holds
+**138 G of VM images** under project `ontrak`.
+
+| Option | Host | Verdict |
+|---|---|---|
+| **W1** keep guests inside `ontrak` | i1 | Works today, zero work. But the container cap (2 944 MiB) is *below* what a Windows guest wants, so the VM and the 27 app containers fight over one cgroup, and the qcow2 sits on the 1 TB HDD shared with 68 Docker containers. |
+| **W2 → recommended** dedicated Incus **VM** on `i3` | i3 | **14.8 GiB free RAM**, VT-x, `/dev/kvm`, and a 350 G LV for qcow2 images on a mostly-empty disk. An Incus VM gets its own hard memory and CPU and does not share a container cap. This is the best home in the estate. |
+| **W3** host-level KVM on `i1` | i1 | Better CPU than i3 (4 cores, AVX2), but the guest would land on the same spindle as 68 Docker containers and 12 containers, with 2.6 GiB already swapped out. |
+| **W4** `i2` | i2 | Best CPU (8 threads, AVX-512) and the worst place for it: PSI 18 %, 75 % disk, 53 % fragmentation. **No.** |
+| W5 the Proxmox hosts `pm3` / `pm4` | — | **Unverifiable today.** `pm3.innotel.us` A-resolves to `73.68.203.71` (the public edge IP, not a host) with `:8006` closed; `pm4.innotel.us` has no A record. They used to run i2 and i3 as VMs. If either is still alive, a real hypervisor is the correct home for Windows guests and worth ten minutes of checking. |
+
+**The honest limit of W2:** the i3-550 is 2010 silicon — 2 physical cores at 3.2 GHz, no
+AVX, no AES-NI. One or two concurrent Windows lab guests will run acceptably because
+they are mostly idle. A classroom of ten is not going to work on this box, and no
+rearrangement of the four servers changes that: it needs a real hypervisor host. Also
+note that with no AES-NI, TLS-heavy work should stay off i3.
+
+---
+
+## 8. Three complete scenarios
+
+### Scenario A — tighten, don't move (≈ half a day, no downtime)
+D1 + D2 + D3 + the `ontrak-tix-db` duplicate + the session-Redis merge.
+
+- **Buys:** ~28 G of disk, 1.4 GiB of RAM and 2 944 MiB of cap back on the loaded host,
+  real ceilings on `i4`, 9 fewer containers, three fewer duplicate services.
+- **Costs:** one confirmed decision (delete `monitor`), no service moves, no address
+  changes, no new checks.
+- **Leaves:** the `proxy` single-point-of-failure, i2's 53 % fragmentation, i3 empty.
+
+### Scenario B — one host per job *(recommended)* (≈ 2–3 days)
+Everything in A, plus:
+
+| Host | New role | Moves |
+|---|---|---|
+| **i1** (4c, 15.3 G, 450 G free) | **Application plane** — it has the most disk headroom and the estate's tenants are already there | keeps everything; sheds the OnTrak Windows guest to i3 (W2) once proven |
+| **i2** (8t, tight disk) | **Edge + identity plane** | sheds `monitor` (A) and `copilotkit`'s k3s if unused; `proxy` split per Pattern 2 if the team can absorb one window |
+| **i3** (idle, 5400 rpm) | **Bulk, cold and virtualization** | gains an Incus VM host (W2), the estate's cold/backup target on its 350 G LV, and telemetry (`prometheus`/`grafana`/`node-exporter` — write-light, RAM-light, and it frees 1.5 GiB of the i2 cap) |
+| **i4** (NVMe, 2t) | **Small, fast, IO-sensitive** — unchanged in kind, fixed in shape | gains 80 G root; hosts the `fax`/`clearpath` strays as Incus containers instead of host Docker |
+
+- **Buys:** every host above the estate's own 80 % disk warning line disappears; i2's
+  PSI drops with `monitor` and telemetry gone; the edge outlives an identity or DNS
+  restart; i3 stops being an empty machine.
+- **Costs:** 2–3 containers' worth of address changes and one window per split; the
+  ops docs (`container-placement.md`, `host-map.md`) must be updated in the same pass or
+  the checks will fail on every run.
+
+### Scenario C — rebuild the data plane (1–2 weeks + hardware)
+Buy **one SSD** (1 TB SATA is enough) for the box that will hold the data tier, then move
+the Tier-1 engines onto it under a single Postgres cluster with per-application databases,
+roles and connection pooling, honestly labelled as **one failure domain**. Replace the 12
+`oauth2-proxy` sidecars with one Authentik outpost.
+
+- **Buys:** the largest container-count reduction available (~40 fewer containers), one
+  engine to patch, snapshots/backups in one place.
+- **Costs:** a hardware purchase; reversing a documented tenant-isolation decision;
+  a pool-wide outage mode that does not exist today; a 12-app SSO migration.
+- **Verdict:** only worth it *after* B, and only with the SSD. Without an SSD, moving
+  the data tier onto the WD5000AVDS would make every product slower than it is now.
+
+---
+
+## 9. Recommended order
+
+1. **D1 + D2 on i4** — 80 G and 14 G back, online, reversible, no decision needed.
+2. **F3 on i4** — set `limits.memory.enforce: hard` and `limits.memory.swap: 0` on
+   `terminal`, `vault`, `vpn` (sized from their measured 303 / 506 / 69 MiB, at ~2×).
+3. **D3 on i2** — confirm `monitor` is unread, then remove it: the biggest single win.
+4. ~~**Kill the duplicates** — `ontrak-tix-db-1` on i4~~ — **DO NOT DO THIS. See §11.3.**
+   The i4 copy is the live database. The correct action is to **migrate it into a managed
+   Incus container**, not delete it. `clearpath` still needs its copy decided (§11.3).
+5. **Merge the session Redis** (9 → 1) and the three OnTrak databases (3 → 1).
+6. **D4 on i3** — build the 350 G pool, then stand up the Windows VM (W2) there.
+7. **Only then** consider splitting `proxy` (Pattern 2), because it is the one change that
+   touches every public name at once and needs the address table, netns pins and docs
+   updated in the same pass.
+
+Steps 1–5 change no service's address and can be done in one evening.
+
+---
+
+## 10. What was not verified
+
+- **No throughput numbers are claimed.** The quick `fsync` harness was unreliable on all
+  four hosts and is discarded (see §1).
+- **`monitor`'s fate is a judgement, not a fact.** Nothing in NPM, Alertmanager or
+  Prometheus references `.88`; a human may still open its Grafana directly. Confirm.
+- **"Free" addresses are "did not answer", not "allocated".** `.64`, `.65`, `.67`, `.68`,
+  `.72`, `.74`, `.75`, `.77`, `.78`, `.80`–`.87` did not answer on 2026-11-15; the
+  address table in `check-container-addresses.py` remains the authority.
+- **`pm3` / `pm4` could not be checked** — see W5. If they are alive, the Windows answer
+  improves and Scenario B's i3 VM becomes a fallback rather than the plan.
+- **`i3`'s role is inferred from its device, not benchmarked.** `WD5000AVDS` is an AV/GP
+  5400 rpm-class drive; that is a documented product class, not a measurement of this
+  spindle under this workload.
+- **The `i1` swap figure (2 638 MiB)** is the Tutor stack (`mysqld` 350 MiB, celery
+  workers, `mineru-api`), not a runaway; it is stale pages from a 4 864 MiB cap that has
+  room to spare, and no action is recommended from it.
+
+---
+
+## 11. What was applied, and four corrections
+
+Applied **2026-11-15, 15:45–16:05 EST**, on i2 and i4 only. `i3` was offline for an OS
+reinstall and nothing in §6/§7 touching it was attempted.
+
+### 11.1 Applied — measured before and after
+
+| Step | Host | Before | After | Verified by |
+|---|---|---|---|---|
+| **D1** `lvextend -l +100%FREE` + online `resize2fs` | i4 | LV 155.42 GiB; `/` 153 G, **50 G free, 67 %** | LV 235.42 GiB; `/` **232 G, 139 G free, 38 %** | `df -h /`, `vgs` (VFree 80 G → 0) |
+| **D2** `docker builder prune -af` | i4 | build cache **14.52 GB**, 98 G used | cache **0 B**, **84 G used** (−14 G) | `docker system df`, `df` |
+| **F3** `limits.memory.enforce: hard`, `limits.memory.swap: 0` | i4 | `terminal`/`vault`/`vpn` at `memory.max=max`, `swap.max=max` | `memory.max` = 1 610 612 736 / 2 281 701 376 / 805 306 368; `memory.high=max`; `swap.max=**0**` | cgroup files read back **without a restart** |
+| **D3** stop then `incus delete monitor` | i2 | `fast` 224 G alloc, **73.5 G free, 75 % cap**; avail RAM 2 877 MiB; CPU PSI **18.3 %** | `fast` **210 G alloc, 88.3 G free, 70 % cap**; avail RAM **4 293 MiB**; CPU PSI **1.06 %** | `zpool list`, `free -m`, `/proc/pressure/cpu`; 9 containers → 8 |
+
+`monitor` was deleted only after a sweep found **no** reference to `192.168.1.88` in any
+container environment or config file on i2, in the host-level Docker containers, in any
+NPM `proxy_host`/`redirection_host`, or in Prometheus — consistent with §F5. Its 15 G of
+SigNoz/ClickHouse data is **gone and not recoverable**; the stack can be rebuilt from
+compose if it is ever wanted again.
+
+`i4` memory: 4 146 MiB used of 7 341, 3 195 available, after the cap change.
+
+### 11.2 Correction — `monarch` on i1 is running, and it is why i1 is overloaded
+
+This page recorded `monarch` as a stopped container. It is **RUNNING** (started
+`2026/11/15 15:43 EST`, `boot.autostart: false`, so it was started deliberately) and holds
+**37 Docker containers**: `transmission-daemon`, Jellyfin, Sonarr, Radarr, Lidarr,
+Whisparr, Prowlarr and `next-server`. `limits.memory: 4864MiB`, `limits.cpu: 2`, currently
+using **3.87 GiB**.
+
+Measured on i1 while it ran:
+
+| Metric | Value |
+|---|---|
+| Load average | **86.03 → 54.76 → 46.60** (1 min) |
+| I/O PSI `some` / `full` | **98.4 % / 77.5 %** — 77 % of wall time stalled on I/O |
+| `iostat sda` | **88.9 % util**, 9 fsync/s at **99 ms** `f_await`, `%iowait` 80 % |
+| Blocked processes | 30–50 in `vmstat` `b` column |
+| Swap | 3 095 / 4 095 MiB used |
+
+**Nothing was stopped.** A media library scan is the user's call, not a rebalance decision,
+and the stack started 2 minutes before this work began. **This is the first thing to decide
+on i1:** while I/O pressure is 98 %, no migration, database merge or VM work on i1 can be
+measured honestly.
+
+### 11.3 Correction — the live OnTrak Tix database is on i4, not i1
+
+§F6 and step 4 of §9 both assumed i1 held production. They had it backwards:
+
+| Copy | Location | Size | Data |
+|---|---|---|---|
+| `ontrak-tix-db-1` | **i4 host Docker**, `:5432`, volume `ontrak-tix_ontrak-tix-db` | **3 884 MB** | **5 001 081 `Ticket`, 2 401 047 `Message`, 60 000 `User`, 1 427 `AuditEvent`** |
+| `ontrak-family-tix-db-1` | inside `ontrak` on i1 | 14 MB | `pg_stat_user_tables` empty — an empty shell |
+
+Following the original instruction would have destroyed five million tickets. **The correct
+action is the opposite of what this page first said:** move the i4 instance *into* a managed
+Incus container (with a cap, an address row and an estate check), and retire the empty i1
+shell. No connection was open to it (`ss -tnp` showed nothing on `:5432`) at the time of
+measurement, so its consumer must be identified before any move.
+
+`clearpath`: NPM `proxy_host` 71, 274 and 275 all point at **`192.168.1.83`** (i1's Incus
+container), so the served copy is i1's. i4's host-Docker `clearpath` (`:3001`, created
+**2026-11-14**, i.e. the day before this audit) appears in no NPM host and is **left
+running and undecided** — it is recent enough that it may be work in progress.
+
+### 11.4 Correction — i2 already has 138 G of VM images
+
+§7 said there were no Incus VMs. There are no *running* ones, but `fast` holds:
+`fast/virtual-machines` **138 G**, all under project `ontrak` — templates
+`ontrak_tpl-{hw-driver-device, net-dns-failure, net-static-ip-conflict, os-perf-startup,
+sec-malware-persistence, sec-phishing-triage, sw-app-crash}` plus sessions, each with a
+`@snapshot-clean` snapshot costing **~9 G**. That is why i2's pool sat at 75 %.
+
+This matters for §7's recommendation: OnTrak's Windows guest already exists as an Incus VM
+pattern here, so W2 on i3 becomes *rehosting an existing design onto better hardware*
+rather than a from-scratch build — and the ~54 G of `snapshot-clean` snapshots on i2 are
+candidates for pruning once the templates are confirmed good.
+
+### 11.5 i2's root cannot be grown from inside the guest
+
+D1 worked on i4 only because i4's volume group had **80 G unallocated**. i2 does not:
+
+```
+ubuntu-vg  1 PV  1 LV  VSize <46.95g  VFree 0
+ubuntu-lv  <46.95g   ext4  /  46G  32.1G used  11.8G avail  70%
+```
+
+The group is fully allocated. `/` at 70 % on i2 — the estate's tightest filesystem, on its
+busiest host — therefore **cannot be relieved with `lvextend`**. It needs either the
+underlying virtual disk enlarged (i2 is a QEMU guest on `pm3`, which §W5 could not verify)
+or data moved off `/` entirely. This is why §D5 (trim + scrub) and the `proxy` split matter
+more on i2 than they look: there is no free LVM escape hatch there, unlike i4.
+
+### 11.6 Not attempted, and why
+
+- **Session-Redis merge (9 → 1)** and **OnTrak 3-database merge** — both land on i1, which
+  was at 77 % I/O-stalled wall time throughout. Merging live databases under that pressure
+  cannot be verified, and a bad cutover would be indistinguishable from the storm.
+- **`christ` / `scif` / `fax` strays into Incus** — a real migration (new container,
+  address, netplan pin, volume copy, cutover) per family. Not a thing to start minutes
+  before the estate's only spare host comes back.
+- **Splitting `proxy`** — still gated on a maintenance window, as §9 says.
+- **Nothing on i3** — offline for reinstall.
+
+---
+
+## 12. Second pass, 2026-11-15 21:10–22:00 EST — i3 returns, zombies cleared, one migration staged
+
+### 12.1 i3 is back and is now a real Incus host
+
+Fresh Ubuntu 26.04.1 (`7.0.0-43-generic`), same `i3-550` **2c/4t**, **15 403 MiB** RAM,
+`WDC WD5000AVDS` 465.8 G, **`/dev/kvm` present**, `/` 98 G at 8 %, and `ubuntu-vg`
+463.76 G with **363.76 G unallocated**.
+
+| Step | What was done | Measured result |
+|---|---|---|
+| Incus | `apt-get install incus` (+ `zfsutils-linux`, `xorriso`, `python3`, `sshpass`, `rsync`) | `incus --version` → **6.0.5**, `incusd` listening on `:8443` |
+| **D4** pool | `lvcreate -l 100%FREE -n incus ubuntu-vg` → **zfs** pool `incus` on `/dev/ubuntu-vg/incus` | `zpool list` → **362 G, 663 K allocated, ONLINE**; `incus storage list` → `incus` zfs **CREATED** |
+| Network | managed `incusbr0` bridge, `enp2s0` untouched | `incusbr0` **10.105.132.1/24**; `.53` still static on `enp2s0` |
+| RAM guard | `zfs_arc_max=4294967296` in `/etc/modprobe.d/zfs-arc.conf` | ARC ceiling **4 GiB** of 15 403 MiB |
+| Profile | preseeded `default`: root on `incus`, `eth0` on `incusbr0` | `incus profile show default` matches |
+
+**D4 was applied differently from §4's plan, deliberately.** §4 offered a `dir` pool; this is
+**zfs**, because that is what `i1` (`incus`) and `i2` (`fast`) run, and because `i2`'s
+existing `ontrak` VM templates depend on `@snapshot-clean` snapshots — a `dir` pool would have
+made the one host meant to carry VMs the only one that cannot snapshot them.
+
+### 12.2 The Windows VM (W2) did not complete — recorded as failed, not as done
+
+i2 already holds both halves of the build, so nothing was invented: the toolset at
+`/root/ontrak/build/incus-windows/` and the ISOs
+`26100.1742.240906-0331.ge_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso`
+(**5 387 960 320 B**, Windows 11 Enterprise eval) and `virtio-win-0.1.285-1.iso`
+(**789 645 312 B**). Tree and ISOs were copied to `/root/winbuild` on i3.
+
+`build.sh -i <iso> 11e` **succeeded** at repacking the ISO with unattended data
+(`unattended-11e.iso`, 733 787 sectors) and created the build VM `ontrak-winpack-build` — then
+**failed** driving the install: `tools/click.py` → `OSError: [Errno 5] Input/output error` in
+`waitbooting()` (`os.read` on the console fd), then `Error: Image not found`. The build VM is
+left **STOPPED** and `output/win11e/` holds only the repacked ISO. **No Windows image exists
+and no VM is serving on i3.**
+
+The alternative — copying one of i2's **nine working Windows VMs** in project `ontrak` — is
+blocked on cross-host trust, not on the VM: `incus config trust add` tokens expire on
+redemption (`expired_token`), and although i3's client certificate *was* accepted on i2
+(`i3-direct` now appears in `incus config trust list`), `incus remote add` still falls through
+to the same expired device-authorization flow. That is the next thing to fix, and it is one
+command pair, not a rebuild.
+
+### 12.3 Zombies on i1 / i2 / i4 — cleared where a restart reaps them
+
+| Host | Before | Parent, and where it lives | Action | After |
+|---|---|---|---|---|
+| **i1** | **9** `curl` | `mineru-api` → `openmaic-mineru` in `atheniq` | `docker restart openmaic-mineru` | **0** |
+| **i2** | **1** `epmd` | `beam.smp` in an Elixir pod inside `copilotkit`'s k3s | none attempted — no `kubectl`/`k3s` reachable in the container | **1** |
+| **i4** | **2** `chrome-headless` | `node`/`concurrently` → `linkwarden-linkwarden-1` in `vault` | `docker restart linkwarden-linkwarden-1` | **1**, recurring |
+
+*A `Z` process is already dead.* It holds no CPU and no memory — only a PID-table slot — so
+nothing can "stop" it; only the parent can reap it with `wait()`. Both restarts cleared the
+backlog and both parents are still leaking: i1 produced a fresh `php` zombie from PID
+`2114549` within minutes, and i4 a fresh `node` from the restarted wrapper. **The durable fix
+belongs in those two applications' child handling, not in ops.** The single remaining `epmd`
+zombie on i2 costs one PID slot and would require restarting a working Elixir pod to clear.
+
+### 12.4 The Tix database migration is staged, not cut over
+
+Backed up first, then moved, then **verified against the old instance before anything else
+was changed**:
+
+| Step | Result |
+|---|---|
+| `pg_dump -Fc` of `ontrak_tix` and `ontrak` | **160 M** + **85 K** in `/root/*.dump` on i4; header reads `PGDMP` |
+| Incus container `ontrak-tix-db`, `.68` | Created; `.68` was unreferenced in the repo and unanswered before use; pinned in its own netplan |
+| Caps | `limits.memory=1GiB`, `limits.cpu=1`, `limits.memory.enforce=hard`, `limits.memory.swap=0`, `boot.autostart=true` — the host-Docker copy had **0 mem / 0 cpu** |
+| Data copy | `/var/lib/docker/volumes/ontrak-tix_ontrak-tix-db/_data` → `/srv/tixdb`, **4.9 G**, owner `70:70` |
+| Postgres inside the new container | **Fails**: `runc create failed: … open sysctl net.ipv4.ip_unprivileged_port_start file: reopen fd 8: permission denied` |
+
+`security.nesting` and `security.privileged` do not fix it, and
+`raw.lxc "lxc.mount.auto = proc:rw sys:rw"` is refused outright (`unknown key`). `vault` on the
+same host runs Docker fine, so the difference is the **port publish**, not Docker-in-Incus as
+such — which is why `--network host` was the next attempt.
+
+**Nothing was deleted and the database is serving again.** `ontrak-tix-db-1` was stopped for
+the copy and restarted in the same pass: **Up (healthy)**, `:5432` listening, counts
+`5000479 | 2400948 | 60000`. The stopped container and its volume are intact; the staged
+Incus container holds a byte-copy of the data and is idle.
+
+**The counts moved since §11.3, and that matters.** The audit recorded **5 001 081**
+`Ticket` / **2 401 047** `Message`; this pass measured **5 000 479** / **2 400 948** — 602
+tickets and 99 messages fewer. So §11.3's "no connection was open, its consumer must be
+identified" is worse than unknown: **something is actively writing to this database**, and it
+has to be found before any cutover, because a cutover that leaves it dialling the old
+address silently forks the data.
+
+### 12.5 What this pass did not do
+
+- **No container was moved to i3 and no estate check names it.** `check-container-addresses.py`,
+  `check-estate-inventory.py`, `check-host-disk.py`, `check-container-limits.py`,
+  `check-stuck-processes.py`, `check-mount-stacks.py`, `check-address-latency.py`,
+  `check-mail-traffic.py`, `trust-estate-hosts.py` and `setup-sshpass-lan.sh` are still
+  three-host tables. Widening them changes what the scheduled run requires and what the
+  fixtures in `scripts/tests/` assert, so it is a change of its own rather than a silent
+  half-edit that would make four checks disagree about how many hosts exist.
+- **`monarch` on i1 is still running** (§11.2). The decision remains the owner's.
+- **i2's 138 G of `ontrak` VM images and 53 % fragmentation** are untouched.
+- **The Tix backup is unverified beyond its header.** It has not been test-restored; the
+  staging container itself is the restore proof, once its Postgres can start.
