@@ -764,7 +764,7 @@ container per iteration.
 | `magnate` | `.57` | 512 MiB → 512 MiB | RUNNING | ping 3/3 from i1 |
 | `copilotkit` | `.114` | **10 GiB → 4 GiB** | RUNNING | ping 3/3 from i1 |
 | `signara` | `.44` | 1 GiB → 1 GiB | RUNNING | ping 3/3 from i1 |
-| `onyx` | `.60` | 768 MiB → 768 MiB | **in progress** | see 14.3.1 |
+| `onyx` | `.60` | 768 MiB → 768 MiB | **did not move** | imported on `i3` but will not start; runs on `i2` again — see 14.3.2 |
 
 Every source is **stopped on i2, not deleted** — nothing is removed until the reinstall, and the
 old rootfs stays as the fallback copy. Measured transfer rate across the six: **36–40 MB/s**
@@ -788,11 +788,44 @@ source=incus/tank`), which keeps the device definition valid without a second bl
 
 **The instance copy then failed a second time, and the reason was not the pool.** The zfs send
 died at **6.55 GB** with `Failed migration on target … zfs send failed: signal: broken pipe`.
-Two attempts, same shape, so `onyx` moved to the tar path instead — `incus export` on i2, `rsync`
-the tar to i3, `incus import … --storage incus` — which does not use a cross-host zfs stream at
-all. *The `incusd` unit that `systemctl is-active` reports as `inactive` is `incusd.service`, which
+Two attempts, same shape, so `onyx` moved to the tar path instead. **The obvious version of that
+path is a trap on this host:** `incus export` writes the archive where you point it, and i2's `/`
+had **6.4 G free against an 8.2 G instance** — the export reached 5.5 G and was heading for a full
+root filesystem *on the host that still runs the edge*. The archive was aborted and removed. What
+worked is streaming it instead of storing it: `incus export onyx -` writes to stdout (documented
+in `incus export --help`), piped over ssh into `/root/onyx.tar` **on i3**, then `incus import
+… --storage incus`. Nothing is written on i2 at all, and the archive lands on the host that has
+the room (77 G). Import took the full 8.2 G and reported `IMPORT_OK`.
+
+*The `incusd` unit that `systemctl is-active` reports as `inactive` is `incusd.service`, which
 does not exist on this build; the daemon is `incus.service` and was active throughout. That
-misread cost a detour and is recorded so nobody repeats it.*
+misread cost a detour and is recorded so nobody repeats it. Likewise `pkill -f "incus export"`
+matches the shell that is running it — the bracketed form (`incus expor[t] onyx`) is what actually
+kills the export.*
+
+#### 14.3.2 `onyx` did not move, and I could not make it start on i3
+
+**Recorded as not done.** The import succeeded, the volume is on `i3`, and the container will not
+run there:
+
+```
+incus start onyx      ->  rc=0, and `incus list` still reports STOPPED
+incus info --show-log ->  Log: (empty)
+journalctl -u incus   ->  -- No entries --
+```
+
+Every probe agrees the start *operation* completes (`status: Running`, `err: ""`) while the
+instance is stopped — so the container is exiting immediately and writing nothing to its console.
+What was ruled out: the missing storage pool (created, `COPY_OK`), the absent `/dev/sdc` behind its
+optional `main-pool-usb` device (**device removed — still stopped**), and the `--console` start,
+which reported `Error: inappropriate ioctl for device` and **briefly showed the instance as
+RUNNING**, which is why an earlier draft of this section claimed it had moved. It had not: forty
+seconds later it was `STOPPED`, and every start since then never leaves `STOPPED` at all.
+
+The instance and its copied volume are **left in place, stopped, on `i3`** (rootfs 10.6 G in
+`incus/containers/onyx`) — that is the evidence for the next attempt, not a rollback to be deleted.
+**`onyx` runs on `i2` again**, at `.60`, as it did before this pass. The honest state is: seven of
+eight containers moved, and this one needs a diagnosis I did not reach.
 
 **`signara` — a NIC that lived in a profile and a netplan that needs udev.** It came up with **no
 LAN address at all**, only its docker bridges:
@@ -828,12 +861,11 @@ which reach hosts by their own addresses and containers from the edge.
 
 | Container | Rootfs | Cap today | Note |
 |---|---|---|---|
-| `distro` | 2.5 G | 512 MiB | copying now; carries a snapshot (`pre-privileged-20261020`) |
-| `magnate` | 3.8 G | 512 MiB | |
-| `copilotkit` | 2.7 G | **10 GiB** | cap is 75 % of i3's RAM and its measured use is 1.58 GiB — **right-sized to 4 GiB** in the move |
-| `onyx` | 8.2 G | 768 MiB | NFS client; §11's mount-stack history is about this container |
-| `signara` | 9.7 G | 1 GiB | |
-| `proxy` | **36.1 G** | 7 424 MiB | **last, and only with a window** — see 14.5 |
+| `onyx` | 8.2 G | 768 MiB | **not moved** — imported on `i3`, refuses to start there, running on `i2` (14.3.2) |
+| `proxy` | **36.1 G** | 7 424 MiB | **not started** — see 14.5 |
+
+**i2 runs `proxy` and `onyx`.** The other six containers' rootfs are `STOPPED` copies kept as the
+rollback path, and nothing on i2 has been deleted.
 
 **`proxy` is not a container, it is the estate's edge**: NPM (every public name), Authentik,
 Technitium (the authoritative DNS), Vault's door, Prometheus, Grafana and six `oauth2-proxy`
