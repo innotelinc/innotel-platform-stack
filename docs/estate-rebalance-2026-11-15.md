@@ -1,6 +1,6 @@
 # Estate rebalance — inventory and options, i1 / i2 / i3 / i4
 
-**Status: partially applied 2026-11-15 — see §11 (15:45–16:05 EST) and §12 (21:10–22:00 EST).** The inventory below is
+**Status: partially applied 2026-11-15 — see §11 (15:45–16:05 EST), §12 (21:10–22:00 EST), §13 (the Tix cap under load, and a check that counts zombies) and §14 (i2 → i3 displacement, in progress while i2 is reinstalled).** The inventory below is
 the **pre-change snapshot**, kept as measured. §11 records what was applied with before and
 after numbers, and **four corrections to findings in this page** — including one that would
 have deleted the production Tix database. Read §11 before acting on §4, §5, §7 or §9.
@@ -636,3 +636,172 @@ withdrawn.** The exact count, and the rule that a row count in this page is quot
   new container starting from the copied data directory, with the old instance's shutdown
   timestamp in its log and a matching `count(*)`, is a stronger proof than a dump check would
   have been. The dump itself remains a second copy, unexercised.
+
+---
+
+## 13. Third pass — the Tix cap under load, and a check that counts zombies
+
+### 13.1 The 1 GiB cap on `ontrak-tix-db` holds under concurrent load
+
+§12.4 set the memory cap from arithmetic, not measurement: 1 GiB, hard-enforced, `swap=0`,
+`limits.cpu=1`, against a host-Docker copy that had **no cap at all**. A cap that is too small
+fails as an OOM kill, and this database has no consumer in production (i1's `ontrak` app points
+at its own `tix-db` service), so nothing upstream would notice it dying.
+
+Measured on the live instance at `.68`:
+
+| Probe | Result |
+|---|---|
+| `count(*)` on `Ticket`, single client | **0.40–0.51 s** across samples (5 000 479 rows, seq scan) |
+| `count(*)` × 36 queries, 12 concurrent clients | **14.8 s** wall, all 36 returned |
+| `memory.peak` during the run | **738 926 592 B** of 1 073 741 824 (69 %) |
+| `memory.events` | `oom 0`, `oom_kill 0` |
+| Container after the run | `Up`, `count(*)` unchanged |
+
+**The cap is right, with 31 % headroom at peak.** 738 MiB is the number a future cap change has
+to start from: a 512 MiB cap would have killed it during this run, and 1 GiB is the smallest cap
+that survives twelve concurrent full scans. Note what the probe does *not* say — it is twelve
+readers of one table, not the application's write mix, because there is no consumer to drive one.
+
+### 13.2 `check-zombie-processes.py`, and why it names four hosts
+
+§12.3 fixed both leaks with `init: true` — a keyword in two compose files that live on two
+hosts. Nothing in the estate would notice it being reverted, and the next supervisor written the
+same way leaks the same way. `scripts/check-zombie-processes.py` counts the symptom on every
+host: **warn at 3**, **fail at 25**, unreadable host is exit 2 and never a pass — the same
+contract as the other checks, publishing `innotel_estate_check_host_zombie_processes{host=…}`.
+
+Live run, on the estate as it stands with i2 still up:
+
+```
+check-zombie-processes: 0 failure(s), 0 warning(s)
+  zombies: i1 0, i2 1, i3 0, i4 0
+```
+
+i2's `1` is the deliberate `epmd` from §12.3, and the warning line is deliberately above it so a
+normal host stays quiet. This is the **one check whose host table is four-wide from the start** —
+§12.5's rule was that widening the existing three-host tables is a change of its own, and that
+holds; a new check does not inherit that debt, and leaving i3 out of it would have meant a check
+that cannot see the host the estate is being moved onto.
+
+### 13.3 The `atheniq` commit in §12.3 cannot be made, and that is the finding
+
+The MinerU edit is real and live (`Init=true`, container healthy, i1 at 0 zombies), but it
+**cannot be committed in `atheniq`**: `services/` is **ignored** by that repository.
+
+```
+$ git ls-files --error-unmatch services/OpenMAIC/docker-compose.mineru.yml
+error: pathspec … did not match any file(s) known to git
+$ git check-ignore -v services/OpenMAIC/docker-compose.mineru.yml
+.gitignore:9:services/	services/OpenMAIC/docker-compose.mineru.yml
+$ git status --porcelain | head -3
+ M contrib/tutor-atheniq-hosts/atheniqhosts/plugin.py
+ M deploy/compose/atheniq-sso.yml
+```
+
+So the deployed copy under `/home/tutor/atheniq/services/` **is** the source of truth for that
+file, and a `git pull` cannot remove `init: true` (it was never tracked to be restored). The
+backup `…mineru.yml.bak-init` stays beside it. §12.3's warning that "the next pull will remove
+it" was wrong in that specific respect and is corrected here: the pull will not touch an ignored
+path, but nothing versions this fix either — a rebuilt container or a re-cloned checkout loses
+it silently. Recording it in this page is the only durable copy.
+
+---
+
+## 14. i2 is going offline — the estate moves onto i3
+
+**Context.** i2 is to be reinstalled, so every container on it has to be somewhere else first.
+That is a different job from §8's scenarios: not a rebalance for headroom, a **displacement**
+with a deadline, onto the one host the estate had written off in §11 (2c/4t, 15.4 GiB, a
+5 400 rpm `WD5000AVDS`). This section records what the move required, what has moved, and what
+it costs while it lasts.
+
+### 14.1 Three things had to exist on i3 before a single container could move
+
+None of i2's eight containers could be copied to i3 as it stood. Each blocker was structural,
+not an error message:
+
+| Missing on i3 | Why it blocked the move | What was done |
+|---|---|---|
+| **A LAN bridge** | Every i2 container is `nictype: bridged, parent: br0` and pins its own LAN address **inside** the container (`.58`, `.70`, …). i3's `enp2s0` held `.53` directly and its only bridge was `incusbr0` (**10.105.132.0/24**, NAT) — an imported container would have come up on NAT and lost its address. | `br0` created as a netplan bridge taking over `enp2s0`, carrying `.53`, **same MAC** (`10:78:d2:9a:0d:52`) so the LAN and the router see no change. Applied with an **armed rollback** (restore the old netplan and re-apply after 180 s unless disarmed); disarmed after the gateway answered. |
+| **i2's profiles** | Every container references `docker` (and `default`); the copy aborted with `Requested profile "docker" doesn't exist`. | `default`, `docker`, `large`, `medium`, `small` exported from i2, `pool: fast` rewritten to `pool: incus`, `used_by:` stripped, applied on i3. `default` now matches i2's: root on `incus`, `eth0` on **`br0`**. |
+| **Trust between the hosts** | `incus copy` across hosts needs the target to accept the source's client certificate. §12.2 recorded the trust attempt as blocked on `expired_token`. | The certificate *was* already trusted (`i3-direct`); the CLI was falling through to device authorization. `incus remote add … --protocol incus --auth-type=tls` succeeds — the missing piece was the explicit auth type, not the certificate. i3 now reads `i2src:` directly. |
+
+**This corrects §12.2.** The Windows VM on i2's `ontrak` project is no longer blocked on trust;
+what remains blocked is the *build* (§12.2's `click.py` failure). The trust fix is one command
+pair, exactly as §12.2 predicted, and it was the `--auth-type=tls` flag.
+
+### 14.2 The copy path, and the failure that shaped it
+
+There is **no CRIU on i3**, so a running container cannot be live-migrated:
+
+```
+Error: Failed instance creation: Unable to perform live container migration.
+CRIU isn't installed on the target server.
+```
+
+So the path is **stop the source → `incus copy i2src:<name> <name> --storage incus` → set the
+cap → start the target**. Transfer measured at **36–40 MB/s**, which is the constraint that sets
+the timetable: 65 G of rootfs is ~30 minutes of copying, inside which each service is down for
+its own copy, not for the batch.
+
+**Two of my own mistakes on the first container, recorded because they cost real downtime.**
+`subscribe` was stopped twice with nothing to start in its place: first because the copy failed on
+the missing `docker` profile *after* my script had already stopped the source, and then because I
+guarded the copy as `if incus copy … | tail -3` — a pipeline whose exit status is `tail`'s, so the
+failure branch never ran and the source was stopped again. Both times the source was restarted
+and verified on `.58` (3/3 packets, ARP `REACHABLE` from i1) before anything else was touched. The
+working script now checks the copy's own status, restarts the source on failure, and copies one
+container per iteration.
+
+### 14.3 What has moved
+
+| Container | Address | Cap before → after | State on i3 | Verified |
+|---|---|---|---|---|
+| `subscribe` | `.58` | 384 MiB → 384 MiB | RUNNING | ping 3/3 from i1, ARP `REACHABLE` |
+| `pi` | `.70` | 384 MiB → 384 MiB | RUNNING | reported `.70` on `eth0`; 1.35 GB transferred |
+
+Both sources are **stopped on i2, not deleted** — nothing is removed until the reinstall, and the
+old rootfs stays as the fallback copy.
+
+*One host-local oddity, written down so it is not mistaken for a fault later:* i3's **host** cannot
+ping `.58` (`ip neigh` shows `FAILED`) while **i1** pings it 3/3 with a REACHABLE ARP entry, and
+the container answers on the bridge. Container-to-container and LAN-to-container traffic are
+fine; only the host's own path to that address is not. It does not affect the estate checks,
+which reach hosts by their own addresses and containers from the edge.
+
+### 14.4 What is left, in the order it should go
+
+| Container | Rootfs | Cap today | Note |
+|---|---|---|---|
+| `distro` | 2.5 G | 512 MiB | copying now; carries a snapshot (`pre-privileged-20261020`) |
+| `magnate` | 3.8 G | 512 MiB | |
+| `copilotkit` | 2.7 G | **10 GiB** | cap is 75 % of i3's RAM and its measured use is 1.58 GiB — **right-sized to 4 GiB** in the move |
+| `onyx` | 8.2 G | 768 MiB | NFS client; §11's mount-stack history is about this container |
+| `signara` | 9.7 G | 1 GiB | |
+| `proxy` | **36.1 G** | 7 424 MiB | **last, and only with a window** — see 14.5 |
+
+**`proxy` is not a container, it is the estate's edge**: NPM (every public name), Authentik,
+Technitium (the authoritative DNS), Vault's door, Prometheus, Grafana and six `oauth2-proxy`
+sidecars. It keeps `.71`, and the router's port-forwards still point at `.71`, so the public path
+is unchanged once it is up — but while it is stopped, **every public name and the estate's own
+DNS are down together**, and a failed copy leaves them down until the source is restarted. Its
+4.72 GiB of live memory also makes it the one container whose copy cannot be verified by a ping
+alone: Authentik's database has to be consistent, which a stop-before-copy gives and a live copy
+would not.
+
+### 14.5 What this costs while it lasts
+
+- **The edge moves to a 5 400 rpm disk.** §11's F1 finding is exactly this: `proxy` is the
+  estate's write-heavy container (Authentik, NPM's MySQL, Prometheus) and i3 is the host chosen
+  in §4 for *bulk* storage. For the duration of the reinstall that trade is accepted knowingly,
+  because the alternative is no edge at all. **It is not the final placement** — once i2 is back,
+  `proxy` belongs on NVMe (i4) or back on i2, and this section is the record that its month on
+  i3 was displacement, not a decision.
+- **i3's RAM becomes the constraint.** Caps on the moved set sum to ~14.4 GiB of 15 403 MiB,
+  which is overcommit rather than reservation — i2's actual working set was ~8.5 GiB for the same
+  eight containers. `copilotkit`'s 10 GiB cap was the one that had to shrink, and it was measured
+  at 1.58 GiB before being set to 4 GiB.
+- **i2's pool must not be touched while its containers are still the fallback.** `fast` is at
+  70 % with 88.3 G free; the stopped rootfs copies are the only rollback path until the reinstall
+  wipes them. Nothing on i2 is deleted as part of this move.
