@@ -132,3 +132,38 @@ The last `conflicting server name "auth.innotel.us" on 0.0.0.0:80` came from a
 hand-written block in `/data/nginx/custom/http.conf` that duplicated the redirect NPM's own
 `:80` block already generates. Removing it leaves `nginx -t` reporting no conflicts at all,
 and `http://auth.innotel.us/` still answers 301 to HTTPS.
+
+## deploy.innotel.us is back, on the panel's own host (2026-11-15)
+
+The name had been left dead by the guest retirement, not by anything wrong with Coolify.
+It still resolved to the public edge (`73.68.203.71`), but NPM held no vhost for it, so
+443 answered `TLS alert, unrecognized name` — the symptom this page already records for a
+name with no loaded `server_name`.
+
+Measured before the repair: none of the 215 proxy hosts named the door, no door rode a
+tunnel any more, and the only estate listeners on `:8090` were telno's `christ-telno` on
+`192.168.1.113` and a stale docker-proxy on `i2`. The panel was on `192.168.1.113` — host
+`dev`, a VM of its own rather than an Incus guest — running `coollabsio/coolify:4.7.5`
+with `coolify-sentinel`, `coolify-db` and `coolify-redis`.
+
+Two faults stacked, which is why pointing a proxy host at it was not enough on its own:
+
+* the panel container was **Up but unhealthy**: inside it only `:9000` (php-fpm) was
+  listening, the web server answering `:8080` was not, so its own health check
+  (`curl 127.0.0.1:8080`) was refused and the host's published `:8000` reset every
+  connect. `docker restart coolify` brought NGINX + PHP-FPM back (`✅ NGINX + PHP-FPM is
+  running correctly.`) and the panel began answering;
+* the edge had no vhost, so the name could not have served anything even with the panel up.
+
+Proxy host **342** now serves `deploy.innotel.us` → `http://192.168.1.113:8000` with
+websockets, HTTP/2 and forced SSL on certificate **153** (which already named the door and
+was unused; it was created while the tunnel was still the path). Verified through the
+edge, from `i2` and from inside the `proxy` container: `/` → `302
+https://deploy.innotel.us/login` → **200**, the login page carries the `coolify` marker,
+TLS `CN=deploy.innotel.us` valid to **2027-02-01**, and `:80` → 301.
+
+`check-deploy-door.py` was restored with the door — it had been reporting the retirement
+as a note — and `TUNNELS` stays empty because this door rides no tunnel. The lesson worth
+keeping: the retirement note was accurate the day it was written and became wrong the
+moment the panel was reachable again, and a check that emits a note instead of probing
+cannot notice that by itself.

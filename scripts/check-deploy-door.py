@@ -17,6 +17,11 @@ proxy hosts forward to those instead of to `.93`:
     deploy.innotel.us           dials 172.18.0.1:8090  ->  127.0.0.1:8000  (Coolify panel)
     fax-staging.lab.innotel.us  dials 172.18.0.1:8091  ->  127.0.0.1:3997  (fax staging)
 
+Both were retired with `.93` on 2026-11-14. `deploy.innotel.us` came back on 2026-11-15
+without a tunnel: the Coolify panel (4.7.5) runs on `192.168.1.113` — host `dev`, a VM of
+its own rather than an Incus guest — which the edge reaches directly, so there is no
+listener to probe. `fax-staging.lab.innotel.us` stays retired.
+
 Three things break this without a word, and none of them is visible from either end alone:
 the ssh session dies and autossh does not come back (the name answers 502), the VM's
 service dies (same 502, tunnel fine), or the certificate on the name quietly lapses (the
@@ -61,20 +66,19 @@ CHECK = "deploy_door"
 #: listener, because that is what a proxy host dials: a 502 from the name and a refused
 #: connect here together say "the tunnel", while a 502 with the listener up says "the
 #: service behind it".
-#: Retired 2026-11-14, with the guest the tunnels ended on. `192.168.1.93` was the
-#: estate's development VMware guest; `deploy.innotel.us` (Coolify) and
-#: `fax-staging.lab.innotel.us` were only ever doors onto it. Both proxy hosts were
-#: deleted rather than left answering 502 (backups `/root/npm-host-321.json` and
-#: `/root/npm-host-281.json` on the edge), so these maps are empty on purpose. The check
-#: stays in the unit: a retirement that silently drops out of the series is the same
-#: blindness the other checks exist to prevent, and a note says what happened.
+#: Empty since 2026-11-14, when `192.168.1.93` (the estate's development VMware guest) was
+#: retired and both proxy hosts were deleted rather than left answering 502 (backups
+#: `/root/npm-host-321.json` and `/root/npm-host-281.json`). `deploy.innotel.us` returned
+#: on 2026-11-15 straight to the panel's own host and needs no listener; the fax staging
+#: door stays retired. An empty map here says "no door rides a tunnel", not "nobody
+#: looked" — the check keeps its place in the unit so the series cannot vanish silently.
 TUNNELS: dict[str, int] = {}
 
-#: The public names that ride those tunnels. `coolify` is the marker a working panel's
-#: page carries; a proxy that answers 200 with somebody else's default page is not a
-#: working door, and 200 alone would call it one. The fax portal has no marker: it is a
-#: 302 to a sign-in page and the jump is the proof.
-DOORS: dict[str, str | None] = {}
+#: The public names a door answers on. `coolify` is the marker a working panel's page
+#: carries; a proxy that answers 200 with somebody else's default page is not a working
+#: door, and 200 alone would call it one. The panel answers `/` with a 302 to `/login`,
+#: which is followed, so the marker is read from the login page (measured 2026-11-15).
+DOORS: dict[str, str | None] = {"deploy.innotel.us": "coolify"}
 
 #: Statuses a working door gives. A 502/503/504 is the failure this exists for; the
 #: rest are answers (a gate's 401/403 is still an open door).
@@ -301,8 +305,9 @@ def main(argv: list[str] | None = None) -> int:
         # check broke. Exit 0 with a note: a series that vanishes reads exactly like a
         # check that stopped running, and every alert rule here is built to notice that.
         note = (
-            "the tunnelled doors were retired with 192.168.1.93 on 2026-11-14 "
-            "(deploy.innotel.us, fax-staging.lab.innotel.us); nothing to probe"
+            "no doors were named, so nothing was probed; deploy.innotel.us rides no "
+            "tunnel since 2026-11-15 and fax-staging.lab.innotel.us was retired with "
+            "192.168.1.93 on 2026-11-14"
         )
         retired = Audit()
         retired.findings.append(Finding("retired", "note", note))
