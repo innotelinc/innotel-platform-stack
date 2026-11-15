@@ -190,6 +190,18 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-media-doors.py --pr
 # it; every case here still said 403, and nothing was watching.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --prom ${TEXTFILE_DIR}/estate-check-edge-sso-door.prom
 
+# And the learner-facing door itself (2026-11-14): `class.atheniq.courses` is where every
+# classroom link in `atheniq-work` goes, and it has to be *behind* a sign-in rather than
+# merely up. A door that answers 200 anonymously reads as healthy everywhere else — the app
+# is fine, the edge is fine, the page loads — so the only thing that reports it is a probe
+# that insists on the redirect, on `client_id=classroom`, and on the callback naming the
+# door it came from. It asks `/classroom/` as well as `/`, because a gate written on the
+# landing page alone still hands a learner a 404 from the app. It holds the superseded
+# `classroom.` name to one of its two allowed states (gated the same way, or moved to the
+# classroom): a third state is a second application nobody registered, and the retirement
+# order is `docs/atheniq-classroom-name.md`.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-atheniq-doors.py --prom ${TEXTFILE_DIR}/estate-check-atheniq-doors.prom
+
 # And that no NFS share has been mounted twice or gone stale. On 2026-10-29
 # `/srv/onyx-pool` in `distro` held 32 769 entries: ganesha restarted, every handle
 # went stale, `mountpoint` blocks on a stale handle instead of failing, and the

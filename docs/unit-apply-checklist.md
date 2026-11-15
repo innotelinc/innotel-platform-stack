@@ -14,7 +14,11 @@ per piece that says it landed rather than that it was copied.
 2. **The script, before the unit.** `ExecStart=` naming a file that is not there is every
    night `status=203/EXEC` and no other symptom; the 2026-10-25 cleanup
    (`docs/root-paths.md`) and the vault mirror are both that. Install to
-   `/usr/local/sbin` (or the container's `/usr/local/bin`), then `test -x` it.
+   `/usr/local/sbin` (or the container's `/usr/local/bin`), then `test -x` it. For the
+   estate checks that step is `bash scripts/install-estate-checks.sh`: it takes its list
+   from the unit's own `ExecStart=` lines (the scripts *and* the tables passed to
+   `--pins/--expect`), adds the shared `estate_check.py` and the sibling files a check
+   reads, and prints `MISSING`/`FAIL` rather than exiting 0 over a copy that did not land.
 3. **The env file, before `enable --now`.** `EnvironmentFile=-` is *optional* on purpose
    in most units, so a missing credential does not stop the job — it makes it fail
    differently. `estate-notify` is the exception: with no `/etc/innotel/ntfy.env` it exits
@@ -33,7 +37,7 @@ per piece that says it landed rather than that it was copied.
 
 | piece | host | installs to | proves it |
 |---|---|---|---|
-| `estate-checks.{service,timer}` | the Cerulean edge (`proxy` on `i2`) | `/etc/systemd/system`, checks in `/opt/innotel/estate-checks/` | a `.prom` per check in `TEXTFILE_DIR`, and `EstateCheckAbsent` quiet for 30 min |
+| `estate-checks.{service,timer}` | the Cerulean edge (`proxy` on `i2`) | `/etc/systemd/system`, and `scripts/install-estate-checks.sh` fills `/opt/innotel/estate-checks/` | a `.prom` per check in `TEXTFILE_DIR`, and `EstateCheckAbsent` quiet for 30 min |
 | `estate-notify@.service` + `estate-notify.sh` | wherever the wired unit runs | unit in `/etc/systemd/system`, script in `/usr/local/sbin` | `systemctl start estate-notify@<unit>` exits 0 and the topic holds the message |
 | `proxy-backup.{service,timer}` | `i2` (`hosts/i2/proxy-backup/`) | script `/usr/local/sbin/backup-proxy.sh` **first** | a dated restore point, and `Result=success` |
 | `vault-replica-sync.{service,timer}` | the host that owns `/srv/vault` | `/usr/local/sbin/vault-replica-sync`, log in `/var/log/` | the replica's newest mtime moved |

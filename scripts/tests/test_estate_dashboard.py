@@ -111,6 +111,8 @@ class DashboardCase(unittest.TestCase):
         # 28; all four are counted now. `check-stalwart-oidc-preflight` took it to 29 on
         # 2026-11-14, published rather than remembered for the same reason the mail copy
         # is: every half-done subset of that apply looks identical from outside.
+        # `check-atheniq-doors` took it to 30 the same day: the classroom's gate fails by
+        # being absent rather than by breaking, so nothing else in the estate would say so.
         unit = UNIT.read_text(encoding="utf-8")
         checks = set(re.findall(r"/opt/innotel/estate-checks/(check-[a-z0-9-]+)\.py", unit))
         self.assertTrue(checks, "the unit must run the checks")

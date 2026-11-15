@@ -95,6 +95,13 @@ CHECK_SCRIPTS = [
     # reporting entirely and `EstateCheckAbsent` would not have named it. The list being
     # typed by hand is what let that happen; the test is what stops the next one.
     "check-media-doors",
+    # The learner-facing door, added the day the class hosts were verified (2026-11-14).
+    # `class.atheniq.courses` is where every classroom link in `atheniq-work` goes, and the
+    # failure it guards — a 200 where a sign-in should be — is one an app *looks* healthy
+    # through: the page loads, the edge answers, every other check is green. It arrived with
+    # a branch, because a check whose absence is silent is the failure this list exists to
+    # catch.
+    "check-atheniq-doors",
 ]
 
 
