@@ -1,0 +1,16 @@
+[Unit]
+Description=Restart Coolify's web process when it dies without exiting
+Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/scripts/coolify-health-watch.sh
+After=docker.service network-online.target
+Wants=network-online.target
+
+# The container's own healthcheck already curls 8080 from inside; this only acts
+# on the verdict. Docker restarts a container that exits and does nothing about
+# one that stays Up and unhealthy, which is the shape the 2026-11-15 outage took:
+# Up seven hours, 5,038 failed healthchecks, scheduler still logging, 502 at the
+# edge. See the script's header.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /root/platform-stack/scripts/coolify-health-watch.sh
+Nice=5

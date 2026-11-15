@@ -1,0 +1,14 @@
+[Unit]
+Description=Check on Coolify's web process every two minutes
+
+[Timer]
+# Two minutes: the healthcheck interval is 4s, so a dead web process is already
+# known to Docker within seconds and the edge is 502 the whole time. Short enough
+# that the outage is a couple of minutes rather than the seven hours it was.
+OnBootSec=2m
+OnCalendar=*:0/2
+Persistent=true
+RandomizedDelaySec=15s
+
+[Install]
+WantedBy=timers.target

@@ -56,6 +56,18 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-authentik-privilege
 # every gated name's callback and reads each proxy block's buffer.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --prom ${TEXTFILE_DIR}/estate-check-sso-callbacks.prom
 
+# And that the two public doors are still open (2026-11-03, re-pointed 2026-11-15):
+# `deploy.innotel.us` and `fax-staging.lab.innotel.us` used to be proxied to the `.93` VM
+# straight, and about half of those connects were dropped by the Windows box at
+# 192.168.1.17 that proxies the address — invisible from the VM, which looked healthy
+# throughout (0/12 connects on a pinned ARP entry, ICMP 20/20 clean). They were carried by
+# a pair of reverse tunnels for a while, and those are now retired: Coolify moved to
+# 192.168.1.113, the estate has one proxy (the cerulean NPM on 192.168.1.71), and both
+# names answer straight from it. This check asks the three things that fail silently and
+# separately: the name answers over HTTPS with a page that is the panel, the upstream the
+# edge dials is still up, and the certificate has runway left.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-deploy-door.py --prom ${TEXTFILE_DIR}/estate-check-deploy-door.prom
+
 # A process somebody left behind: a `docker exec … grep -r /` ran for 18 h in
 # `metrics-prometheus` and an nginx worker sat in `worker process is shutting down` for
 # 8 h on `cerulean-npm`, holding 393 MiB, while `i4` swapped (2026-10-27). One `ps` and

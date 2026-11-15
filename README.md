@@ -87,6 +87,9 @@ The remaining platforms are **business functions** built on top:
 - [**Ambient environment precedence**](docs/env-precedence.md) — why a variable
   exported for one stack can retarget another, which scripts are guarded
   against it, and the guard to copy when adding a new one.
+- [**Host map**](docs/host-map.md) — the addresses that actually answer, what runs
+  on each, the env file every re-apply needs, and the placement errors this pass
+  corrected.
 
 ## Central shared library — `scripts/stack-lib.sh`
 

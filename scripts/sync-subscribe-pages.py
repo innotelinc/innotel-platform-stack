@@ -44,7 +44,7 @@ TEMPLATE = STACK / "web" / "subscribe" / "template.html"
 SERVICES = [
     "magnate", "monarch", "jellyfin", "zeus", "capstone", "oasis", "onyx",
     "signara", "atlas", "atheniq", "plutus", "distro", "genesis",
-    "ontrak", "verifier", "genie", "rizzaura", "zapit", "cerulean",
+    "ontrak", "verifier", "genie", "orion", "rizzaura", "zapit", "cerulean",
 ]
 
 # Which mesh group dir a service's repo is checked out under. Every repo dir
@@ -95,6 +95,12 @@ DEFAULTS = {
     "capstone": {"name": "Capstone", "tagline": "Voice AI that answers for you", "accent": "#a78bfa"},
     "oasis": {"name": "Oasis", "tagline": "Mail and collaboration, self-hosted", "accent": "#fbbf24"},
     "onyx": {"name": "Onyx", "tagline": "Object storage you own", "accent": "#38bdf8"},
+    # Orion was hand-added to the live apex page and pointed at subscribe.orion.locker
+    # — a real, unrelated .locker domain — so the directory's one home-cloud tile sent
+    # visitors off the estate. Generating it here keeps the tile (and its
+    # subscribe.orion.innotel.us host) from being a hand-edit that the next
+    # regeneration would silently drop.
+    "orion": {"name": "Orion", "tagline": "Your own home-cloud desktop", "accent": "#38bdf8"},
     "signara": {"name": "Signara", "tagline": "Trust and signing infrastructure", "accent": "#38bdf8"},
     "atlas": {"name": "Atlas", "tagline": "The DevOps platform", "accent": "#22d3ee"},
     "atheniq": {"name": "AthenIQ", "tagline": "Learning, on your terms", "accent": "#a78bfa"},
