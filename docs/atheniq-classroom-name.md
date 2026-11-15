@@ -6,7 +6,7 @@ kind of name:
 | name | what it is | what a learner gets |
 | --- | --- | --- |
 | `class.atheniq.courses` | **the classroom** — every link in the courseware names it | 302 to authentik, `client_id=classroom`, back to its own `/oauth2/callback` |
-| `classroom.atheniq.courses` | a superseded name, still served by the same app | the same 302, with *its* own callback |
+| `classroom.atheniq.courses` | a superseded name, now a 301 to the classroom | `301` to `https://class.atheniq.courses`, path and query preserved |
 | `ai.atheniq.courses` | the authoring/generation app | its own gate; not part of this decision |
 
 Measured 2026-11-14 with a plain `curl` from outside, no cookies:
@@ -35,14 +35,43 @@ until it is, any DNS change leaves a name whose certificate claims it should exi
 That is why the retirement runs in this order, and why the repo's check accepts either
 state while it does.
 
-## The ordered change (edge work — not done in this repo)
+## Where it stands on 2026-11-14
 
-1. **Redirect it.** In NPM, replace the `classroom.atheniq.courses` proxy host with a
+Steps 1 and 2 are done and measured; step 3 is in this repository and reaches the edge
+with `scripts/install-estate-checks.sh`; step 4 has not been started.
+
+```
+classroom.atheniq.courses/                  301 → https://class.atheniq.courses/
+classroom.atheniq.courses/classroom/abc123 301 → https://class.atheniq.courses/classroom/abc123
+classroom.atheniq.courses/classroom/abc123?x=1
+                                            301 → https://class.atheniq.courses/classroom/abc123?x=1
+```
+
+The path *and* the query survive, which is why step 1 is a redirection host rather than a
+302 to a landing page: the courseware's links are deep, and a learner who followed one from
+a saved copy still lands on the lesson.
+
+The `classroom` provider in authentik holds four callbacks after step 2
+(`classroom.innotel.us`, `ai.lms.innotel.us`, `class.atheniq.courses`, `ai.atheniq.courses`);
+the alias's own is gone, so the provider's record no longer names a door nobody uses. The
+classroom's callback is untouched — removing it would have been the failure the check exists
+for.
+
+One thing worth knowing before the next retirement: this NPM (2026.8.5's bundled build)
+rejects the body its own documentation suggests, and in two different ways. `enabled` is not
+a writable field on a redirection host, and `advanced_config` has no default, so leaving it
+out is a 500 rather than a validation error. Both came from NPM's own log
+(`Field 'advanced_config' doesn't have a default value`) after the request had already passed
+schema validation — not from guessing, and not from the API's error text alone.
+
+## The ordered change (steps 1–2 done, 3–4 as written)
+
+1. **Redirect it.** *(done 2026-11-14 — redirection host 45, certificate 119, `preserve_path`.)* In NPM, replace the `classroom.atheniq.courses` proxy host with a
    redirection host to `https://class.atheniq.courses`, path preserved — the estate's
    convention for a superseded name (`learn.innotel.us → atheniq.courses`,
    `studio.innotel.us → studio.atheniq.courses`). Verify a deep link:
    `curl -sI https://classroom.atheniq.courses/classroom/<id>` → `301` with the path intact.
-2. **Then the provider.** Remove `https://classroom.atheniq.courses/oauth2/callback` from
+2. **Then the provider.** *(done 2026-11-14 — the alias is a 301, so nothing authenticates on it.)* Remove `https://classroom.atheniq.courses/oauth2/callback` from
    the `classroom` provider in authentik. Nobody authenticates on the alias after step 1;
    leaving the callback registered is a second door left unlocked in the provider's own
    record.
@@ -68,9 +97,15 @@ warning. Both classroom names are consistently on one identity host, which is th
 requirement [identity-hosts.md](identity-hosts.md) states; the brand is the estate's
 direction. It is a note because `EstateCheckNotPinned` pages on a warning older than an
 hour, and this one cannot clear until the provider changes — a page that cannot end is one
-people learn to close.
+people learn to close. (On 2026-11-14 the **app-side** gate was moved to `auth.innotel.us`: `classroom-sso`'s
+`--oidc-issuer-url` and `192.168.1.59:3001` agree. The name still answers publicly with the
+cerulean issuer — ten of ten requests, from inside the edge and from outside it — so the
+layer that terminates `class.atheniq.courses` is not the gate on 3001. The note keeps
+firing, which is correct: it is reporting a door that has not moved, not a check that is
+stale.)
 
 For the alias it accepts exactly two states and no third: **gated the same way**, or
 **redirecting to the classroom** (published as a `note`, so the retirement is visible on the
-dashboard when it happens). A 200 on either name is the failure the check exists for: the
+dashboard when it happens). It has been in the second state since 2026-11-14, which is what
+`alias_moved` on the dashboard means. A 200 on either name is the failure the check exists for: the
 classroom is not "up" when it answers anonymously, it is open.

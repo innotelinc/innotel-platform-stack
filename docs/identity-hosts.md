@@ -49,6 +49,8 @@ after the person has already signed in correctly. That is what the Orion NAS doo
 | `scripts/conform-project.sh` | `auth.innotel.us` | template for new projects — this is where the policy is enforced |
 | `scripts/sync-mail-identities.py` | `auth.innotel.us` | default `AUTHENTIK_API_URL`; both names serve the same instance, measured by the shared client id |
 | `scripts/check-orion-signin.py` | both, canonical warned | asserts the *agreement*, not the brand |
+| the classroom gate (`classroom-sso`, `deploy/compose/atheniq-sso.yml` in `atheniq`) | `auth.innotel.us` | **half** moved 2026-11-14: the app-side gate's `--oidc-issuer-url` names the canonical host and port 3001 answers with it. The public name still answers with the cerulean one, so whatever terminates `class.atheniq.courses` is not that gate — `check-atheniq-doors.py` keeps reporting the note until that layer is found, and this table must not claim otherwise |
+| the generation gate beside it (`generation-sso`, same file) | `auth.cerulean.innotel.us` | **not** part of that change — a separate door (`ai.lms.innotel.us`), left as it was |
 | Stalwart's directory discovery (`scripts/stalwart-oidc-discovery-proxy.py`, `stalwart-directory-watchdog.sh`, `stalwart-oidc-discovery-setup.sh`) | `auth.cerulean.innotel.us` | **captured, not chosen** — see below |
 | `docs/sso-cleanup-2026-11-02.md`, `docs/mail-sso-directory-2026-11-06.md` | `auth.cerulean.innotel.us` | incident records: they say what was measured then, and are not rewritten |
 | `scripts/check-media-doors.py`, `check-sso-redirects.py` | the brand they were measured against | assertions about a regression, not configuration |
