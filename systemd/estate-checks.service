@@ -85,6 +85,21 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-sso.py --webma
 # has sshd but not the key the checks hold; the same route `check-alert-delivery.py` uses.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stalwart-oidc-cache.py --prom ${TEXTFILE_DIR}/estate-check-stalwart-oidc-cache.prom
 
+# And the pieces that copy depends on, by the runbook's own preflight (2026-11-14). The
+# check above reads the copy; this asks the eleven facts step 1 of
+# `docs/mail-discovery-canonical.md` asks a person — the three units, the leaf's SAN against
+# the upstream the proxy will actually use, the anchor's expiry, the DNAT rules, whether the
+# provider answers from inside the container, both users' read access, and the bearer probe.
+# Every half-done subset of that apply fails identically (a start-up fetch cached as failed,
+# every bearer 500, anonymous still 200), which is why the facts are published rather than
+# left to the moment somebody is already halfway through.
+#
+# It carries no second copy of the rules: the repo's `stalwart-oidc-discovery-setup.sh` is
+# streamed into the container and its `preflight` is run there, so the series says exactly
+# what the runbook says. That is why this unit needs `scripts/` beside it and not only
+# `check-*.py` — the check exits 2 with that reason if the script is missing.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stalwart-oidc-preflight.py --prom ${TEXTFILE_DIR}/estate-check-stalwart-oidc-preflight.prom
+
 # The one check that is about this repo rather than about a host. The files in `groups/`
 # are generated *and tracked*, so a member repo that moves on leaves the file a rebuild
 # starts from behind — and this repo's CI only compares them when *this* repo changes,

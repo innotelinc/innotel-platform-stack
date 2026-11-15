@@ -108,7 +108,9 @@ class DashboardCase(unittest.TestCase):
         # at 24 — the exact drift this test exists to catch, and it did: a threshold one
         # short is a green panel that tolerates one silent check. `check-mail-identities`
         # took it to 26 the same day, `check-vault-disk` to 27, and `check-orion-signin` to
-        # 28; all four are counted now.
+        # 28; all four are counted now. `check-stalwart-oidc-preflight` took it to 29 on
+        # 2026-11-14, published rather than remembered for the same reason the mail copy
+        # is: every half-done subset of that apply looks identical from outside.
         unit = UNIT.read_text(encoding="utf-8")
         checks = set(re.findall(r"/opt/innotel/estate-checks/(check-[a-z0-9-]+)\.py", unit))
         self.assertTrue(checks, "the unit must run the checks")
