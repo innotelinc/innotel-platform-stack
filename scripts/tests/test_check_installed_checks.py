@@ -40,6 +40,11 @@ check = _load()
 
 ONE = "# check one, the revision's copy\n"
 TWO = "# check two, the revision's copy\n"
+UNIT_TEXT = (
+    "[Service]\n"
+    "ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-one.py "
+    "--prom ${TEXTFILE_DIR}/estate-check-one.prom\n")
+TIMER_TEXT = "[Timer]\nOnCalendar=*:0/30\n"
 
 
 def reader(mapping: dict[str, bytes]):
@@ -91,6 +96,51 @@ class Comparison(unittest.TestCase):
             check.compare(self.directory / "nope", [], reader({}))
 
 
+class UnitComparison(unittest.TestCase):
+    """The unit files are the other half of the list: same three kinds, one directory over."""
+
+    SERVICE = "systemd/estate-checks.service"
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.unit_dir = Path(self.dir.name)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def put(self, text: str) -> None:
+        (self.unit_dir / "estate-checks.service").write_text(text, encoding="utf-8")
+
+    def test_an_identical_unit_produces_nothing(self):
+        self.put(UNIT_TEXT)
+        self.assertEqual(check.compare_units(
+            self.unit_dir, reader({self.SERVICE: UNIT_TEXT.encode()})), [])
+
+    def test_a_unit_edited_on_the_host_is_drifted(self):
+        # The mistake this closes: the install directory is right, the unit naming it is not,
+        # and every check keeps publishing while systemd runs an older job.
+        self.put(UNIT_TEXT + "# a hand edit on the host\n")
+        found = check.compare_units(self.unit_dir, reader({self.SERVICE: UNIT_TEXT.encode()}))
+        self.assertEqual([(m.kind, m.name) for m in found],
+                         [("drifted", "estate-checks.service")])
+        self.assertEqual(found[0].where, self.SERVICE)
+        self.assertNotEqual(found[0].installed, found[0].revision)
+
+    def test_a_unit_the_revision_has_and_the_host_does_not_is_missing(self):
+        found = check.compare_units(self.unit_dir, reader({self.SERVICE: UNIT_TEXT.encode()}))
+        self.assertEqual([(m.kind, m.name) for m in found],
+                         [("missing", "estate-checks.service")])
+
+    def test_a_unit_the_revision_dropped_is_unknown(self):
+        self.put(UNIT_TEXT)
+        found = check.compare_units(self.unit_dir, reader({}))
+        self.assertEqual([(m.kind, m.name) for m in found],
+                         [("unknown", "estate-checks.service")])
+
+    def test_a_unit_neither_side_has_is_not_a_finding(self):
+        self.assertEqual(check.compare_units(self.unit_dir, reader({})), [])
+
+
 class Verdict(unittest.TestCase):
     def test_each_kind_is_a_failure_and_carries_the_file(self):
         result = check.audit([check.Mismatch("drifted", "check-one.py", "aaaa", "bbbb"),
@@ -131,10 +181,15 @@ class EndToEnd(unittest.TestCase):
         root = Path(self.dir.name)
         self.repo = root / "repo"
         self.installed = root / "installed"
-        self.unit = root / "estate-checks.service"
+        self.unit_dir = root / "systemd"
+        self.unit_dir.mkdir()
+        self.unit = self.unit_dir / "estate-checks.service"
         (self.repo / "scripts").mkdir(parents=True)
         (self.repo / "scripts" / "check-one.py").write_text(ONE, encoding="utf-8")
         (self.repo / "scripts" / "estate_check.py").write_text("# shared\n", encoding="utf-8")
+        (self.repo / "systemd").mkdir()
+        (self.repo / "systemd" / "estate-checks.service").write_text(UNIT_TEXT, encoding="utf-8")
+        (self.repo / "systemd" / "estate-checks.timer").write_text(TIMER_TEXT, encoding="utf-8")
         # --no-verify: the estate installs its own commit hooks, and this repository
         # exists only to be read back by `git show`.
         for args in (["init", "-q"],
@@ -147,11 +202,8 @@ class EndToEnd(unittest.TestCase):
         self.installed.mkdir()
         (self.installed / "check-one.py").write_text(ONE, encoding="utf-8")
         (self.installed / "estate_check.py").write_text("# shared\n", encoding="utf-8")
-        self.unit.write_text(
-            "[Service]\n"
-            "ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-one.py "
-            "--prom ${TEXTFILE_DIR}/estate-check-one.prom\n",
-            encoding="utf-8")
+        self.unit.write_text(UNIT_TEXT, encoding="utf-8")
+        (self.unit_dir / "estate-checks.timer").write_text(TIMER_TEXT, encoding="utf-8")
 
     def tearDown(self):
         self.dir.cleanup()
@@ -166,7 +218,7 @@ class EndToEnd(unittest.TestCase):
     def test_an_install_that_matches_exits_zero(self):
         code, out, _ = self.run_check()
         self.assertEqual(code, 0)
-        self.assertIn("every installed check matches", out)
+        self.assertIn("every installed check and both unit files match", out)
 
     def test_a_changed_copy_exits_one_and_is_named(self):
         (self.installed / "check-one.py").write_text(ONE + "# edited\n", encoding="utf-8")
@@ -174,6 +226,20 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("DRIFT", out)
         self.assertIn("check-one.py", out)
+
+    def test_a_unit_edited_on_the_host_exits_one_and_is_named(self):
+        self.unit.write_text(UNIT_TEXT + "# a hand edit on the host\n", encoding="utf-8")
+        code, out, _ = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("DRIFT", out)
+        self.assertIn("estate-checks.service", out)
+
+    def test_a_timer_missing_from_the_host_is_named(self):
+        (self.unit_dir / "estate-checks.timer").unlink()
+        code, out, _ = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("MISSING", out)
+        self.assertIn("estate-checks.timer", out)
 
     def test_a_revision_it_cannot_read_is_two_not_a_pass(self):
         out, err = io.StringIO(), io.StringIO()
