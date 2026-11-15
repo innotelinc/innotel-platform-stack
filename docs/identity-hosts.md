@@ -119,3 +119,16 @@ returned `0`; the name was being served by the cerulean host record. Two changes
 Worth knowing before the next identity change: a test that passes on the edge can fail on a
 container because *which* host record wins is decided by load order, not by the API's
 listing. `nginx -t` names the conflict; the API does not.
+
+## Retired with the guest, and the last duplicate (2026-11-14)
+
+`192.168.1.93` was retired, so `deploy.innotel.us` and `fax-staging.lab.innotel.us` were
+deleted from the edge (backups `/root/npm-host-321.json` and `/root/npm-host-281.json`)
+rather than left answering 502. `check-deploy-door.py` now carries empty door and tunnel
+maps and exits 0 with a `retired` note, because a series that disappears reads exactly like
+a check that stopped running.
+
+The last `conflicting server name "auth.innotel.us" on 0.0.0.0:80` came from a
+hand-written block in `/data/nginx/custom/http.conf` that duplicated the redirect NPM's own
+`:80` block already generates. Removing it leaves `nginx -t` reporting no conflicts at all,
+and `http://auth.innotel.us/` still answers 301 to HTTPS.
