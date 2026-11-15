@@ -1,4 +1,4 @@
-# Incus container placement — i1 / i2 / i4 (`i3` retired 2026-11-02)
+# Incus container placement — i1 / i2 / i3 / i4 (`i3` rebuilt 2026-11-15)
 
 Surveyed 2026-09-27; refreshed 2026-10-01 (a morning survey and an evening
 rebalance), 2026-10-02 (the edge moved onto `i4`) and 2026-10-09 (the edge came back
@@ -14,6 +14,33 @@ incident was fixed by pinning addresses instead of trusting the router, and the
 evening pass moved the edge services back onto i1, right-sized i1's CPU caps, and
 put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
+
+## Changes applied 2026-11-15 — `i3` is rebuilt and back in the estate
+
+- **`i3` (`192.168.1.53`) answers again** after being retired on 2026-11-02. It is a fresh
+  Ubuntu 26.04.1 on the same `i3-550` (2c/4t), 15 403 MiB RAM, and a 465.8 G
+  `WD5000AVDS` whose `ubuntu-vg` holds **363.76 G unallocated**. `/dev/kvm` is present
+  (8 `vmx` flags), which is what makes the §W2 Windows-guest plan possible here.
+- **It is a fourth Incus host, built the same way as the other three:** `incus` 6.0.5, a
+  **zfs** pool named `incus` on a dedicated 363.76 G LV (`lvcreate -l 100%FREE -n incus
+  ubuntu-vg`, source `/dev/ubuntu-vg/incus`) — the driver `i1` (`incus`) and `i2` (`fast`)
+  already use, and the one `i2`'s `ontrak` VM templates rely on for `@snapshot-clean` — and
+  a managed `incusbr0` bridge (10.105.132.1/24). `zfs_arc_max` is capped at 4 GiB
+  (`/etc/modprobe.d/zfs-arc.conf`) so the estate's spare-RAM host does not hand half of it
+  to cache. Measured after: `zpool list` → `incus` 362 G, 663 K allocated, **ONLINE**.
+- **The host's own address does not depend on Incus.** `192.168.1.53` stays static on
+  `enp2s0` in `/etc/netplan/*.yaml`; no bridge was created over the NIC, so a broken
+  `incusbr0` or a stopped `incusd` cannot take the host off the network.
+- **Nothing serves from it yet.** A container `ontrak-tix-db` (`.68`) was created to take
+  the live OnTrak Tix database off `i4`'s host Docker and is **not cut over**: its Postgres
+  will not start inside the container (`runc … open sysctl
+  net.ipv4.ip_unprivileged_port_start: permission denied`). The database is still served by
+  `ontrak-tix-db-1` on `i4`, which was stopped and restarted within the same pass and is
+  healthy. Nothing was deleted. Details in `docs/estate-rebalance-2026-11-15.md` §12.4.
+- **The A Tix row is `.68` and it is not in any check yet.** `check-container-addresses.py`
+  still names `i1`, `i2`, `i4` only, so adding `i3` and `.68` is a deliberate separate
+  change: widening those tables changes what the scheduled run requires and what the three
+  fixtures in `scripts/tests/` assert.
 
 ## Changes applied 2026-11-13 — `lms.innotel.us` folded into `atheniq.courses`
 
