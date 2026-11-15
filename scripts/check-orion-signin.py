@@ -64,7 +64,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from estate_check import Audit, Finding, read_host, ssh, write_prom  # noqa: E402
@@ -93,6 +93,9 @@ CLIENT_KEY = "OAUTH2_PROXY_CLIENT_ID"
 USER_AGENT = "innotel-estate-check/1.0 (+orion signin)"
 TIMEOUT = 20.0
 DISCOVERY_SUFFIX = ".well-known/openid-configuration"
+
+#: The 3xx codes whose Location can carry a person on to the login page.
+REDIRECT = (301, 302, 303, 307, 308)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -145,6 +148,9 @@ class Measured:
     start_status: int | None = None
     start_location: str = ""
     authorize_status: int | None = None
+    authorize_location: str = ""
+    login_status: int | None = None
+    login_location: str = ""
 
 
 def gather(issuer: str, client_id: str, get=None) -> Measured:
@@ -174,8 +180,30 @@ def gather(issuer: str, client_id: str, get=None) -> Measured:
     measured.start_location = headers.get("Location") or headers.get("location") or ""
 
     if measured.start_location:
-        measured.authorize_status = get(measured.start_location)[0]
+        measured.authorize_status, headers, _ = get(measured.start_location)
+        measured.authorize_location = headers.get("Location") or headers.get("location") or ""
+        # authentik hands the authorize request to its flow executor, which serves the form.
+        # Follow that one hop so the judgement is about the page a person lands on.
+        if measured.authorize_status in REDIRECT and measured.authorize_location:
+            measured.login_location = urljoin(measured.start_location, measured.authorize_location)
+            measured.login_status = get(measured.login_location)[0]
     return measured
+
+
+def reaches_login_page(measured: Measured, issuer_host: str) -> bool:
+    """Whether the authorize request lands a person on a login page.
+
+    A 200 is the provider serving the form itself. A redirect is the provider handing the
+    request to its flow executor — authentik does that for every sign-in — so what counts
+    is the page that redirect points at: a 200 on the issuer's own host. Anything else
+    (a dead flow, a bounce to another name) leaves the person without a way in.
+    """
+    if measured.authorize_status == 200:
+        return True
+    if measured.authorize_status not in REDIRECT or not measured.login_location:
+        return False
+    return (measured.login_status == 200
+            and urlsplit(measured.login_location).netloc == issuer_host)
 
 
 def audit(measured: Measured) -> Audit:
@@ -302,14 +330,16 @@ def audit(measured: Measured) -> Audit:
                 f"({measured.start_location})",
             )
         )
-    elif measured.authorize_status != 200:
+    elif not reaches_login_page(measured, issuer_host):
+        landed = (f"and the page it handed on to answered {measured.login_status}"
+                  if measured.authorize_location else "and it sent them nowhere")
         out.findings.append(
             Finding(
                 "authorize_status",
                 "fail",
                 f"{parts.netloc} answered {measured.authorize_status} for the door's own "
-                f"authorize request (client {measured.client_id or 'unknown'}); the person "
-                "never reaches a login page",
+                f"authorize request (client {measured.client_id or 'unknown'}) {landed}; "
+                "the person never reaches a login page",
             )
         )
 
