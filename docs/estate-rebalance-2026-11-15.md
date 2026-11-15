@@ -1,6 +1,6 @@
 # Estate rebalance — inventory and options, i1 / i2 / i3 / i4
 
-**Status: partially applied 2026-11-15 15:45–16:05 EST — see §11.** The inventory below is
+**Status: partially applied 2026-11-15 — see §11 (15:45–16:05 EST) and §12 (21:10–22:00 EST).** The inventory below is
 the **pre-change snapshot**, kept as measured. §11 records what was applied with before and
 after numbers, and **four corrections to findings in this page** — including one that would
 have deleted the production Tix database. Read §11 before acting on §4, §5, §7 or §9.
@@ -485,7 +485,7 @@ more on i2 than they look: there is no free LVM escape hatch there, unlike i4.
 
 ---
 
-## 12. Second pass, 2026-11-15 21:10–22:00 EST — i3 returns, zombies cleared, one migration staged
+## 12. Second pass, 2026-11-15 21:10–22:00 EST — i3 returns, zombie leaks fixed, Tix database moved
 
 ### 12.1 i3 is back and is now a real Incus host
 
