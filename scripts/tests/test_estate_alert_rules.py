@@ -67,6 +67,13 @@ CHECK_SCRIPTS = [
     "check-deploy-door",
     "check-mail-sso",
     "check-stalwart-oidc-cache",
+    # The runbook's own preflight, published every half hour (2026-11-14). The check above
+    # reads the copy; this one reads the eleven facts the apply depends on — the units, the
+    # leaf's SAN against the upstream the proxy actually uses, the anchor, the DNAT rules,
+    # whether the provider answers from inside the container, both users' read access and
+    # the bearer probe. It arrived with a branch, because a check whose absence is silent
+    # is the failure this list exists to catch.
+    "check-stalwart-oidc-preflight",
     "check-telno-legacy-import",
     # The mailbox -> identity mirror. It is the one job here that retries every fifteen
     # minutes and is deliberately not wired to `OnFailure=` (96 messages a day for one

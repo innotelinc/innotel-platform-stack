@@ -62,8 +62,13 @@ preflight() {
     exit 2
   fi
   rc=0
-  say() { printf '  %-24s %s\n' "$1" "$2"; }
-  need() { printf '  %-24s %s\n' "$1" "$2"; rc=1; }
+  # The verdict is per line, and it is written down rather than implied, because the same
+  # output is read by a machine as well as a person: `check-stalwart-oidc-preflight.py`
+  # streams this script into the container and turns every FAIL line into a finding. A
+  # form where pass and fail print identically can only be judged by the exit code, which
+  # says that something is wrong and never which of the eleven things.
+  say() { printf '  %-4s %-22s  %s\n' ok "$1" "$2"; }
+  need() { printf '  %-4s %-22s  %s\n' FAIL "$1" "$2"; rc=1; }
 
   echo "units"
   for unit in stalwart stalwart-oidc-proxy stalwart-oidc-redirect; do

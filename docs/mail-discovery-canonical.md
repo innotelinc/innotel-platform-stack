@@ -71,6 +71,12 @@ It checks the three units, the copy and its age, the leaf's SAN against the upst
 proxy will actually use, the anchor's expiry, the DNAT rule count, whether the provider
 answers from inside the container, both users' read access, and the bearer probe — and it
 changes nothing. Exit 0 is `PREFLIGHT OK`; exit 2 means it was not run in the container.
+The same run is published every half hour as an estate check
+(`innotel_estate_check_last_status{check="stalwart_oidc_preflight"}`, run by
+`estate-checks.service` on the edge), so these eleven facts are watched rather than
+remembered — an anchor that is about to expire, a leaf whose SAN stopped matching the
+upstream, or a DNAT that vanished all surface as a series before anybody starts the apply.
+
 Do the recording by hand as well the first time, because the recording matters as much as
 the verdict:
 

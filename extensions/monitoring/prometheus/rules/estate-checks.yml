@@ -135,6 +135,14 @@ groups:
           # split into `media` and `iptv`, so a textfile that stopped arriving alerted on
           # nothing — the exact silence this rule exists for, one branch short.
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="media_doors"}), "check", "media_doors", "check", ".*")
+          # The mail container's own preflight, published (2026-11-14). `stalwart_oidc_cache`
+          # above asks whether the local copy is current; this asks the eleven facts step 1
+          # of docs/mail-discovery-canonical.md asks a person — the units, the leaf's SAN
+          # against the upstream the proxy actually uses, the anchor's expiry, the DNAT
+          # rules, whether the provider answers from inside the container, both users' read
+          # access and the bearer probe. Every half-done subset of that apply fails
+          # identically, so a check that stops reporting must not be the thing that hides it.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="stalwart_oidc_preflight"}), "check", "stalwart_oidc_preflight", "check", ".*")
         for: 30m
         labels:
           severity: critical
