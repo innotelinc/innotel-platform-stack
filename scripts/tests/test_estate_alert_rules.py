@@ -30,6 +30,11 @@ sys.path.insert(0, str(SCRIPTS))
 
 #: The scripts that publish the shared metric family, each exporting `CHECK`.
 CHECK_SCRIPTS = [
+    # The install guard's `--verify`, on the timer (2026-11-15): every file the unit runs,
+    # against `scripts/<name>` at `origin/main`. A copy replaced after a clean install is
+    # otherwise invisible: the checks keep running and keep publishing, asserting an older
+    # revision of themselves.
+    "check-installed-checks",
     "check-container-addresses",
     "check-container-limits",
     "check-estate-inventory",
