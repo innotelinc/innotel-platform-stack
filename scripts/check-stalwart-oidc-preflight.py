@@ -36,7 +36,7 @@ streams it in and reads its output. Exit 2 means the question could not be asked
 Usage:
     ./scripts/check-stalwart-oidc-preflight.py
     ./scripts/check-stalwart-oidc-preflight.py --prom /path/to/textfile
-    ./scripts/check-stalwart-oidc-preflight.py --host root@192.168.1.52 --container mail
+    ./scripts/check-stalwart-oidc-preflight.py --host root@192.168.1.51 --container mail
 
 Exit codes: 0 = every fact holds, 1 = at least one does not, 2 = could not run.
 """
@@ -56,9 +56,11 @@ from estate_check import Audit, Finding, ssh_prefix, write_prom  # noqa: E402
 
 CHECK = "stalwart_oidc_preflight"
 
-#: The host the mail container runs on and the container itself (`i2`, per the container
-#: address table). The unit file that starts this check is the authority for both.
-HOST = "root@192.168.1.52"
+#: The host the mail container runs on and the container itself (`i1`, per the container
+#: address table). The unit file that starts this check is the authority for both. It read
+#: `i2` until 2026-11-14: `incus exec mail` there finds no instance, so every run ended at
+#: exit 2 and the preflight never actually ran.
+HOST = "root@192.168.1.51"
 CONTAINER = "mail"
 
 #: The preflight is not installed anywhere on the container — the setup script is run from
