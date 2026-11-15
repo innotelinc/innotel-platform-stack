@@ -116,7 +116,9 @@ class DashboardCase(unittest.TestCase):
         # `check-installed-checks` took it to 31 on 2026-11-15. The guard compared the
         # install to the revision only when somebody installed, so a copy replaced after
         # a clean install was invisible to every panel here: 30 checks reported, one of
-        # them asserting an older revision of itself.
+        # them asserting an older revision of itself. `check-unit-drift` took it to 32
+        # the same day: the estate's own units installed on a host by hand, against the
+        # repository's copies, so a unit edited during an incident is a failing check.
         unit = UNIT.read_text(encoding="utf-8")
         checks = set(re.findall(r"/opt/innotel/estate-checks/(check-[a-z0-9-]+)\.py", unit))
         self.assertTrue(checks, "the unit must run the checks")
