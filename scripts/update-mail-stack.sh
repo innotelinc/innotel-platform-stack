@@ -449,9 +449,18 @@ log "==================== mail stack: $MODE ===================="
 [ "$ONLY" = bulwark ] || stalwart_resolve
 [ "$ONLY" = stalwart ] || bulwark_resolve
 
+# Three outcomes, not two: a release that exists but crosses the 1.0 store boundary is
+# blocked rather than current, so the action column can say so.
+if [ "${STALWART_NEEDS:-0}" -eq 1 ]; then
+  stalwart_action=update
+elif [ -n "$STALWART_BLOCKED" ]; then
+  stalwart_action=blocked
+else
+  stalwart_action=current
+fi
+
 printf '\n  %-10s %-12s %-12s %s\n' COMPONENT CURRENT AVAILABLE ACTION
-printf '  %-10s %-12s %-12s %s\n' stalwart "${STALWART_CURRENT:--}" "${STALWART_TARGET:--}" \
-  "$([ "${STALWART_NEEDS:-0}" -eq 1 ] && echo update || { [ -n "$STALWART_BLOCKED" ] && echo blocked || echo current; })"
+printf '  %-10s %-12s %-12s %s\n' stalwart "${STALWART_CURRENT:--}" "${STALWART_TARGET:--}" "$stalwart_action"
 printf '  %-10s %-12s %-12s %s\n\n' bulwark "${BULWARK_CURRENT:--}" "${BULWARK_TARGET:--}" \
   "$([ "${BULWARK_NEEDS:-0}" -eq 1 ] && echo update || echo current)"
 log "stalwart tracks: ${STALWART_SERIES:-not checked (--only bulwark)}"
