@@ -4,11 +4,12 @@
 # WHY THIS EXISTS
 # ---------------
 # `systemd/estate-checks.service` names every check by absolute path
-# (`/opt/innotel/estate-checks/check-*.py`) and is installed on the edge by hand
-# (`docs/unit-apply-checklist.md` step 2). Until now the copying half of that was a line in
-# somebody's shell history, so the directory and the unit were two lists kept level by
-# memory — and the failure mode of a mismatch is `status=203/EXEC` on every run with every
-# file, timer and unit in place, which is the trap the checklist already documents.
+# (`/opt/innotel/estate-checks/check-*.py`). The directory and the unit are one list split
+# across two files, and the failure mode of a mismatch is `status=203/EXEC` on every run
+# with every file, timer and unit in place, which is the trap the checklist already
+# documents. So this fills the directory *and* installs the unit that names it, from the
+# same checkout and under the same guard: a unit edit cannot land beside scripts from
+# another revision, or the other way round.
 #
 # The list here is *derived*, not typed: every file the unit names inside the install
 # directory (`ExecStart=`'s script and the data files passed to it), plus the shared module
@@ -17,11 +18,16 @@
 # installed — the same reasoning as `check-stalwart-oidc-preflight.py` streaming the
 # runbook's own script instead of reimplementing it.
 #
-# WHAT IT DOES NOT DO
-# -------------------
-# It does not install the unit and it does not restart anything: those are steps 4 and 5 of
-# the checklist, and a copy that quietly reloads systemd is a copy that can hide the very
-# 203/EXEC this is meant to prevent. It prints what to run next instead.
+# THE UNIT TOO
+# ------------
+# The unit and its timer are installed into `/etc/systemd/system` here, because a unit left
+# in a checkout is a timer running yesterday's `ExecStart=` lines beside today's scripts —
+# the same mismatch as a missing script, one file over. When the installed text changes the
+# script runs `systemctl daemon-reload`, since an edited unit that was never reloaded keeps
+# running the old text, which is the other trap the checklist names.
+#
+# It still does not start or restart anything: starting is what would hide the 203/EXEC this
+# is meant to prevent, and the checklist's last step is a person reading `ExecMainStatus`.
 #
 # THE GUARD
 # ---------
@@ -54,6 +60,13 @@ self_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 root=$(cd -- "$self_dir/.." && pwd)
 unit="$root/systemd/estate-checks.service"
 dest=${DEST:-/opt/innotel/estate-checks}
+# Where systemd reads the job from. Overridable so the tests — and anyone staging a copy —
+# can install somewhere that is not the live unit directory.
+unit_dest=${UNIT_DEST:-/etc/systemd/system}
+# The two files that make up the estate-checks job. The timer rides with the service: a
+# service installed without its timer never runs, and a timer without its service fires into
+# nothing, both of them silently.
+UNIT_FILES=(estate-checks.service estate-checks.timer)
 
 die() { printf 'install-estate-checks: %s\n' "$*" >&2; exit 2; }
 
@@ -122,18 +135,25 @@ fi
 
 drift=0
 
-# check_drift <basename> <installed path> — compare one installed file with the revision.
-check_drift() {
+# check_drift_at <path in the repository> <installed file> — compare one file with the
+# revision. It takes the path in the repository rather than assuming `scripts/`, because the
+# unit is held to the same comparison as the scripts it names.
+check_drift_at() {
   [ "$has_ref" -eq 1 ] || return 0
-  if ! git -C "$root" cat-file -e "$ref:scripts/$1" 2>/dev/null; then
-    printf 'DRIFT    %-38s installed, and %s does not have it\n' "$1" "$ref" >&2
+  if ! git -C "$root" cat-file -e "$ref:$1" 2>/dev/null; then
+    printf 'DRIFT    %-38s installed, and %s does not have it\n' "${1##*/}" "$ref" >&2
     drift=1
     return 0
   fi
-  if ! git -C "$root" show "$ref:scripts/$1" 2>/dev/null | cmp -s - "$2"; then
-    printf 'DRIFT    %-38s differs from %s:scripts/%s\n' "$1" "$ref" "$1" >&2
+  if ! git -C "$root" show "$ref:$1" 2>/dev/null | cmp -s - "$2"; then
+    printf 'DRIFT    %-38s differs from %s:%s\n' "${1##*/}" "$ref" "$1" >&2
     drift=1
   fi
+}
+
+# The checks half: everything the unit runs lives in `scripts/`.
+check_drift() {
+  check_drift_at "scripts/$1" "$2"
 }
 
 if [ "$verify" -eq 1 ]; then
@@ -157,6 +177,20 @@ if [ "$verify" -eq 1 ]; then
     printf 'DRIFT    %-38s installed, and %s does not have it\n' "$deployed" "$ref" >&2
     drift=1
   done < <(cd "$dest" && find . -maxdepth 1 -type f -name 'check-*.py' -printf '%f\n' | sort)
+  # The unit is the other half of the list, and the same invisibility applies: a unit an
+  # edit behind names a script the directory no longer has, and the `-` on every ExecStart
+  # turns that into a silent textfile rather than an error.
+  for name in "${UNIT_FILES[@]}"; do
+    if [ ! -f "$root/systemd/$name" ]; then
+      continue
+    fi
+    if [ ! -f "$unit_dest/$name" ]; then
+      printf 'MISSING  %-38s the checkout has it, %s does not\n' "$name" "$unit_dest" >&2
+      verify_missing=1
+      continue
+    fi
+    check_drift_at "systemd/$name" "$unit_dest/$name"
+  done
   printf '\nverified %s against %s\n' "$dest" "${ref:-nothing (not a checkout)}"
   [ "$verify_missing" -eq 0 ] || exit 1
   if [ "$drift" -ne 0 ]; then
@@ -201,6 +235,14 @@ while read -r name; do
   installed=$((installed + 1))
 done < <(all_files)
 
+# The unit half of the guard, before anything is written over /etc: a checkout on a branch
+# has a unit that differs from main's, and installing that is how the two lists came apart.
+for name in "${UNIT_FILES[@]}"; do
+  if [ -f "$root/systemd/$name" ]; then
+    check_drift_at "systemd/$name" "$root/systemd/$name"
+  fi
+done
+
 # The other direction: a `check-*.py` left in the directory that the unit no longer runs.
 # Not a failure — the file is inert — but it is how `check-stuck-processes.py` sat on the
 # edge unowned for six days, and the difference between "deployed" and "run by a timer" is
@@ -231,11 +273,43 @@ if [ "$drift" -ne 0 ]; then
   fi
 fi
 
+# The unit and its timer, now that the scripts they name are there. This is the half that
+# made "the unit is right" and "the checks are right" two separate facts a person had to keep
+# level by hand.
+unit_changed=0
+for name in "${UNIT_FILES[@]}"; do
+  if [ ! -f "$root/systemd/$name" ]; then
+    continue
+  fi
+  mkdir -p "$unit_dest" || die "could not create $unit_dest"
+  if ! cmp -s "$root/systemd/$name" "$unit_dest/$name"; then
+    unit_changed=1
+  fi
+  install -m 0644 "$root/systemd/$name" "$unit_dest/$name"
+  # Prove the copy landed, for the same reason the checks are proved: a short unit file is a
+  # unit systemd reads as truncated, and a `cp` that returned 0 is not that proof.
+  if ! cmp -s "$root/systemd/$name" "$unit_dest/$name"; then
+    printf 'FAIL     %-38s did not land as %s/%s\n' "$name" "$root/systemd" "$name" >&2
+    exit 1
+  fi
+  printf 'ok       %-38s %s\n' "$name" "$unit_dest/$name"
+done
+# Only when the text actually changed, and only when this is the directory systemd reads: a
+# reload is reading the unit files again, and an edited-but-unreloaded unit is the trap the
+# checklist calls "fixed `ExecStart=` that looks unfixed".
+if [ "$unit_changed" -eq 1 ]; then
+  if [ "$unit_dest" = /etc/systemd/system ] && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    printf 'reloaded systemd — it reads the unit that is there now (nothing was started)\n'
+  else
+    printf 'note     the unit changed; run: systemctl daemon-reload\n' >&2
+  fi
+fi
+
 cat <<EOF
 
 next, from docs/unit-apply-checklist.md:
-  install -m 0644 systemd/estate-checks.service systemd/estate-checks.timer /etc/systemd/system/
-  systemctl daemon-reload && systemctl enable --now estate-checks.timer
+  systemctl enable --now estate-checks.timer   # if it is not enabled yet
   systemctl start estate-checks.service
   systemctl show -p Result -p ExecMainStatus estate-checks.service
 EOF
