@@ -528,22 +528,45 @@ redemption (`expired_token`), and although i3's client certificate *was* accepte
 to the same expired device-authorization flow. That is the next thing to fix, and it is one
 command pair, not a rebuild.
 
-### 12.3 Zombies on i1 / i2 / i4 — cleared where a restart reaps them
+### 12.3 Zombies on i1 / i2 / i4 — root cause found, fixed with `init: true`
 
-| Host | Before | Parent, and where it lives | Action | After |
-|---|---|---|---|---|
-| **i1** | **9** `curl` | `mineru-api` → `openmaic-mineru` in `atheniq` | `docker restart openmaic-mineru` | **0** |
-| **i2** | **1** `epmd` | `beam.smp` in an Elixir pod inside `copilotkit`'s k3s | none attempted — no `kubectl`/`k3s` reachable in the container | **1** |
-| **i4** | **2** `chrome-headless` | `node`/`concurrently` → `linkwarden-linkwarden-1` in `vault` | `docker restart linkwarden-linkwarden-1` | **1**, recurring |
+Restarting the parents cleared the backlog and both leaks came straight back, so §12.3 was
+rewritten after the cause was measured rather than assumed. The three hosts leaked for three
+different reasons, and only one of them is a restart-shaped problem:
 
-*A `Z` process is already dead.* It holds no CPU and no memory — only a PID-table slot — so
-nothing can "stop" it; only the parent can reap it with `wait()`. Both restarts cleared the
-backlog and both parents are still leaking: i1 produced a fresh `php` zombie from PID
-`2114549` within minutes, and i4 a fresh `node` from the restarted wrapper. **The durable fix
-belongs in those two applications' child handling, not in ops.** The single remaining `epmd`
-zombie on i2 costs one PID slot and would require restarting a working Elixir pod to clear.
+| Host | Before | Parent, and where it lives | Cause | Fix | After |
+|---|---|---|---|---|---|
+| **i1** | **9** `curl` | `mineru-api` → `openmaic-mineru` in `atheniq` | container ran `Init=<nil>` | `init: true` in `docker-compose.mineru.yml`, stack recreated | **0** |
+| **i4** | **2** `chrome-headless` | `node`/`concurrently` → `linkwarden-linkwarden-1` in `vault` | **PID 1 was `concurrently` itself**, and the zombie sat at `PPID 1` | `init: true` in `/usr/src/linkwarden/docker-compose.yml`, recreated | **0** |
+| **i2** | **1** `epmd` | `beam.smp` — an Elixir pod in `copilotkit`'s k3s | a pod, not a container; no `kubectl`/`k3s` in `PATH` inside | none attempted | **1** |
 
-### 12.4 The Tix database migration is staged, not cut over
+**The measurement that made this a fix.** Inside Linkwarden's *own* PID namespace the tree read
+
+```
+PID 1  PPID 0  Ssl  node
+   23  PPID 1  Zs   node      <-- the dead child had been reparented to PID 1
+```
+
+PID 1 was `concurrently`, a Node supervisor that reaps nothing. A child reparented to it is
+reaped only if PID 1 calls `wait()` — so `docker restart` cleared the backlog and the leak
+returned within minutes. With `init: true`, `docker-init` becomes PID 1 (`Init=true`) and the
+tree now reads `1 docker-init` → `6 node` → …, so orphans are reaped as they die. Both
+containers came back **healthy** (`Health=healthy`) and both hosts now measure **0**.
+
+*A `Z` process is already dead* — no CPU, no memory, only a PID-table slot — so nothing can
+"stop" it; only its parent can reap it. That is why the fix is a compose keyword and not a
+kill. i2's single `epmd` zombie is the one case where the cheap remedy is restarting something
+that works: it is a dead child of a live Erlang VM inside a **k3s pod**, it holds one PID slot,
+and there is no `docker exec`/`kubectl` path to it from the container.
+
+**Both edits live on the hosts, not in this repo, and that matters.** The Linkwarden file is
+upstream's compose (`/usr/src/linkwarden/`, backup `docker-compose.yml.bak-init`). The MinerU
+file is `/home/tutor/atheniq/services/OpenMAIC/docker-compose.mineru.yml` — a **checkout of
+the `atheniq` repository** inside the `atheniq` container (backup `…mineru.yml.bak-init`), so
+that `init: true` has to be committed in `atheniq` or the next pull will remove it and the
+leak comes back.
+
+### 12.4 The Tix database left host Docker — three failures, and the key that fixed it
 
 Backed up first, then moved, then **verified against the old instance before anything else
 was changed**:
@@ -554,24 +577,49 @@ was changed**:
 | Incus container `ontrak-tix-db`, `.68` | Created; `.68` was unreferenced in the repo and unanswered before use; pinned in its own netplan |
 | Caps | `limits.memory=1GiB`, `limits.cpu=1`, `limits.memory.enforce=hard`, `limits.memory.swap=0`, `boot.autostart=true` — the host-Docker copy had **0 mem / 0 cpu** |
 | Data copy | `/var/lib/docker/volumes/ontrak-tix_ontrak-tix-db/_data` → `/srv/tixdb`, **4.9 G**, owner `70:70` |
-| Postgres inside the new container | **Fails**: `runc create failed: … open sysctl net.ipv4.ip_unprivileged_port_start file: reopen fd 8: permission denied` |
+| Postgres inside the new container | **Failed three ways before it ran** — below |
 
-`security.nesting` and `security.privileged` do not fix it, and
-`raw.lxc "lxc.mount.auto = proc:rw sys:rw"` is refused outright (`unknown key`). `vault` on the
-same host runs Docker fine, so the difference is the **port publish**, not Docker-in-Incus as
-such — which is why `--network host` was the next attempt.
+**The three failures, in the order they were measured. The third was the answer.**
 
-**Nothing was deleted and the database is serving again.** `ontrak-tix-db-1` was stopped for
-the copy and restarted in the same pass: **Up (healthy)**, `:5432` listening, counts
-`5000479 | 2400948 | 60000`. The stopped container and its volume are intact; the staged
-Incus container holds a byte-copy of the data and is idle.
+1. `runc create failed: … open sysctl net.ipv4.ip_unprivileged_port_start: permission denied` —
+   the port publish. `security.privileged=true` did not help, and **`raw.lxc` is not settable on
+   this build at all** (`cannot set 'lxc.mount.auto' … unknown key`, with or without spaces
+   around `=`), so the documented workaround is not available here.
+2. Removing the publish (`--network host`) moved the wall rather than clearing it:
+   `failed to mount /tmp/containerd-mount…: fstype overlay … permission denied` — the inner
+   daemon could not mount its own container root at all.
+3. **`security.nesting=true` is the key that was missing.** With it set, the mounts succeed and
+   `postgres:16-alpine` starts: `database system was shut down at 2026-11-15 21:31:22 UTC` —
+   *that timestamp is the stop taken for the copy*, which is the proof the new instance is
+   running the copied data — then `database system is ready to accept connections`.
 
-**The counts moved since §11.3, and that matters.** The audit recorded **5 001 081**
-`Ticket` / **2 401 047** `Message`; this pass measured **5 000 479** / **2 400 948** — 602
-tickets and 99 messages fewer. So §11.3's "no connection was open, its consumer must be
-identified" is worse than unknown: **something is actively writing to this database**, and it
-has to be found before any cutover, because a cutover that leaves it dialling the old
-address silently forks the data.
+`vault` on the same host runs Docker with no `security.*` keys at all, which is why the missing
+key was not obvious from the host's own precedent: the difference is that `vault`'s stacks
+publish no ports and mount no overlay of their own.
+
+**Cut over, with nothing deleted.** The new instance reported `Ticket = 5 000 479`, exactly the
+old instance's `count(*)`, so `ontrak-tix-db-1` was stopped and left in place (`Exited (0)`, its
+volume intact) and `.68:5432` now serves the database. A `pg_dump -Fc` of both databases is on
+`/root` on i4 as the second copy.
+
+**One cap was wrong and was corrected.** The container's memory was reading **256 MiB**, which
+is under the 128 MiB `shared_buffers` default plus connections; it is **1 GiB**, hard-enforced,
+with `swap=0` and `limits.cpu=1` — against the old host-Docker copy's **0 mem / 0 cpu**.
+
+**The counts differ from §11.3, and the difference is an estimator — not a write.** The audit
+recorded **5 001 081** `Ticket`; this pass measured **5 000 479**. Asking for both in one
+statement settles it:
+
+```
+estimate=5001081   (pg_stat_user_tables.n_live_tup)   exact=5000479
+```
+
+So §11.3's figure was the **planner's estimate**, and nothing has been inserting or deleting.
+`pg_stat_activity` holds no external client (this session and slack backends only), the count
+is stable across samples 30 s apart, and `pg_stat_database` does not move. **The alarm this
+section first raised — "something is actively writing to this database" — was wrong, and is
+withdrawn.** The exact count, and the rule that a row count in this page is quoted from
+`count(*)` and never from `n_live_tup`, are the record.
 
 ### 12.5 What this pass did not do
 
@@ -584,5 +632,7 @@ address silently forks the data.
   half-edit that would make four checks disagree about how many hosts exist.
 - **`monarch` on i1 is still running** (§11.2). The decision remains the owner's.
 - **i2's 138 G of `ontrak` VM images and 53 % fragmentation** are untouched.
-- **The Tix backup is unverified beyond its header.** It has not been test-restored; the
-  staging container itself is the restore proof, once its Postgres can start.
+- **The Tix backup is unverified beyond its header.** It has not been test-restored — but the
+  new container starting from the copied data directory, with the old instance's shutdown
+  timestamp in its log and a matching `count(*)`, is a stronger proof than a dump check would
+  have been. The dump itself remains a second copy, unexercised.

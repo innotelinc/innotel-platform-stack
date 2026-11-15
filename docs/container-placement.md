@@ -31,12 +31,17 @@ estate as it is, not as it was.
 - **The host's own address does not depend on Incus.** `192.168.1.53` stays static on
   `enp2s0` in `/etc/netplan/*.yaml`; no bridge was created over the NIC, so a broken
   `incusbr0` or a stopped `incusd` cannot take the host off the network.
-- **Nothing serves from it yet.** A container `ontrak-tix-db` (`.68`) was created to take
-  the live OnTrak Tix database off `i4`'s host Docker and is **not cut over**: its Postgres
-  will not start inside the container (`runc … open sysctl
-  net.ipv4.ip_unprivileged_port_start: permission denied`). The database is still served by
-  `ontrak-tix-db-1` on `i4`, which was stopped and restarted within the same pass and is
-  healthy. Nothing was deleted. Details in `docs/estate-rebalance-2026-11-15.md` §12.4.
+- **No container runs on it yet.** Its only instance is `ontrak-winpack-build`, a Windows
+  build VM left STOPPED when the installer step failed; see
+  `docs/estate-rebalance-2026-11-15.md` §12.2 for what that failure was.
+- **The live Tix database did leave `i4`'s host Docker — into an Incus container on `i4`, not
+  onto `i3`.** `ontrak-tix-db` now answers on `.68:5432` with `limits.memory=1GiB`,
+  `limits.cpu=1`, `limits.memory.swap=0` and **`security.nesting=true`**. That last key is the
+  one that matters for any Docker-inside-Incus container here: without it the inner daemon
+  cannot mount its own overlay (`failed to mount … fstype overlay … permission denied`), and
+  `raw.lxc` is not settable on this build to work around it. `ontrak-tix-db-1` on host Docker
+  is stopped, not deleted, and its volume is intact. Details in
+  `docs/estate-rebalance-2026-11-15.md` §12.4.
 - **The A Tix row is `.68` and it is not in any check yet.** `check-container-addresses.py`
   still names `i1`, `i2`, `i4` only, so adding `i3` and `.68` is a deliberate separate
   change: widening those tables changes what the scheduled run requires and what the three
