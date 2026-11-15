@@ -103,6 +103,10 @@ CHECK_SCRIPTS = [
     # a branch, because a check whose absence is silent is the failure this list exists to
     # catch.
     "check-atheniq-doors",
+    # The zombie count, added 2026-11-15 after two containers leaked unreaped children for
+    # weeks with nothing reporting it. It arrived with a branch, because the whole point of
+    # the check is that the leak is silent: a textfile that stops arriving must be named.
+    "check-zombie-processes",
 ]
 
 

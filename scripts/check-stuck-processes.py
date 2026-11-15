@@ -72,6 +72,10 @@ CHECK = "stuck_processes"
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
     "i2": "root@192.168.1.52",
+    # `i3` is a host again as of 2026-11-15. A host that has just taken eight containers
+    # is the one most likely to have something stuck in it, and the 2026-10-27 finding
+    # this check exists for was a `docker exec` nobody was watching.
+    "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
 

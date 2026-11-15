@@ -95,6 +95,9 @@ CHECK = "address_latency"
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
     "i2": "root@192.168.1.52",
+    # `i3` is a host again as of 2026-11-15 and now carries six of `i2`'s containers, so
+    # the addresses dialled there have to be measured from it as well.
+    "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
 

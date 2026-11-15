@@ -33,9 +33,10 @@ def _load():
 
 inv = _load()
 
-#: The 192.168.1.53 (`i3`) remote was removed on 2026-11-02 with the host: every estate
-#: host still trusted it, and a trusted host the inventory does not name is a failure.
-ALL_KNOWN_REMOTES = ["192.168.1.51", "192.168.1.52", "192.168.1.54"]
+#: The 192.168.1.53 (`i3`) remote was removed on 2026-11-02 with the host and restored on
+#: 2026-11-15 when the host returned: a trusted host the inventory does not name is a
+#: failure, and so is a host the inventory names but no one trusts.
+ALL_KNOWN_REMOTES = ["192.168.1.51", "192.168.1.52", "192.168.1.53", "192.168.1.54"]
 
 
 def views(overrides=None):

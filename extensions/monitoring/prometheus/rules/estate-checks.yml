@@ -141,6 +141,7 @@ groups:
           # split into `media` and `iptv`, so a textfile that stopped arriving alerted on
           # nothing — the exact silence this rule exists for, one branch short.
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="media_doors"}), "check", "media_doors", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="host_zombies"}), "check", "host_zombies", "check", ".*")
           # The mail container's own preflight, published (2026-11-14). `stalwart_oidc_cache`
           # above asks whether the local copy is current; this asks the eleven facts step 1
           # of docs/mail-discovery-canonical.md asks a person — the units, the leaf's SAN

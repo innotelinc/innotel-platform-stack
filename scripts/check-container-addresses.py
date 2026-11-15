@@ -167,29 +167,37 @@ EXPECTED: dict[str, dict[str, str]] = {
     # reads this table, failed every run on a deliberately stopped container. Re-add the
     # row with the address the day it is placed on a host that can hold it.
     "i2": {
-        # CopilotKit's self-hosted dashboard, on `.114` since 2026-11-14 (its
-        # `cpk.lab.innotel.us`, `cpk-api.…` and `cpk-ws.…` names forward here). It
-        # arrived on a DHCP lease; pinned statically the same day in its own netplan
-        # (`99-static.yaml`, `dhcp4: false`), because a renumber is how the 2026-10-01
-        # outage happened and three names here are reached by address.
-        "copilotkit": "192.168.1.114",
-        "distro": "192.168.1.61",
-        "magnate": "192.168.1.57",
         # Running since before the table was written; the check kept reporting it as
         # "running and not in the table" on every run until 2026-10-28.
         "monitor": "192.168.1.88",
+        # `onyx` stayed when the rest moved on 2026-11-15: it mounts the USB block device
+        # (`main-pool-usb`, `/dev/sdc`) and is not to run detached from it.
         "onyx": "192.168.1.60",
-        "pi": "192.168.1.70",
         # `proxy` was recreated on i2 on 2026-10-26 22:00 EDT and is no longer an
         # i4 container. The address is unchanged (.71), which is why only the host row
         # moves. Its `/data` bind mount now exists (verified 2026-10-28: raw-mount
         # path=/data, source=/usr/src/proxy/data, 209 proxy_host confs readable), so
         # rule 4 watches it rather than reporting the 2026-10-26 defect.
         "proxy": "192.168.1.71",
+    },
+    # `i3` (`192.168.1.53`) is a host again as of 2026-11-15 and took six of `i2`'s
+    # containers while `i2` is reinstalled. Every one of them keeps the address it had —
+    # it is pinned in the container's own netplan — so only the host key moved, which is
+    # the point of the pin. `docs/estate-rebalance-2026-11-15.md` §14 has the cutover.
+    "i3": {
+        "copilotkit": "192.168.1.114",
+        "distro": "192.168.1.61",
+        "magnate": "192.168.1.57",
+        "pi": "192.168.1.70",
         "signara": "192.168.1.44",
         "subscribe": "192.168.1.58",
     },
     "i4": {
+        # Created 2026-11-15: the Tix database left host Docker for a capped container
+        # (1 GiB hard, `swap=0`), which is what made its memory a number instead of an
+        # absence. It answers `.68:5432` and `ontrak-tix-db-1` on the host is stopped with
+        # its volume intact — no data was deleted (`estate-rebalance` §12.4).
+        "ontrak-tix-db": "192.168.1.68",
         "sage": "192.168.1.94",
         "telno": "192.168.1.95",
         "telno-turn": "192.168.1.96",
@@ -202,14 +210,16 @@ EXPECTED: dict[str, dict[str, str]] = {
 #: Where each host is reachable. Overridable with `--hosts`.
 #: `i4` (`root@192.168.1.54`) joined this table on 2026-10-02: it took the edge and three
 #: other containers off i1, so the addresses the estate dials now live there too, and a
-#: table that skipped it would leave those addresses unwatched. `i3` (`192.168.1.53`) is
-#: **not** here any more: it was retired on 2026-11-02 and its containers were copied to
-#: `i2`. A host in this table must exist — the check exits 2 on one it cannot read, so
-#: a retired host left behind reads as an estate-wide outage rather than as a stale row.
-#: See docs/container-placement.md §The i3 host is retired.
+#: table that skipped it would leave those addresses unwatched. `i3` (`192.168.1.53`) was
+#: removed on 2026-11-02 when it was retired and **is back as of 2026-11-15**, carrying six
+#: of `i2`'s containers — the addresses below are unchanged, so leaving it out now would
+#: leave six dialled addresses unread. A host in this table must exist — the check exits 2
+#: on one it cannot read, so a retired host left behind reads as an estate-wide outage
+#: rather than as a stale row.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
     "i2": "root@192.168.1.52",
+    "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
 
