@@ -281,10 +281,15 @@ for name in "${UNIT_FILES[@]}"; do
   if [ ! -f "$root/systemd/$name" ]; then
     continue
   fi
-  mkdir -p "$unit_dest" || die "could not create $unit_dest"
-  if ! cmp -s "$root/systemd/$name" "$unit_dest/$name"; then
-    unit_changed=1
+  # An identical unit is left untouched rather than rewritten: `install` bumps the mtime,
+  # systemd reads that as "the text changed", and every install would ask for a reload it
+  # does not need — `NeedDaemonReload=yes` on a host where nothing is waiting.
+  if cmp -s "$root/systemd/$name" "$unit_dest/$name"; then
+    printf 'ok       %-38s %s (unchanged)\n' "$name" "$unit_dest/$name"
+    continue
   fi
+  mkdir -p "$unit_dest" || die "could not create $unit_dest"
+  unit_changed=1
   install -m 0644 "$root/systemd/$name" "$unit_dest/$name"
   # Prove the copy landed, for the same reason the checks are proved: a short unit file is a
   # unit systemd reads as truncated, and a `cp` that returned 0 is not that proof.
