@@ -156,12 +156,18 @@ def run_preflight(script: str, host: str = HOST, container: str = CONTAINER,
                   timeout: int = TIMEOUT_SECONDS) -> Result:
     """Stream the setup script into the container and run its `preflight`.
 
-    `bash /dev/stdin preflight` rather than `bash -s`: the script resolves its own
-    directory through `BASH_SOURCE[0]`, and under `-s` that is unset, which `set -u`
-    turns into an error before a single fact is read. As a path `/dev/stdin` is a real
-    name, so the script behaves exactly as it does when a person runs it.
+    The script is written to a file inside the container and run from it, rather than
+    streamed to `bash /dev/stdin`: the script resolves its own directory through
+    `BASH_SOURCE[0]`, so it needs a real path (`bash -s` leaves that unset and `set -u`
+    fails before a fact is read), and on i1 `bash /dev/stdin` is refused outright —
+    `bash: /dev/stdin: Permission denied` — which this check reported as exit 126 for as
+    long as it pointed at the wrong host. The temporary file is removed before returning.
     """
-    remote = f"incus exec {shlex.quote(container)} -- bash /dev/stdin preflight"
+    remote = (
+        f"incus exec {shlex.quote(container)} -- sh -c "
+        "'cat > /tmp/stalwart-preflight.sh && bash /tmp/stalwart-preflight.sh preflight; "
+        "rc=$?; rm -f /tmp/stalwart-preflight.sh; exit $rc'"
+    )
     completed = subprocess.run(
         [*ssh_prefix(), "-o", "ConnectTimeout=25", host, remote],
         input=script,
