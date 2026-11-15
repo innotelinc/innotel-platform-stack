@@ -20,6 +20,12 @@ WHAT IT COMPARES
 2. **What is sitting there** — every other `check-*.py` in the directory. A script the
    revision no longer carries is drift too: `check-sso-signin.py` and
    `check-copilotkit-door.py` were still installed after their replacements landed.
+The ref is fetched before the comparison, best effort. `origin/main` in a checkout is only
+as fresh as its last fetch, and a ref one merge behind reports the checks that landed in
+between as drift — the first run of this check did exactly that. A fetch that fails (no
+network) is not an error here: the comparison still runs against the last fetched `main`,
+and a check that stops succeeding for good is what `EstateCheckStale` is for.
+
 3. **Nothing else.** `*.bak*` copies are ignored deliberately — the estate keeps the copy
    it replaced beside the check, and that is a record, not drift.
 
@@ -119,6 +125,23 @@ def git_reader(repo: Path, ref: str):
     return read
 
 
+def refresh(repo: Path, ref: str) -> None:
+    """Bring `origin/<branch>` up to date, so a stale ref is not read as drift.
+
+    Silent by design: this runs from a timer, and a fetch that fails must not turn a sound
+    install into a failed check. The worst it can do is compare against what was last
+    fetched, which is what the check did before it fetched at all.
+    """
+    if not ref.startswith("origin/"):
+        return  # a local revision is already whatever it is
+    branch = ref.split("/", 1)[1]
+    try:
+        subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", "--prune",
+                        "origin", branch], capture_output=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def compare(directory: Path, names: list[str], read) -> list[Mismatch]:
     """Every file the install has, against the revision. Pure apart from the two readers."""
     if not directory.is_dir():
@@ -198,6 +221,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
+
+    refresh(args.repo, args.ref)
 
     try:
         names = unit_files(args.unit)
