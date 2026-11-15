@@ -26,7 +26,12 @@ between as drift — the first run of this check did exactly that. A fetch that 
 network) is not an error here: the comparison still runs against the last fetched `main`,
 and a check that stops succeeding for good is what `EstateCheckStale` is for.
 
-3. **Nothing else.** `*.bak*` copies are ignored deliberately — the estate keeps the copy
+3. **The unit itself.** `estate-checks.{service,timer}` in the directory systemd reads,
+   against `systemd/<name>`. The checks are only half of what runs: the unit naming them can
+   be edited on the host after the install just as easily, and it is not inside the directory
+   the rest of this check watches. `install-estate-checks.sh --verify` compares it; this is
+   the same comparison on a timer.
+4. **Nothing else.** `*.bak*` copies are ignored deliberately — the estate keeps the copy
    it replaced beside the check, and that is a record, not drift.
 
 A revision it cannot read is exit 2, never a pass: a check that compares nothing and says
@@ -68,6 +73,9 @@ DEFAULT_REPO = Path("/usr/src/projects/complete/ips")
 DEFAULT_REF = "origin/main"
 #: The unit systemd reads, not the one in a checkout — see "what the unit runs" above.
 DEFAULT_UNIT = Path("/etc/systemd/system/estate-checks.service")
+#: The two files that make up the job. The service is also where the file list comes from;
+#: the timer is here because a service installed without one never runs, and that is silent.
+UNIT_FILES = ("estate-checks.service", "estate-checks.timer")
 
 INSTALLED_PATH = re.compile(r"/opt/innotel/estate-checks/([A-Za-z0-9._-]+)")
 
@@ -84,6 +92,8 @@ class Mismatch:
     name: str
     installed: str = ""
     revision: str = ""
+    #: Where the file lives in the repository: `scripts/<name>` unless it is a unit.
+    where: str = ""
 
 
 def digest(data: bytes) -> str:
@@ -105,7 +115,7 @@ def unit_files(unit: Path) -> list[str]:
 
 
 def git_reader(repo: Path, ref: str):
-    """A function from a basename to the bytes at `ref:scripts/<name>`, or None if absent.
+    """A function from a path in the repository to its bytes at `ref`, or None if absent.
 
     `ref` is resolved once, here: an unresolvable revision raises rather than returning a
     reader that answers None for everything, because None means "the revision dropped this
@@ -117,8 +127,8 @@ def git_reader(repo: Path, ref: str):
     if resolved.returncode != 0:
         raise Unreadable(f"{repo} has no {ref} to compare against")
 
-    def read(name: str) -> bytes | None:
-        got = subprocess.run(["git", "-C", str(repo), "show", f"{ref}:scripts/{name}"],
+    def read(path: str) -> bytes | None:
+        got = subprocess.run(["git", "-C", str(repo), "show", f"{ref}:{path}"],
                              capture_output=True)
         return got.stdout if got.returncode == 0 else None
 
@@ -163,28 +173,55 @@ def compare(directory: Path, names: list[str], read) -> list[Mismatch]:
     return found
 
 
+def compare_units(unit_dir: Path, read) -> list[Mismatch]:
+    """The unit files themselves, which every other name in this list hangs off.
+
+    Same three kinds as a check, because they are the same mistake: a unit edited on the host
+    is a file whose installed bytes are not the revision's, one directory over.
+    """
+    found: list[Mismatch] = []
+    for name in UNIT_FILES:
+        path = unit_dir / name
+        installed = path.read_bytes() if path.is_file() else None
+        want = read(f"systemd/{name}")
+        if installed is None:
+            if want is None:
+                continue  # neither on the host nor in the revision: nothing to report
+            found.append(Mismatch("missing", name, where=f"systemd/{name}"))
+            continue
+        if want is None:
+            found.append(Mismatch("unknown", name, installed=digest(installed),
+                                 where=f"systemd/{name}"))
+            continue
+        if want != installed:
+            found.append(Mismatch("drifted", name, digest(installed), digest(want),
+                                 where=f"systemd/{name}"))
+    return found
+
+
 def audit(mismatches: list[Mismatch]) -> "Audit":
     """The findings every scheduled check publishes."""
     out = Audit()
     for mismatch in mismatches:
+        where = mismatch.where or f"scripts/{mismatch.name}"
         if mismatch.kind == "drifted":
             out.findings.append(Finding(
                 "drifted", "fail",
-                f"{mismatch.name} is installed as {mismatch.installed} and the revision has "
-                f"{mismatch.revision}: what is running is not what main asserts"))
+                f"{mismatch.name} is installed as {mismatch.installed} and the revision's "
+                f"{where} has {mismatch.revision}: what is there is not what main asserts"))
         elif mismatch.kind == "unknown":
             out.findings.append(Finding(
                 "unknown", "fail",
-                f"{mismatch.name} is installed ({mismatch.installed}) and the revision does "
-                "not carry it: a script nothing in main owns is still sitting there"))
+                f"{mismatch.name} is installed ({mismatch.installed}) and the revision has no "
+                f"{where}: something main does not own is still sitting there"))
         else:
             out.findings.append(Finding(
                 "missing", "fail",
-                f"{mismatch.name} is named by the unit and is not in the install directory"))
+                f"{mismatch.name} is installed as nothing and the revision has {where}"))
     if not mismatches:
         out.findings.append(Finding(
             "installed_matches", "note",
-            "every installed check is the revision's own copy"))
+            "every installed check, and both unit files, are the revision's own copies"))
     return out
 
 
@@ -201,7 +238,7 @@ def report(mismatches: list[Mismatch], ref: str) -> str:
         else:
             lines.append(f"{'MISSING':8} {mismatch.name:44} named by the unit, not installed")
     if not mismatches:
-        lines.append(f"{'OK':8} every installed check matches {ref}")
+        lines.append(f"{'OK':8} every installed check and both unit files match {ref}")
     lines.append("")
     lines.append(f"{len(mismatches)} finding(s) against {ref}")
     return "\n".join(lines)
@@ -218,17 +255,22 @@ def main(argv: list[str] | None = None) -> int:
                         help="the revision to hold the install to (default %(default)s)")
     parser.add_argument("--unit", type=Path, default=DEFAULT_UNIT,
                         help="the installed unit (default %(default)s)")
+    parser.add_argument("--unit-dir", type=Path,
+                        help="where the unit and timer are installed (default: --unit's family)")
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
     refresh(args.repo, args.ref)
 
+    unit_dir = args.unit_dir or args.unit.parent
     try:
         names = unit_files(args.unit)
         if not names:
             raise Unreadable(f"{args.unit} names nothing inside {args.dir}")
-        mismatches = compare(args.dir, names, git_reader(args.repo, args.ref))
+        read = git_reader(args.repo, args.ref)
+        mismatches = compare(args.dir, names, lambda name: read(f"scripts/{name}"))
+        mismatches += compare_units(unit_dir, read)
     except Unreadable as error:
         print(f"check-installed-checks: {error}", file=sys.stderr)
         if args.prom and HAVE_TELEMETRY:
