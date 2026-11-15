@@ -69,6 +69,18 @@ tests:
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="telno_legacy_import"}'
         values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="mail_identities"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="vault_mount"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="vault_disk"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="orion_signin"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="media_doors"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="stalwart_oidc_preflight"}'
+        values: '0x60'
     alert_rule_test:
       - eval_time: 35m
         alertname: EstateCheckAbsent
@@ -123,6 +135,18 @@ tests:
       - series: 'innotel_estate_check_last_run_timestamp{check="stalwart_oidc_cache"}'
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="telno_legacy_import"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="mail_identities"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="vault_mount"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="vault_disk"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="orion_signin"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="media_doors"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="stalwart_oidc_preflight"}'
         values: '0x60'
     alert_rule_test:
       - eval_time: 35m
@@ -237,3 +261,27 @@ tests:
             exp_annotations:
               summary: 'The telno_legacy_import check has never reported'
               description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `telno_legacy_import` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: mail_identities}
+            exp_annotations:
+              summary: 'The mail_identities check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `mail_identities` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: vault_mount}
+            exp_annotations:
+              summary: 'The vault_mount check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `vault_mount` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: vault_disk}
+            exp_annotations:
+              summary: 'The vault_disk check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `vault_disk` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: orion_signin}
+            exp_annotations:
+              summary: 'The orion_signin check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `orion_signin` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: media_doors}
+            exp_annotations:
+              summary: 'The media_doors check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `media_doors` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: stalwart_oidc_preflight}
+            exp_annotations:
+              summary: 'The stalwart_oidc_preflight check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `stalwart_oidc_preflight` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'

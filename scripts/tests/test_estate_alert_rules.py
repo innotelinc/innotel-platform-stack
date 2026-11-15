@@ -24,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 RULES = ROOT / "extensions/monitoring/prometheus/rules/estate-checks.yml"
+TESTS = ROOT / "extensions/monitoring/prometheus/rules/tests/estate-checks.test.yml"
 
 sys.path.insert(0, str(SCRIPTS))
 
@@ -124,6 +125,16 @@ def _block(text: str, alert: str) -> str:
     return tail[: end.start()] if end else tail
 
 
+def _case(text: str, name: str) -> str:
+    """The text of the promtool test's `- name: <name>` case, up to the next case."""
+    start = re.search(rf"^  - name: {re.escape(name)}\n", text, re.MULTILINE)
+    if start is None:
+        raise AssertionError(f"no case named {name} in {TESTS.name}")
+    tail = text[start.end():]
+    end = re.search(r"^  - name: ", tail, re.MULTILINE)
+    return tail[: end.start()] if end else tail
+
+
 class RuleCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -211,6 +222,32 @@ class RuleCase(unittest.TestCase):
         block = _block(self.text, "EstateCheckStale")
         self.assertRegex(block, r">\s*24\s*\*\s*60\s*\*\s*60")
         self.assertIn("24 hours", block)
+
+    def test_the_promtool_test_carries_every_branch(self):
+        # `EstateCheckAbsent` fires on a series that is *missing*, so the only way to
+        # exercise a branch is to hand promtool an estate with every check in it but one.
+        # That makes the test file a second copy of the branch list, and on 2026-11-15 it
+        # was six branches behind: the rule grew, the cases did not, and the first run that
+        # could reach them (shellcheck had been failing ahead of them) reported six
+        # absences the rule should never have had. Both directions are checked, because a
+        # case naming a check the rule does not know passes while testing nothing.
+        text = TESTS.read_text(encoding="utf-8")
+        feeds = r'last_run_timestamp\{check="([^"]+)"\}'
+        self.assertEqual(
+            set(re.findall(feeds, _case(text, "all checks reporting means no absent alert"))),
+            self.checks,
+            "the all-reporting case must feed every check, or it is testing an absence",
+        )
+        self.assertEqual(
+            set(re.findall(r"check: ([a-z_]+)", _case(text, "no check reporting fires once per known check"))),
+            self.checks,
+            "the nothing-reporting case must expect one alert per branch",
+        )
+        self.assertEqual(
+            self.checks - set(re.findall(feeds, _case(text, "a check with no series at all is absent"))),
+            {"estate_inventory"},
+            "the one-absent case must omit exactly the check it says it omits",
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover
