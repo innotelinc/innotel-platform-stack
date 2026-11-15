@@ -225,6 +225,19 @@ class DriftGuard(unittest.TestCase):
         self.assertIn("MISSING", done.stderr)
         self.assertIn("estate-checks.service", done.stderr)
 
+    def test_an_install_that_changes_nothing_leaves_the_unit_alone(self):
+        # Rewriting identical bytes bumps the mtime, systemd reads that as a changed unit,
+        # and `NeedDaemonReload=yes` on a host where nothing moved is the kind of standing
+        # warning that teaches people to ignore the warning.
+        self.install()
+        installed = self.unit_dest / "estate-checks.service"
+        before = installed.stat()
+        second = self.run_installer("--ref", "HEAD")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        after = installed.stat()
+        self.assertEqual((after.st_mtime_ns, after.st_ino), (before.st_mtime_ns, before.st_ino))
+        self.assertIn("(unchanged)", second.stdout)
+
     def test_an_install_starts_nothing(self):
         # Reloading re-reads the text; starting is what would hide the 203/EXEC the checklist
         # is about, and that stays a person's step. A fake `systemctl` on PATH is the only way
