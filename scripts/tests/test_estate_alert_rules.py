@@ -35,6 +35,10 @@ CHECK_SCRIPTS = [
     # otherwise invisible: the checks keep running and keep publishing, asserting an older
     # revision of themselves.
     "check-installed-checks",
+    # Every other unit this host carries, against `systemd/<name>` at the revision
+    # (2026-11-15). The estate keeps its units in the repository and installs them by
+    # hand; nothing compared the two until this.
+    "check-unit-drift",
     "check-container-addresses",
     "check-container-limits",
     "check-estate-inventory",
