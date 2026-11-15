@@ -113,6 +113,10 @@ class DashboardCase(unittest.TestCase):
         # is: every half-done subset of that apply looks identical from outside.
         # `check-atheniq-doors` took it to 30 the same day: the classroom's gate fails by
         # being absent rather than by breaking, so nothing else in the estate would say so.
+        # `check-installed-checks` took it to 31 on 2026-11-15. The guard compared the
+        # install to the revision only when somebody installed, so a copy replaced after
+        # a clean install was invisible to every panel here: 30 checks reported, one of
+        # them asserting an older revision of itself.
         unit = UNIT.read_text(encoding="utf-8")
         checks = set(re.findall(r"/opt/innotel/estate-checks/(check-[a-z0-9-]+)\.py", unit))
         self.assertTrue(checks, "the unit must run the checks")

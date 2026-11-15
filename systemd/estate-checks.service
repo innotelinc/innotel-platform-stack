@@ -260,3 +260,4 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-telno-legacy-import
 # `check-alert-delivery.py` uses — so a mailbox with no identity to sign in is a page
 # rather than a journal line the next run overwrites.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-identities.py --prom ${TEXTFILE_DIR}/estate-check-mail-identities.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-installed-checks.py --prom ${TEXTFILE_DIR}/estate-check-installed-checks.prom
