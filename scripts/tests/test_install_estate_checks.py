@@ -20,8 +20,10 @@ twice.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -110,6 +112,86 @@ class InstallerCase(unittest.TestCase):
                               check=False, cwd="/", env={"PATH": "/usr/bin:/bin"})
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.split(), self.files)
+
+
+class DriftGuard(unittest.TestCase):
+    """What lands has to be the revision's copy, not merely *a* copy of it.
+
+    A copy can be right in every run and still be the wrong file — an uncommitted edit, a
+    checkout on a branch, or a deployed check silently replaced an hour after it landed.
+    None of that shows up in the checks themselves, so the installer holds every file it
+    lands to `scripts/<name>` at the revision, and `--verify` repeats the comparison later.
+    These tests drive both halves against a throwaway install directory.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.dest = Path(self.dir.name) / "installed"
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def run_installer(self, *args: str) -> "subprocess.CompletedProcess[str]":
+        env = dict(os.environ, DEST=str(self.dest))
+        return subprocess.run(["bash", str(INSTALLER), *args], capture_output=True,
+                              text=True, check=False, env=env)
+
+    def install(self) -> None:
+        done = self.run_installer("--ref", "HEAD")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_a_fresh_install_verifies_clean(self):
+        self.install()
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("DRIFT", done.stderr)
+
+    def test_a_check_that_changed_after_the_install_is_named(self):
+        self.install()
+        target = self.dest / "check-alert-delivery.py"
+        target.write_text(target.read_text(encoding="utf-8") + "\n# hand edit\n", encoding="utf-8")
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("DRIFT", done.stderr)
+        self.assertIn("check-alert-delivery.py", done.stderr)
+
+    def test_a_check_the_revision_dropped_is_drift_too(self):
+        self.install()
+        (self.dest / "check-retired-thing.py").write_text("# retired\n", encoding="utf-8")
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("check-retired-thing.py", done.stderr)
+
+    def test_drift_is_accepted_only_when_said_out_loud(self):
+        self.install()
+        (self.dest / "check-alert-delivery.py").write_text("# replaced\n", encoding="utf-8")
+        accepted = self.run_installer("--verify", "--ref", "HEAD", "--allow-drift")
+        self.assertEqual(accepted.returncode, 0)
+        self.assertIn("allow-drift", accepted.stderr)
+
+    def test_reinstalling_clears_the_drift(self):
+        self.install()
+        (self.dest / "check-alert-delivery.py").write_text("# replaced\n", encoding="utf-8")
+        self.install()
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_a_revision_it_cannot_resolve_is_refused(self):
+        # Failing open would print `ok` for a copy it never compared, which is worse than
+        # having no guard at all.
+        done = self.run_installer("--verify", "--ref", "no-such-revision")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("cannot resolve", done.stderr)
+
+    def test_verify_without_an_install_directory_is_refused(self):
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("no install directory", done.stderr)
+
+    def test_an_unknown_argument_is_refused(self):
+        done = self.run_installer("--yes-please")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("unknown argument", done.stderr)
 
 
 if __name__ == "__main__":
