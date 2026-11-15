@@ -764,7 +764,7 @@ container per iteration.
 | `magnate` | `.57` | 512 MiB → 512 MiB | RUNNING | ping 3/3 from i1 |
 | `copilotkit` | `.114` | **10 GiB → 4 GiB** | RUNNING | ping 3/3 from i1 |
 | `signara` | `.44` | 1 GiB → 1 GiB | RUNNING | ping 3/3 from i1 |
-| `onyx` | `.60` | 768 MiB → 768 MiB | **did not move** | imported on `i3` but will not start; runs on `i2` again — see 14.3.2 |
+| `onyx` | `.60` | 768 MiB → 768 MiB | **did not move, left stopped** | imported on `i3`, not started there: it mounts a **USB block device** — see 14.3.2 |
 
 Every source is **stopped on i2, not deleted** — nothing is removed until the reinstall, and the
 old rootfs stays as the fallback copy. Measured transfer rate across the six: **36–40 MB/s**
@@ -822,10 +822,31 @@ which reported `Error: inappropriate ioctl for device` and **briefly showed the 
 RUNNING**, which is why an earlier draft of this section claimed it had moved. It had not: forty
 seconds later it was `STOPPED`, and every start since then never leaves `STOPPED` at all.
 
+**The reason, as the owner gave it: `onyx` was connected to a USB device.** Its config carries
+`main-pool-usb` — a `unix-block` device mapping host **`/dev/sdc`** into the container. Measured on
+both hosts, and the measurement is the opposite of what this section first assumed:
+
+```
+i3: brw-rw---- 1 root disk 8, 32 Nov 15 21:10 /dev/sdc      <- present
+i2: ls: cannot access '/dev/sdc': No such file or directory  <- absent
+```
+
+So the device is *optional in practice*: `required: "false"` on the mapping, which is why `onyx`
+runs on `i2` today without it and why the copy's failure to start on `i3` was **not** the missing
+disk. The owner's instruction is nonetheless to **leave the copy stopped**, and that is what is
+done — the container is bound to a USB device and is not to be brought up detached from it without
+a decision about what that disk is for. **The start failure itself is therefore still unexplained**,
+and this section says so rather than inventing a cause to close it.
+
+*I removed `main-pool-usb` while testing whether the device was the blocker. That was the right
+test and the wrong lasting state: the device has been **restored** on the i3 copy
+(`unix-block, source=/dev/sdc, path=/dev/sdc, required=false`), so the instance definition still
+describes what `onyx` actually is.*
+
 The instance and its copied volume are **left in place, stopped, on `i3`** (rootfs 10.6 G in
-`incus/containers/onyx`) — that is the evidence for the next attempt, not a rollback to be deleted.
-**`onyx` runs on `i2` again**, at `.60`, as it did before this pass. The honest state is: seven of
-eight containers moved, and this one needs a diagnosis I did not reach.
+`incus/containers/onyx`) — the evidence for the move once the USB disk goes with it, not a rollback
+to be deleted. **`onyx` still runs on `i2`**, at `.60`, where its disk is. The honest count for this
+pass is **six of eight containers moved**: `onyx` waits for its hardware, `proxy` for a window.
 
 **`signara` — a NIC that lived in a profile and a netplan that needs udev.** It came up with **no
 LAN address at all**, only its docker bridges:
@@ -861,7 +882,7 @@ which reach hosts by their own addresses and containers from the edge.
 
 | Container | Rootfs | Cap today | Note |
 |---|---|---|---|
-| `onyx` | 8.2 G | 768 MiB | **not moved** — imported on `i3`, refuses to start there, running on `i2` (14.3.2) |
+| `onyx` | 8.2 G | 768 MiB | **left stopped on `i3`** — it mounts the USB disk `/dev/sdc`, which lives on `i2` (14.3.2); still serving from `i2` |
 | `proxy` | **36.1 G** | 7 424 MiB | **not started** — see 14.5 |
 
 **i2 runs `proxy` and `onyx`.** The other six containers' rootfs are `STOPPED` copies kept as the
