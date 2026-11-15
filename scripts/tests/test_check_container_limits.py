@@ -226,5 +226,130 @@ class CpusetCase(unittest.TestCase):
         self.assertEqual(count_cpus(" 0-1 "), 2)
 
 
+####################################################################################
+# The memory half: a ceiling written down must be the ceiling in force (rules 8-11)
+####################################################################################
+
+MEM_TOTAL = 15_279 * 1024 * 1024  # i1's MemTotal, so a percentage has something to be a share of
+
+
+def memory(name, *, state="RUNNING", mem=None, enforce="soft", swap=None,
+           mem_max=None, mem_high=None, swap_max=None):
+    """One container row, with its memory side spelled the way incus spells it."""
+    return chk.Container(
+        name=name,
+        state=state,
+        mem_declared_raw=mem,
+        mem_declared=chk.parse_size(mem, MEM_TOTAL),
+        mem_enforce=enforce,
+        swap_declared=swap,
+        mem_max=mem_max,
+        mem_high=mem_high,
+        swap_max=swap_max,
+    )
+
+
+def memory_audit(inst):
+    return chk.audit({"i1": [inst]}, HOST_CPUS, host_mem={"i1": MEM_TOTAL})
+
+
+class MemoryCase(unittest.TestCase):
+    def test_a_hard_limit_that_is_the_ceiling_has_no_finding(self):
+        result = memory_audit(memory("mail", mem="1GiB", enforce="hard", swap="1GiB",
+                                     mem_max="1073741824", mem_high="max",
+                                     swap_max="1073741824"))
+        self.assertTrue(result.ok, [f.message for f in result.findings])
+        self.assertEqual(result.findings, [])
+
+    def test_a_soft_limit_is_memory_high_and_that_is_correct(self):
+        # The estate's default: incus writes memory.high and leaves memory.max alone.
+        result = memory_audit(memory("nas", mem="256MiB", mem_max="max", mem_high="268435456"))
+        self.assertEqual(result.findings, [])
+
+    def test_a_hard_limit_left_at_max_is_a_failure_that_names_the_file(self):
+        result = memory_audit(memory("mail", mem="1GiB", enforce="hard", mem_max="max", mem_high="max"))
+        self.assertFalse(result.ok)
+        self.assertEqual([f.code for f in result.failures], ["memory_not_enforced"])
+        self.assertIn("memory.max", result.failures[0].message)
+        self.assertIn("1GiB", result.failures[0].message)
+
+    def test_a_container_with_the_limit_in_neither_file_is_a_failure(self):
+        result = memory_audit(memory("nas", mem="256MiB", mem_max="max", mem_high="max"))
+        self.assertFalse(result.ok)
+        self.assertEqual([f.code for f in result.failures], ["memory_not_enforced"])
+        self.assertIn("memory.high", result.failures[0].message)
+
+    def test_a_hard_limit_that_is_only_a_soft_one_is_a_failure(self):
+        # enforce=hard is a promise about memory.max; memory.high holding it is the soft
+        # path, which lets the container through under pressure.
+        result = memory_audit(memory("mail", mem="1GiB", enforce="hard",
+                                     mem_max="max", mem_high="1073741824"))
+        self.assertEqual([f.code for f in result.failures], ["memory_not_enforced"])
+        self.assertIn("memory.max", result.failures[0].message)
+
+    def test_a_swap_cap_the_kernel_never_took_is_the_atheniq_failure(self):
+        # 2026-11-14: limits.memory.swap=2GiB written on a running container,
+        # memory.swap.max left at max, and it held 2 547 MiB of the host's 4 095 MiB.
+        result = memory_audit(memory("atheniq", mem="3GiB", swap="2GiB",
+                                     mem_max="max", mem_high="3221225472", swap_max="max"))
+        self.assertFalse(result.ok)
+        self.assertEqual([f.code for f in result.failures], ["swap_not_enforced"])
+        self.assertIn("limits.memory.swap=2GiB", result.failures[0].message)
+        self.assertIn("memory.swap.max", result.failures[0].message)
+
+    def test_a_limit_incus_applied_at_start_is_in_memory_max(self):
+        # What most of the estate looks like: soft enforcement, the cap in memory.max.
+        result = memory_audit(memory("blueprint", mem="512MiB", swap="512MiB",
+                                     mem_max="536870912", mem_high="max",
+                                     swap_max="536870912"))
+        self.assertEqual(result.findings, [])
+
+    def test_a_boolean_swap_flag_is_not_a_size_to_compare(self):
+        # atlas and copilotkit declare `limits.memory.swap: true`, which incus turns into
+        # swap.max 0; a flag is not a number this check can hold to a file.
+        result = memory_audit(memory("atlas", mem="1536MiB", swap="true",
+                                     mem_max="1610612736", mem_high="max", swap_max="0"))
+        self.assertEqual(result.findings, [])
+
+    def test_a_hard_swap_cap_that_is_not_the_written_one_is_a_failure(self):
+        result = memory_audit(memory("ontrak", mem="3GiB", enforce="hard", swap="2GiB",
+                                     mem_max="3221225472", mem_high="max", swap_max="1073741824"))
+        self.assertFalse(result.ok)
+        self.assertEqual([f.code for f in result.failures], ["swap_not_enforced"])
+        self.assertIn("memory.swap.max", result.failures[0].message)
+
+    def test_swap_false_is_a_flag_and_so_is_true(self):
+        self.assertEqual(memory_audit(memory("nas", swap="false", swap_max="0")).findings, [])
+        self.assertEqual(memory_audit(memory("nas", swap="true", swap_max="max")).findings, [])
+
+    def test_a_container_with_no_declared_memory_limit_is_not_a_finding(self):
+        result = memory_audit(memory("capstone", mem_max="max", mem_high="max", swap_max="max"))
+        self.assertEqual(result.findings, [])
+
+    def test_a_stopped_container_is_not_failed_for_memory_it_does_not_have(self):
+        # The CPU pass already writes the one `stopped` note; memory must not add a second.
+        inst = memory("monarch", state="STOPPED", mem="3GiB", enforce="hard")
+        inst.declared, inst.effective = 2, None
+        self.assertEqual([f.code for f in chk.audit({"i1": [inst]}, HOST_CPUS).findings], ["stopped"])
+
+    def test_a_percentage_limit_is_resolved_against_the_host(self):
+        half = MEM_TOTAL // 2
+        # soft enforcement: the percentage lands in memory.high, not memory.max
+        ok = memory_audit(memory("nas", mem="50%", mem_max="max", mem_high=str(half)))
+        self.assertEqual(ok.findings, [])
+        wrong = memory_audit(memory("nas", mem="50%", mem_max="max", mem_high=str(half // 2)))
+        self.assertEqual([f.code for f in wrong.failures], ["memory_not_enforced"])
+
+    def test_sizes_parse_the_way_incus_writes_them(self):
+        self.assertEqual(chk.parse_size("3GiB"), 3221225472)
+        self.assertEqual(chk.parse_size("2GiB"), 2147483648)
+        self.assertEqual(chk.parse_size("512MiB"), 536870912)
+        self.assertEqual(chk.parse_size("3221225472"), 3221225472)
+        self.assertEqual(chk.parse_size("max"), None)
+        self.assertEqual(chk.parse_size(""), None)
+        self.assertEqual(chk.parse_size("50%", MEM_TOTAL), MEM_TOTAL // 2)
+        self.assertEqual(chk.parse_size("50%", 0), None)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

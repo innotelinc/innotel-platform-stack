@@ -59,6 +59,39 @@ THE FILE-DESCRIPTOR RULES
    docker somewhere, so a host that suddenly reports nothing is the probe having
    stopped working — the failure mode of a check that has quietly stopped checking.
 
+THE MEMORY HALF
+---------------
+Until 2026-11-14 this file's subject was CPU caps and file descriptors, and the two
+limits that decide whether a *host* stays up were never read. `atheniq` was configured
+
+    limits.memory: 3GiB
+    limits.memory.enforce: soft
+    limits.memory.swap: 2GiB
+
+and held **2 547 MiB of that host's 4 095 MiB swap** — more than the cap it was written
+to have, on a host whose swap was already full. Nothing was misconfigured; the config was
+simply not what the kernel had: `memory.max` and `memory.swap.max` both read `max`, because
+the limits had been written on a container that was already running and incus applies a
+soft limit to a live container as `memory.high`.
+
+Which file carries a limit is therefore not a matter of taste. Read across the estate on
+2026-11-14: a container that started with its limit has it in `memory.max` (`blueprint`
+512 MiB, `ontrak` 2 944 MiB), and one whose limit was changed while running has it in
+`memory.high` with `memory.max` at `max` (`atheniq`, before it was made hard). Both are
+the ceiling in force; a container showing `max` in *both* is the one with no ceiling.
+
+8. **The declared memory limit must be in one of the two files.** `memory.max`, as incus
+   writes it at start or under hard enforcement; or `memory.high`, as it writes a soft
+   limit applied to a running container. Neither holding it is a failure that names both.
+   A percentage is resolved against the host's MemTotal, the way incus resolves it.
+9. **A written swap size must be `memory.swap.max`.** `true` and `false` are flags, not
+   sizes, and are not compared. What this catches is a cap the kernel never took — the
+   `atheniq` case above, where a written 2 GiB sat beside `memory.swap.max` at `max`.
+10. **`limits.memory.swap: false` must be `memory.swap.max` 0.** `true` asks for no
+    ceiling and is not a finding.
+11. **No declared memory limit is not a finding** — the same decision as rule 3, for the
+    same reason: the estate fences what it wants fenced.
+
 WHAT IS MEASURED, AND WHY NOT THE DECLARED VALUE
 ------------------------------------------------
 The soft limit is read from `/proc/<pid>/limits` of the process that is being
@@ -155,6 +188,16 @@ class Container:
     #: `limits.cpu` is the vCPU count incus hands qemu at boot (`-smp N`), so there is no
     #: `lxc.payload.<name>` cgroup to read and its absence proves nothing (see `audit`).
     kind: str = "container"
+    #: The memory side: as declared (raw and resolved) and as the cgroup holds it. The raw
+    #: text is kept because a finding has to quote what was written — `3GiB`, a percentage
+    #: — rather than a byte count nobody typed.
+    mem_declared_raw: str | None = None
+    mem_declared: int | None = None
+    mem_enforce: str = "soft"
+    swap_declared: str | None = None
+    mem_max: str | None = None
+    mem_high: str | None = None
+    swap_max: str | None = None
 
 
 @dataclass
@@ -248,6 +291,7 @@ def audit(
     observed: dict[str, list[Container]],
     host_cpus: dict[str, int],
     fd_pressure: dict[str, list[FdPressure]] | None = None,
+    host_mem: dict[str, int] | None = None,
 ) -> Audit:
     """Compare what each container declares against what the host enforces — and what
     each docker container is spending of the limit it has."""
@@ -304,8 +348,128 @@ def audit(
                         f"{inst.effective} CPU(s) — the fence is not the one that was written",
                     )
                 )
+    for host, containers in observed.items():
+        for inst in sorted(containers, key=lambda c: c.name):
+            out.findings.extend(memory_findings(host, inst, (host_mem or {}).get(host, 0)))
     if fd_pressure is not None:
         out.findings.extend(fd_findings(fd_pressure))
+    return out
+
+
+#: Sizes incus writes in a config (`3GiB`, `512MiB`) and the ones the kernel writes
+#: (`3221225472`). Both sides of a memory comparison are parsed to bytes, because that is
+#: the only form two of them can be compared in.
+_SIZE = {
+    "b": 1,
+    "kb": 1000, "mb": 1000 ** 2, "gb": 1000 ** 3, "tb": 1000 ** 4,
+    "kib": 1024, "mib": 1024 ** 2, "gib": 1024 ** 3, "tib": 1024 ** 4,
+    "k": 1000, "m": 1000 ** 2, "g": 1000 ** 3, "t": 1000 ** 4,
+    "ki": 1024, "mi": 1024 ** 2, "gi": 1024 ** 3, "ti": 1024 ** 4,
+}
+
+
+def parse_size(value: str | None, total: int = 0) -> int | None:
+    """Bytes for a size incus or the kernel wrote; None when it is not a size.
+
+    `max` and `unlimited` mean no ceiling and parse to None, which the memory rules read
+    as *nothing is enforced here* rather than as a missing reading — the same distinction
+    the CPU rules draw between `max` and an absent cpuset. A percentage is a share of
+    `total` (the host's MemTotal), which is what incus resolves it against.
+    """
+    if value is None:
+        return None
+    text = value.strip().lower()
+    if not text or text in ("max", "unlimited"):
+        return None
+    if text.endswith("%"):
+        if not total:
+            return None
+        try:
+            return int(total * float(text[:-1]) / 100)
+        except ValueError:
+            return None
+    for suffix in sorted(_SIZE, key=len, reverse=True):
+        if not text.endswith(suffix):
+            continue
+        try:
+            return int(float(text[: -len(suffix)]) * _SIZE[suffix])
+        except ValueError:
+            continue
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
+def memory_findings(host: str, inst: Container, mem_total: int) -> list[Finding]:
+    """Rules 8-11: the memory and swap ceiling written down is the one in force.
+
+    A stopped container has no cgroup to be wrong and is reported once, by the CPU pass.
+    """
+    if inst.state != "RUNNING":
+        return []
+    if inst.mem_declared is None and not inst.swap_declared:
+        return []
+    where = f"{host} {inst.name}"
+    out: list[Finding] = []
+
+    if inst.mem_declared is not None:
+        # A size is exact; a percentage is rounded to a page boundary on the way in.
+        slack = 1048576 if str(inst.mem_declared_raw or "").strip().endswith("%") else 0
+
+        def holds(value: str | None) -> bool:
+            got = parse_size(value, mem_total)
+            return got is not None and abs(got - inst.mem_declared) <= slack
+
+        if inst.mem_max is None and inst.mem_high is None:
+            out.append(
+                Finding(
+                    "memory_unreadable",
+                    "fail",
+                    f"{where}: limits.memory={inst.mem_declared_raw} but no memory cgroup "
+                    f"could be read — nothing shows the ceiling is enforced",
+                )
+            )
+        elif inst.mem_enforce == "hard":
+            if not holds(inst.mem_max):
+                out.append(
+                    Finding(
+                        "memory_not_enforced",
+                        "fail",
+                        f"{where}: limits.memory={inst.mem_declared_raw} with "
+                        f"limits.memory.enforce=hard but memory.max holds "
+                        f"{inst.mem_max or 'nothing'} — the ceiling in force is not the "
+                        f"written one",
+                    )
+                )
+        elif not (holds(inst.mem_max) or holds(inst.mem_high)):
+            out.append(
+                Finding(
+                    "memory_not_enforced",
+                    "fail",
+                    f"{where}: limits.memory={inst.mem_declared_raw} but neither memory.max "
+                    f"({inst.mem_max or 'nothing'}) nor memory.high "
+                    f"({inst.mem_high or 'nothing'}) holds it — nothing caps this container",
+                )
+            )
+
+    raw_swap = (inst.swap_declared or "").strip()
+    if not raw_swap or raw_swap.lower() in ("true", "false"):
+        return out
+    want = parse_size(raw_swap, mem_total)
+    if want is None:
+        return out
+    got = parse_size(inst.swap_max, mem_total)
+    if got is None or abs(got - want) > 1048576:
+        out.append(
+            Finding(
+                "swap_not_enforced",
+                "fail",
+                f"{where}: limits.memory.swap={raw_swap} but memory.swap.max holds "
+                f"{inst.swap_max or 'nothing'} — the swap cap is not one the kernel took "
+                f"(atheniq held 2547 MiB against a written 2 GiB, 2026-11-14)",
+            )
+        )
     return out
 
 
@@ -316,7 +480,12 @@ def audit(
 
 def gather(
     hosts: dict[str, str], runner=ssh
-) -> tuple[dict[str, list[Container]], dict[str, int], dict[str, list[FdPressure]]]:
+) -> tuple[
+    dict[str, list[Container]],
+    dict[str, int],
+    dict[str, list[FdPressure]],
+    dict[str, int],
+]:
     """Read each host's declared caps, the cpuset actually in force, and every docker
     container's file-descriptor pressure.
 
@@ -328,29 +497,53 @@ def gather(
     """
     observed: dict[str, list[Container]] = {}
     host_cpus: dict[str, int] = {}
+    host_mem: dict[str, int] = {}
     pressure: dict[str, list[FdPressure]] = {}
     for host, target in hosts.items():
         host_cpus[host] = int(read_host(host, target, "nproc", runner).strip() or 0)
+        # MemTotal in bytes, because a percentage limit is a share of it.
+        host_mem[host] = int(
+            read_host(
+                host, target, "awk '/^MemTotal:/{print $2*1024}' /proc/meminfo", runner
+            ).strip()
+            or 0
+        )
         listing = json.loads(read_host(host, target, "incus list --format json", runner) or "[]")
         pressure[host] = parse_fd(host, read_host(host, target, FD_WALK, runner))
         cpuset = read_host(
             host,
             target,
             "for c in $(incus list --format csv -c n); do "
-            'printf "%s %s\\n" "$c" "$(cat /sys/fs/cgroup/lxc.payload.$c/cpuset.cpus.effective 2>/dev/null)"; '
+            'd=/sys/fs/cgroup/lxc.payload.$c; '
+            'printf "%s|%s|%s|%s|%s\\n" "$c" '
+            '"$(cat $d/cpuset.cpus.effective 2>/dev/null)" '
+            '"$(cat $d/memory.max 2>/dev/null)" '
+            '"$(cat $d/memory.high 2>/dev/null)" '
+            '"$(cat $d/memory.swap.max 2>/dev/null)"; '
             "done",
             runner,
         )
         effective: dict[str, str] = {}
+        memory: dict[str, tuple[str | None, str | None, str | None]] = {}
         for line in cpuset.splitlines():
-            name, _, spec = line.partition(" ")
-            effective[name.strip()] = spec.strip()
+            fields = [part.strip() for part in line.split("|")]
+            if not fields or not fields[0]:
+                continue
+            name = fields[0]
+            fields += [""] * (4 - len(fields))
+            effective[name] = fields[1]
+            memory[name] = (fields[2] or None, fields[3] or None, fields[4] or None)
 
         containers: list[Container] = []
         for entry in listing:
             name = entry.get("name", "")
-            declared_raw = (entry.get("expanded_config") or {}).get("limits.cpu")
+            cfg = entry.get("expanded_config") or {}
+            declared_raw = cfg.get("limits.cpu")
             declared = int(declared_raw) if declared_raw not in (None, "", "0") else None
+            mem_raw = cfg.get("limits.memory")
+            if mem_raw in (None, "", "0"):
+                mem_raw = None
+            swap_raw = (cfg.get("limits.memory.swap") or "").strip() or None
             spec = effective.get(name, "")
             containers.append(
                 Container(
@@ -361,10 +554,17 @@ def gather(
                     declared=declared,
                     effective=count_cpus(spec) if spec else None,
                     kind=entry.get("type", "container") or "container",
+                    mem_declared_raw=mem_raw,
+                    mem_declared=parse_size(mem_raw, host_mem[host]),
+                    mem_enforce=(cfg.get("limits.memory.enforce") or "soft").strip().lower(),
+                    swap_declared=swap_raw,
+                    mem_max=memory.get(name, (None, None, None))[0],
+                    mem_high=memory.get(name, (None, None, None))[1],
+                    swap_max=memory.get(name, (None, None, None))[2],
                 )
             )
         observed[host] = containers
-    return observed, host_cpus, pressure
+    return observed, host_cpus, pressure, host_mem
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -393,7 +593,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        observed, host_cpus, pressure = gather(hosts)
+        observed, host_cpus, pressure, host_mem = gather(hosts)
     except Exception as error:
         print(f"check-container-limits: could not read a host: {error}", file=sys.stderr)
         if not (os.environ.get("SSHPASS") and shutil.which("sshpass")):
@@ -405,16 +605,17 @@ def main(argv: list[str] | None = None) -> int:
         emit(None, ran=False)
         return 2
 
-    result = audit(observed, host_cpus, pressure)
+    result = audit(observed, host_cpus, pressure, host_mem)
     emit(result, ran=True)
     for level in ("fail", "warn", "note"):
         for finding in [f for f in result.findings if f.level == level]:
             print(f"{level.upper():4} {finding.message}")
     declared = sum(1 for cs in observed.values() for c in cs if c.declared)
+    memcaps = sum(1 for cs in observed.values() for c in cs if c.mem_declared or c.swap_declared)
     read = sum(len(cs) for cs in pressure.values())
     print(
         f"\ncheck-container-limits: {len(result.failures)} failure(s), "
-        f"{len(result.warnings)} warning(s), {declared} declared cap(s), "
+        f"{len(result.warnings)} warning(s), {declared} declared cpu cap(s), {memcaps} declared memory/swap cap(s), "
         f"{read} docker container(s) read for file-descriptor pressure"
     )
     return 0 if result.ok else 1
