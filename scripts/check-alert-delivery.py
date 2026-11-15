@@ -114,7 +114,14 @@ STALWART_LOG = "/var/log/stalwart"
 DEFAULT_WAIT_SECONDS = 90
 POLL_SECONDS = 5
 
-#: A Stalwart delivery log line begins with an RFC3339 UTC stamp:
+#: A delivery to a mailbox on this server is logged as an *ingest*, not a delivery:
+#:   2026-11-15T02:29:57Z INFO Message ingested (message-ingest.ham) queueId = …, queueName = "local", from = "alertmanager@innotel.us", to = ["alertmanager@innotel.us"], …
+#: `delivery.completed`/`delivery.dsn-success` is what the server writes when a message
+#: leaves for another host; when both ends are local the ingest is the only line, and the
+#: probe's recipient is the alerts account on this same server. Measured 2026-11-15: the
+#: submit and the mailbox both worked while this check called the receiver silent, because
+#: it only knew the outbound event names.
+#: The line begins with an RFC3339 UTC stamp:
 #:   2026-10-02T21:48:17Z INFO Delivery completed (delivery.completed) queueId = …, from = "alertmanager@innotel.us", to = ["admin@innotel.us"], …
 #: but the line usually leads with an ANSI colour escape (`\x1b[37m…\x1b[0m`) before the
 #: stamp, so the escape is stripped before matching rather than anchored around.
@@ -169,18 +176,22 @@ def last_error_command() -> str:
 def mail_log_command() -> str:
     """The successful deliveries from the receiver to its recipient, in today's log.
 
+    A recipient on this server counts too: Stalwart logs that as
+    `message-ingest.ham`, with the same `from`/`to` fields, and never as
+    `delivery.completed`.
+
     `-a` because a log line can carry a control byte, and `|| true` so a day with no mail
     yet is an empty answer rather than an ssh failure (an empty answer is a *finding*: the
     receiver did not deliver).
     """
-    # Candidates only: every completed delivery in today's log, newest last. The
+    # Candidates only: every delivery or local ingest in today's log, newest last. The
     # sender/recipient filter is applied in Python, not here, because Stalwart colours its
     # field names — the line reads `\x1b[36mfrom\x1b[0m = "…"`, so `grep -F 'from = "'`
     # matches nothing at all. Measured 2026-10-24, after a probe was delivered and this
     # check still called the receiver silent.
     inner = (
         f'f="{STALWART_LOG}/stalwart.$(date -u +%F)"; '
-        f'grep -aE "delivery\\.(completed|dsn-success)" "$f" 2>/dev/null '
+        f'grep -aE "delivery\.(completed|dsn-success)|message-ingest\.(ham|spam)" "$f" 2>/dev/null '
         f'| tail -n 400 || true'
     )
     return "incus exec mail -- sh -c " + shlex.quote(inner) + " </dev/null"

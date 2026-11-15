@@ -50,6 +50,19 @@ TEXT_COLOURED = (
 )
 
 
+#: A delivery to a mailbox on this server: Stalwart logs the ingest, never a delivery.
+LOCAL_INGEST = (
+    '2026-11-15T02:29:57Z INFO Message ingested (message-ingest.ham) '
+    'queueId = q2, queueName = "local", from = "alertmanager@innotel.us", '
+    'to = ["alertmanager@innotel.us"]'
+)
+LOCAL_INGEST_ELSEWHERE = (
+    '2026-11-15T02:29:58Z INFO Message ingested (message-ingest.ham) '
+    'queueId = q3, queueName = "local", from = "alertmanager@innotel.us", '
+    'to = ["admin@innotel.us"]'
+)
+
+
 class CommandCase(unittest.TestCase):
     def test_the_probe_name_is_unique_per_run(self):
         self.assertNotEqual(probe.probe_name("a"), probe.probe_name("b"))
@@ -107,6 +120,24 @@ class ParseCase(unittest.TestCase):
         times = probe.delivery_times(OLD_DELIVERY + DELIVERED)
         self.assertEqual(times, sorted(times))
         self.assertEqual(len(times), 2)
+
+
+    def test_a_local_ingest_to_the_alerts_account_counts_as_delivery(self):
+        times = probe.delivery_times(
+            LOCAL_INGEST, from_address="alertmanager@innotel.us",
+            to_address="alertmanager@innotel.us")
+        self.assertEqual(len(times), 1)
+
+    def test_a_local_ingest_to_someone_else_does_not_count(self):
+        times = probe.delivery_times(
+            LOCAL_INGEST_ELSEWHERE, from_address="alertmanager@innotel.us",
+            to_address="alertmanager@innotel.us")
+        self.assertEqual(times, [])
+
+    def test_the_log_read_asks_for_local_ingests_too(self):
+        command = probe.mail_log_command()
+        self.assertIn("message-ingest", command)
+        self.assertIn("dsn-success", command)
 
 
 class AuditCase(unittest.TestCase):
