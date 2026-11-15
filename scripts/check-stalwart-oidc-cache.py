@@ -56,7 +56,7 @@ Nothing is restarted, refreshed or written. The refresh itself belongs to the pr
 Usage:
     ./scripts/check-stalwart-oidc-cache.py
     ./scripts/check-stalwart-oidc-cache.py --prom /path/to/textfile
-    ./scripts/check-stalwart-oidc-cache.py --host root@192.168.1.52 --container mail
+    ./scripts/check-stalwart-oidc-cache.py --host root@192.168.1.51 --container mail
 
 Exit codes: 0 = the copy is current and servable, 1 = it is not, 2 = could not run.
 """
@@ -77,10 +77,13 @@ from estate_check import Audit, Finding, ssh_prefix, write_prom  # noqa: E402
 
 CHECK = "stalwart_oidc_cache"
 
-#: The host the mail container runs on (`i2`, per the container address table) and the
+#: The host the mail container runs on (`i1`, per the container address table) and the
 #: container itself. The unit file that starts this check is the authority for both, not
-#: this default.
-HOST = "root@192.168.1.52"
+#: this default. It said `i2` until 2026-11-14, which is why the check spent that time at
+#: exit 2: `incus exec mail` on i2 has no such instance, and "could not ask" was the whole
+#: verdict. `check-mail-identities.py` had the right host all along, which is what gave the
+#: discrepancy away.
+HOST = "root@192.168.1.51"
 CONTAINER = "mail"
 
 #: Where the setup script puts the three pieces the server depends on.

@@ -16,4 +16,4 @@
 # the same reason and disappears with it.
 192.168.1.93:3997	dev box off — fax staging (fax-staging.lab.innotel.us)
 192.168.1.93:8080	dev box off — the telno TLD family (telno.digital, telno.mobi, …)
-172.18.0.1:18080	dev box off — the reverse tunnel telno.services is served through
+127.0.0.1:18080	dev box off — the telno.services tunnel ended on the dev box, retired 2026-11-14; the vhosts still dial the edge's own loopback (the row said 172.18.0.1 until then, so the target read as dead instead of declared off)
