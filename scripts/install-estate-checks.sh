@@ -23,13 +23,31 @@
 # the checklist, and a copy that quietly reloads systemd is a copy that can hide the very
 # 203/EXEC this is meant to prevent. It prints what to run next instead.
 #
-# Exit codes: 0 = every file is in place, 1 = one was missing from the checkout or landed
-# short, 2 = this is not a checkout (no unit to read).
+# THE GUARD
+# ---------
+# What lands has to be what the repository says, not merely *a* copy of it. A working tree
+# with an uncommitted edit, a checkout on a branch, or a deployed check silently replaced by
+# an older copy an hour after it landed (measured 2026-11-15): none of those show up in the
+# run itself. The checks keep working, they just stop asserting what `main` says.
+#
+# So every installed file is compared byte for byte with `scripts/<name>` at a revision,
+# `origin/main` unless told otherwise, and a difference fails the install. Deploying a fix
+# before its pull request merges is legitimate; `--allow-drift` is how a person says so out
+# loud, and the difference is still printed.
+#
+# `--verify` runs that comparison alone, changing nothing: it is what catches a copy that
+# drifted *after* the install, and what a periodic job should call.
+#
+# Exit codes: 0 = every file is in place and matches, 1 = one was missing from the checkout,
+# landed short, or differs from the revision, 2 = this is not a checkout (no unit to read).
 #
 # On the edge, from a checkout:
 #
 #     sudo bash scripts/install-estate-checks.sh
 #     sudo bash scripts/install-estate-checks.sh --print        # the list, changing nothing
+#     sudo bash scripts/install-estate-checks.sh --verify       # installed == revision?
+#     sudo bash scripts/install-estate-checks.sh --allow-drift  # installing from a branch
+#     sudo bash scripts/install-estate-checks.sh --ref <rev>    # hold it to another revision
 set -euo pipefail
 
 self_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -69,13 +87,89 @@ all_files() {
   { unit_files; printf '%s\n' "${SIBLINGS[@]}" "${SHARED[@]}"; } | sort -u
 }
 
-if [ "${1:-}" = "--print" ] || [ "${1:-}" = "-n" ]; then
-  all_files
+ref=${REF:-}
+verify=0
+allow_drift=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --print|-n) all_files; exit 0 ;;
+    --verify) verify=1 ;;
+    --allow-drift) allow_drift=1 ;;
+    --ref) shift; [ $# -gt 0 ] || die "--ref needs a revision"; ref=$1 ;;
+    --ref=*) ref=${1#--ref=} ;;
+    *) die "unknown argument: $1 (--print, --verify, --allow-drift, --ref <rev>)" ;;
+  esac
+  shift
+done
+# A revision nobody can resolve is the guard failing open, which is worse than not having
+# it: the install would print ok for a copy it never compared. Refuse instead.
+if [ -n "$ref" ] && ! git -C "$root" rev-parse --verify --quiet "$ref^{commit}" >/dev/null 2>&1; then
+  git -C "$root" fetch -q origin 2>/dev/null || true
+fi
+has_ref=0
+if [ -n "$ref" ]; then
+  git -C "$root" rev-parse --verify --quiet "$ref^{commit}" >/dev/null 2>&1 && has_ref=1
+  [ "$has_ref" -eq 1 ] || die "cannot resolve $ref in $root — nothing to compare the install with"
+else
+  for candidate in origin/main HEAD; do
+    if git -C "$root" rev-parse --verify --quiet "$candidate^{commit}" >/dev/null 2>&1; then
+      ref=$candidate
+      has_ref=1
+      break
+    fi
+  done
+fi
+
+drift=0
+
+# check_drift <basename> <installed path> — compare one installed file with the revision.
+check_drift() {
+  [ "$has_ref" -eq 1 ] || return 0
+  if ! git -C "$root" cat-file -e "$ref:scripts/$1" 2>/dev/null; then
+    printf 'DRIFT    %-38s installed, and %s does not have it\n' "$1" "$ref" >&2
+    drift=1
+    return 0
+  fi
+  if ! git -C "$root" show "$ref:scripts/$1" 2>/dev/null | cmp -s - "$2"; then
+    printf 'DRIFT    %-38s differs from %s:scripts/%s\n' "$1" "$ref" "$1" >&2
+    drift=1
+  fi
+}
+
+if [ "$verify" -eq 1 ]; then
+  [ -d "$dest" ] || die "no install directory at $dest"
+  verify_missing=0
+  while read -r name; do
+    [ -n "$name" ] || continue
+    if [ ! -f "$dest/$name" ]; then
+      printf 'MISSING  %-38s the unit names it, %s does not have it\n' "$name" "$dest" >&2
+      verify_missing=1
+      continue
+    fi
+    check_drift "$name" "$dest/$name"
+  done < <(all_files)
+  # The other direction, over every check on disk rather than the unit's list: a script
+  # left behind is drift as soon as the revision stops carrying it.
+  while read -r deployed; do
+    [ -n "$deployed" ] || continue
+    [ "$has_ref" -eq 1 ] || break
+    git -C "$root" cat-file -e "$ref:scripts/$deployed" 2>/dev/null && continue
+    printf 'DRIFT    %-38s installed, and %s does not have it\n' "$deployed" "$ref" >&2
+    drift=1
+  done < <(cd "$dest" && find . -maxdepth 1 -type f -name 'check-*.py' -printf '%f\n' | sort)
+  printf '\nverified %s against %s\n' "$dest" "${ref:-nothing (not a checkout)}"
+  [ "$verify_missing" -eq 0 ] || exit 1
+  if [ "$drift" -ne 0 ]; then
+    if [ "$allow_drift" -eq 1 ]; then
+      printf 'note     drift accepted with --allow-drift\n' >&2
+      exit 0
+    fi
+    exit 1
+  fi
   exit 0
 fi
-[ $# -eq 0 ] || die "unknown argument: $1 (the only one is --print)"
 
-mkdir -p "$dest" || die "could not create $dest"
+  mkdir -p "$dest" || die "could not create $dest"
 
 installed=0
 short=0
@@ -103,6 +197,7 @@ while read -r name; do
     continue
   fi
   printf 'ok       %-38s %s\n' "$name" "$dest/$name"
+  check_drift "$name" "$dest/$name"
   installed=$((installed + 1))
 done < <(all_files)
 
@@ -126,6 +221,16 @@ if [ "$short" -ne 0 ]; then
   printf 'install-estate-checks: something did not land — do NOT reload the unit yet\n' >&2
   exit 1
 fi
+if [ "$drift" -ne 0 ]; then
+  if [ "$allow_drift" -eq 1 ]; then
+    printf 'note     the installed copy is not %s; accepted with --allow-drift\n' "$ref" >&2
+  else
+    printf 'install-estate-checks: the installed copy is not %s — install from %s, or pass\n' "$ref" "$ref" >&2
+    printf '         --allow-drift when you are deliberately ahead of it\n' >&2
+    exit 1
+  fi
+fi
+
 cat <<EOF
 
 next, from docs/unit-apply-checklist.md:
