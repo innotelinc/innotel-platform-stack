@@ -61,16 +61,20 @@ CHECK = "deploy_door"
 #: listener, because that is what a proxy host dials: a 502 from the name and a refused
 #: connect here together say "the tunnel", while a 502 with the listener up says "the
 #: service behind it".
-TUNNELS: dict[str, int] = {"172.18.0.1:8090": 8000, "172.18.0.1:8091": 3997}
+#: Retired 2026-11-14, with the guest the tunnels ended on. `192.168.1.93` was the
+#: estate's development VMware guest; `deploy.innotel.us` (Coolify) and
+#: `fax-staging.lab.innotel.us` were only ever doors onto it. Both proxy hosts were
+#: deleted rather than left answering 502 (backups `/root/npm-host-321.json` and
+#: `/root/npm-host-281.json` on the edge), so these maps are empty on purpose. The check
+#: stays in the unit: a retirement that silently drops out of the series is the same
+#: blindness the other checks exist to prevent, and a note says what happened.
+TUNNELS: dict[str, int] = {}
 
 #: The public names that ride those tunnels. `coolify` is the marker a working panel's
 #: page carries; a proxy that answers 200 with somebody else's default page is not a
 #: working door, and 200 alone would call it one. The fax portal has no marker: it is a
 #: 302 to a sign-in page and the jump is the proof.
-DOORS: dict[str, str | None] = {
-    "deploy.innotel.us": "coolify",
-    "fax-staging.lab.innotel.us": None,
-}
+DOORS: dict[str, str | None] = {}
 
 #: Statuses a working door gives. A 502/503/504 is the failure this exists for; the
 #: rest are answers (a gate's 401/403 is still an open door).
@@ -289,6 +293,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tunnels", default=",".join(TUNNELS), help="comma-separated host:port listeners on the edge")
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here for the alerts")
     args = parser.parse_args(argv)
+
+    if not [n for n in args.names.split(",") if n.strip()] and not [
+        e for e in args.tunnels.split(",") if e.strip()
+    ]:
+        # Nothing to probe because the doors were retired with their host, not because the
+        # check broke. Exit 0 with a note: a series that vanishes reads exactly like a
+        # check that stopped running, and every alert rule here is built to notice that.
+        note = (
+            "the tunnelled doors were retired with 192.168.1.93 on 2026-11-14 "
+            "(deploy.innotel.us, fax-staging.lab.innotel.us); nothing to probe"
+        )
+        retired = Audit()
+        retired.findings.append(Finding("retired", "note", note))
+        if args.prom:
+            try:
+                write_prom(args.prom, CHECK, retired, True)
+            except OSError as error:
+                print(f"check-deploy-door: could not write {args.prom}: {error}", file=sys.stderr)
+        print(f"NOTE {note}")
+        print("\ncheck-deploy-door: 0 failure(s), 0 warning(s)")
+        return 0
 
     doors: list[Door] = []
     tunnels: list[Tunnel] = []
