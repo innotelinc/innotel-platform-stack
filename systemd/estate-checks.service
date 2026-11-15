@@ -271,3 +271,10 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-telno-legacy-import
 # `check-alert-delivery.py` uses — so a mailbox with no identity to sign in is a page
 # rather than a journal line the next run overwrites.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-identities.py --prom ${TEXTFILE_DIR}/estate-check-mail-identities.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-installed-checks.py --prom ${TEXTFILE_DIR}/estate-check-installed-checks.prom
+# The same comparison for every other unit this host carries: the ones in `systemd/`
+# that are installed here, against the revision. A unit edited on a host during an
+# incident leaves the job running and the repository wrong.
+# i1 and i2 are read over ssh: only the edge's node_exporter is scraped, so a textfile
+# written on either host would be read by nobody.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-unit-drift.py --host i1=192.168.1.51 --host i2=192.168.1.52 --prom ${TEXTFILE_DIR}/estate-check-unit-drift.prom
