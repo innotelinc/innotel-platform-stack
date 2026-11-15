@@ -222,19 +222,34 @@ LIMIT_ROWS = [("proxy", "2", "0-1"), ("monarch", "2", "2-3"), ("mail", "1", "0")
               ("vpn", "1", "0")]
 
 
-def _limit_rules(effective_override: dict | None = None) -> dict:
+def _limit_rules(effective_override: dict | None = None, memory: dict | None = None) -> dict:
+    """The host as the check reads it: one `|`-separated row per container.
+
+    `memory` maps a container name to what its cgroup holds (`cgroup`) and what it
+    declares (`config`) — both halves of a memory finding.
+    """
     effective_override = effective_override or {}
-    listing = [
-        {"name": name, "status": "Running", "expanded_config": {"limits.cpu": declared}}
-        for name, declared, _ in LIMIT_ROWS
-    ]
-    cpusets = "\n".join(
-        f"{name} {effective_override.get(name, spec)}" for name, _, spec in LIMIT_ROWS
-    ) + "\n"
+    memory = memory or {}
+    listing = []
+    rows = []
+    for name, declared, spec in LIMIT_ROWS:
+        over = memory.get(name, {})
+        config = {"limits.cpu": declared}
+        config.update(over.get("config", {}))
+        listing.append({"name": name, "status": "Running", "expanded_config": config})
+        cgroup = over.get("cgroup", {})
+        rows.append("|".join([
+            name,
+            effective_override.get(name, spec),
+            cgroup.get("max", ""),
+            cgroup.get("high", ""),
+            cgroup.get("swap", ""),
+        ]))
     return {
         I1: {
             "answers": [
-                ["cpuset.cpus.effective", cpusets],
+                ["MemTotal", "16025026560\n"],
+                ["cpuset.cpus.effective", "\n".join(rows) + "\n"],
                 ["nproc", "4\n"],
                 ["format json", json.dumps(listing)],
             ]
@@ -257,6 +272,18 @@ class LimitsLiveCase(LiveCase):
         body = self.text(prom)
         self.assertIn('innotel_estate_check_last_status{check="container_limits"} 0', body)
         self.assertIn('innotel_estate_check_failures{check="container_limits"} 1', body)
+
+    def test_a_swap_cap_that_soft_enforcement_ignores_fails_the_run(self):
+        # The atheniq case end to end: 2GiB written, enforcement soft, memory.swap.max=max.
+        chk = _load("check-container-limits")
+        rules = _limit_rules(memory={"ontrak": {
+            "config": {"limits.memory": "3GiB", "limits.memory.enforce": "soft",
+                       "limits.memory.swap": "2GiB"},
+            "cgroup": {"max": "max", "high": "3221225472", "swap": "max"},
+        }})
+        code, prom = self.run_check(chk, {"i1": f"root@{I1}"}, rules)
+        self.assertEqual(code, 1)
+        self.assertIn('innotel_estate_check_failures{check="container_limits"} 1', self.text(prom))
 
     def test_an_unreachable_host_is_exit_two_not_a_pass(self):
         chk = _load("check-container-limits")

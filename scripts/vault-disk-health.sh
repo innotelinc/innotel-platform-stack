@@ -57,7 +57,6 @@ fi
 # what a threshold is about. Seagate packs extra bytes into some raw values (Power_On_Hours
 # reads `5510 (207 0 0)`), so take the first number only.
 raw() { awk -v id="$1" '$1 == id { print $10; exit }' <<<"$attrs" | tr -d '\r' | awk '{print $1}'; }
-norm() { awk -v id="$1" '$1 == id { print $3; exit }' <<<"$attrs"; }
 whosefail() { awk -v id="$1" '$1 == id { print $9; exit }' <<<"$attrs"; }
 
 model=$(sed -n 's/^Device Model: *//p' <<<"$info" | head -1)
