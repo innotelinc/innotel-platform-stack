@@ -111,10 +111,14 @@ done < <(all_files)
 # edge unowned for six days, and the difference between "deployed" and "run by a timer" is
 # exactly what this whole file is about.
 if [ -d "$dest" ]; then
+  # `find -printf %f` rather than `ls`: this list is compared line-for-line with `comm`
+  # against the names the unit runs, so a name `ls` prints with escapes is a stale note
+  # either invented or lost, and the note is the point.
+  deployed=$(cd "$dest" && find . -maxdepth 1 -type f -name 'check-*.py' -printf '%f\n' | sort)
   while read -r stale; do
     [ -n "$stale" ] || continue
     printf 'note     %-38s in %s, but no ExecStart runs it\n' "$stale" "$dest"
-  done < <(comm -13 <(all_files) <(cd "$dest" && ls -1 check-*.py 2>/dev/null | sort || true))
+  done < <(comm -13 <(all_files) <(printf '%s\n' "$deployed"))
 fi
 
 printf '\n%d file(s) in %s\n' "$installed" "$dest"
