@@ -939,14 +939,14 @@ that table is a bug in one of them.
 | i1 | `rizzaura` | `.62` | Rizz Aura (5 svc) | 208 MiB (512 MiB) | 2 |
 | i1 | `www` | ~~`.80`~~ | **retired 2026-10-29** — the public landing page moved to `ord-atheniq` (`104.238.162.5:8086`); stopped since 2026-10-28 with an empty volume | — | — |
 | i2 | `capstone` | `.30` | Zeus / capstone telephony | 4.34 GiB (uncapped) | 2 |
-| i2 | `copilotkit` | `.114` | CopilotKit's self-hosted dashboard (`cpk.lab.innotel.us`, `cpk-api.…`, `cpk-ws.…`) | 1.29 GiB (10 GiB) | 6 |
-| i2 | `distro` | `.61` | distro control plane | 204 MiB (1 GiB) | 2 |
-| i2 | `magnate` | `.57` | Magnate | 181 MiB (1 GiB) | 2 |
+| i3 | `copilotkit` | `.114` | CopilotKit's self-hosted dashboard (`cpk.lab.innotel.us`, `cpk-api.…`, `cpk-ws.…`) — **on `i3` since 2026-11-15, cap cut 10 GiB → 4 GiB** | 1.29 GiB (10 GiB) | 6 |
+| i3 | `distro` | `.61` | distro control plane — **on `i3` since 2026-11-15** | 204 MiB (1 GiB) | 2 |
+| i3 | `magnate` | `.57` | Magnate — **on `i3` since 2026-11-15** | 181 MiB (1 GiB) | 2 |
 | i2 | `monitor` | `.88` | SigNoz — traces, metrics, logs | — | 2 |
-| i2 | `onyx` | `.60` | Onyx (RAG) | 291 MiB (1 GiB) | 2 |
-| i2 | `pi` | `.70` | pi | 193 MiB (1 GiB) | 2 |
-| i2 | `signara` | `.44` | Signara (and the estate's one Alertmanager) | 539 MiB (896 MiB) | 2 |
-| i2 | `subscribe` | `.58` | Subscribe | 123 MiB (384 MiB) | 2 |
+| i2 | `onyx` | `.60` | Onyx (RAG) — **moving to `i3` 2026-11-15** (its `tank/onyx-data` volume went first) | 291 MiB (1 GiB) | 2 |
+| i3 | `pi` | `.70` | pi — **on `i3` since 2026-11-15** | 193 MiB (1 GiB) | 2 |
+| i3 | `signara` | `.44` | Signara (and the estate's one Alertmanager) — **on `i3` since 2026-11-15** | 539 MiB (896 MiB) | 2 |
+| i3 | `subscribe` | `.58` | Subscribe — **on `i3` since 2026-11-15** | 123 MiB (384 MiB) | 2 |
 | i2 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 3.99 GiB (4 GiB) | 2 |
 | i4 | `sage` | `.94` | sage | — | — |
 | i4 | `telno` | `.95` | telno | — | — |
@@ -961,6 +961,38 @@ repositories were retired with the `.46` migration, and `dev` (`.74`) went with 
 `atheniq` is the exception: it stayed, moved `i2` → `i1` → `i4` → `i2`, and is a running
 container above. The retired names are kept here only so the surveys can be read against
 each other.
+
+## Changes applied 2026-11-15 — `i2` is being reinstalled, so its containers move to `i3`
+
+**This supersedes the 2026-11-02 section below** that says the estate is three Incus hosts and
+everything formerly on `i3` runs on `i2`. `i3` is a host again (§12.1 of
+`docs/estate-rebalance-2026-11-15.md`) and is now taking `i2`'s containers while `i2` is rebuilt.
+
+Moved, at the **same addresses** (nothing dials by host): `subscribe` `.58`, `pi` `.70`,
+`distro` `.61`, `magnate` `.57`, `copilotkit` `.114`, `signara` `.44` — each verified by ping from
+`i1` after the cutover. `onyx` `.60` follows on the tar path. **`proxy` `.71` has not moved** and is
+the one to plan: it is the edge, the identity provider, NPM and the authoritative DNS.
+
+Four things had to change on `i3` before a single container could move, and each is worth knowing
+before the next host rebuild:
+
+- **`br0`.** Every i2 container is `nictype: bridged parent: br0` with its LAN address pinned
+  *inside* the container, so a target without a LAN bridge loses the address. `br0` took over
+  `enp2s0` carrying `.53`, **same MAC** (`10:78:d2:9a:0d:52`), applied with an armed rollback.
+- **`i2`'s profiles.** `default`, `docker`, `large`, `medium`, `small` were exported, `pool: fast`
+  rewritten to `pool: incus`, and re-applied; `default` now matches i2's (`root` on `incus`,
+  `eth0` on `br0`). Without `docker` the first copy aborted outright.
+- **A `tank` pool.** `onyx` mounts a custom volume from pool `tank`, which existed only on `i2`;
+  `incus storage create tank zfs source=incus/tank` gives `i3` the same name on the existing
+  zpool (the volume itself is 58 MiB of a 79 GiB pool).
+- **Cross-host trust.** The certificate was never the problem — `incus remote add … --auth-type=tls`
+  is. `oncus copy` now works from `i3` against `i2src:`.
+
+**Two failures in the move that are properties of these containers, not of the hosts.** A
+container's `eth0` may live in a profile rather than in its config (`signara` came up with no LAN
+NIC at all and needed the device added by hand), and **`netplan apply` cannot be used inside these
+containers** — it aborts on `udevadm control --reload`, since there is no udev to reload;
+`netplan generate` + `systemctl restart systemd-networkd` is the equivalent that works.
 
 ## Findings
 

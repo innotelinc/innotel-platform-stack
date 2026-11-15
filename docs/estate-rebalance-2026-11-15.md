@@ -760,9 +760,63 @@ container per iteration.
 |---|---|---|---|---|
 | `subscribe` | `.58` | 384 MiB → 384 MiB | RUNNING | ping 3/3 from i1, ARP `REACHABLE` |
 | `pi` | `.70` | 384 MiB → 384 MiB | RUNNING | reported `.70` on `eth0`; 1.35 GB transferred |
+| `distro` | `.61` | 512 MiB → 512 MiB | RUNNING | ping 3/3 from i1 |
+| `magnate` | `.57` | 512 MiB → 512 MiB | RUNNING | ping 3/3 from i1 |
+| `copilotkit` | `.114` | **10 GiB → 4 GiB** | RUNNING | ping 3/3 from i1 |
+| `signara` | `.44` | 1 GiB → 1 GiB | RUNNING | ping 3/3 from i1 |
+| `onyx` | `.60` | 768 MiB → 768 MiB | **in progress** | see 14.3.1 |
 
-Both sources are **stopped on i2, not deleted** — nothing is removed until the reinstall, and the
-old rootfs stays as the fallback copy.
+Every source is **stopped on i2, not deleted** — nothing is removed until the reinstall, and the
+old rootfs stays as the fallback copy. Measured transfer rate across the six: **36–40 MB/s**
+(1.35 GB took 36 s; 36.1 G of `proxy` is therefore ~17 min of copying, before its boot).
+
+#### 14.3.1 Two containers did not move on the first attempt, for reasons worth keeping
+
+**`onyx` — a device on a storage pool the target did not have.** The copy aborted before creating
+anything:
+
+```
+Failed add validation for device "onyx-data": Failed to get storage pool "tank": Storage pool not found
+```
+
+The container mounts a custom volume (`tank/onyx-data`) at `/mnt/onyx`, and **`tank` exists on i2
+only** (`default`, `fast`, `tank` there; `incus` here). The volume is small — i2's `tank` reports
+**58.04 MiB used of 79.16 GiB** — so the cost was not the data but the name. Fixed by creating a
+matching pool on i3 backed by a dataset of the existing zpool (`incus storage create tank zfs
+source=incus/tank`), which keeps the device definition valid without a second block device, then
+`incus storage volume copy i2src:tank/onyx-data tank/onyx-data` (**VOLUME_OK**).
+
+**The instance copy then failed a second time, and the reason was not the pool.** The zfs send
+died at **6.55 GB** with `Failed migration on target … zfs send failed: signal: broken pipe`.
+Two attempts, same shape, so `onyx` moved to the tar path instead — `incus export` on i2, `rsync`
+the tar to i3, `incus import … --storage incus` — which does not use a cross-host zfs stream at
+all. *The `incusd` unit that `systemctl is-active` reports as `inactive` is `incusd.service`, which
+does not exist on this build; the daemon is `incus.service` and was active throughout. That
+misread cost a detour and is recorded so nobody repeats it.*
+
+**`signara` — a NIC that lived in a profile and a netplan that needs udev.** It came up with **no
+LAN address at all**, only its docker bridges:
+
+```
+signara,RUNNING,"172.19.0.1 (br-b48b1f1033a0)
+```
+
+Its `eth0` is defined nowhere in its own config — it comes from profile `default` (its profiles are
+`default`, `docker`, `medium`) — and the copy did not reproduce it: `incus config show` listed
+`root` and nothing else, and inside the container `ip -br link` showed only the four docker veths.
+Adding it explicitly (`incus config device add signara eth0 nic nictype=bridged parent=br0`)
+created the interface but **still no address**, because `netplan apply` inside a container aborts
+before configuring anything:
+
+```
+subprocess.CalledProcessError: Command '['udevadm', 'control', '--reload']' returned non-zero exit status 1
+```
+
+There is no udev in the container to reload. `netplan generate` + `systemctl restart
+systemd-networkd` applies the same config without the udev step, and `.44` came up (`192.168.1.44/24
+on eth0`, 3/3 from i1). **The lesson generalises: on this estate a container's NIC may live in a
+profile rather than its config, and `netplan apply` is not usable inside these containers** — the
+two-host pattern that worked for six containers does not cover either case.
 
 *One host-local oddity, written down so it is not mistaken for a fault later:* i3's **host** cannot
 ping `.58` (`ip neigh` shows `FAILED`) while **i1** pings it 3/3 with a REACHABLE ARP entry, and
