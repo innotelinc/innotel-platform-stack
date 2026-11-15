@@ -58,12 +58,14 @@ CHECK = "estate_inventory"
 
 #: The estate as it should be: name → address, and the storage pools each host may have.
 #: Cross-checked against docs/container-placement.md — a change here is a change there.
-#: `i3` was retired on 2026-11-02 (its containers were copied to `i2`), so it is no longer
-#: a host this check can assert anything about. Leaving it here made the whole run exit 2:
-#: a host that does not answer is never silence.
+#: `i3` was retired on 2026-11-02 and **returned on 2026-11-15** (rebuilt, Ubuntu 26.04.1,
+#: Incus 6.0.5), so it is a host this check asserts against again. The 2026-11-02 lesson
+#: still holds in both directions: a host left here after it is gone makes the whole run
+#: exit 2, because a host that does not answer is never silence.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
     "i2": "root@192.168.1.52",
+    "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
 
@@ -76,6 +78,11 @@ POOLS: dict[str, set[str]] = {
     "i1": {"incus"},
     # `tank` came over with `i3`'s containers on 2026-11-02; measured on i2 the same day.
     "i2": {"default", "fast", "tank"},
+    # `incus` (zfs, 362 G) holds the container rootfs; `tank` was created on 2026-11-15
+    # because `onyx` mounts a custom volume named `tank/onyx-data` and a container's device
+    # is validated against the pool's name, not its size. It is a dataset of the same
+    # zpool (`source=incus/tank`), not a second disk.
+    "i3": {"incus", "tank"},
     "i4": {"default", "tank"},
 }
 
@@ -88,6 +95,7 @@ OPTIONAL: set[str] = set()
 ROLE: dict[str, str] = {
     "i1": "estate (edge — every address is dialled here)",
     "i2": "estate (apps, mail, media, monitoring, signing)",
+    "i3": "estate (displacement target since 2026-11-15 — six of i2's containers, on br0)",
     "i4": "estate (terminal, vault, vpn, sage, telno — bridged on br-lan)",
 }
 

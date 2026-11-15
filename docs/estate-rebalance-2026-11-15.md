@@ -912,3 +912,78 @@ would not.
 - **i2's pool must not be touched while its containers are still the fallback.** `fast` is at
   70 % with 88.3 G free; the stopped rootfs copies are the only rollback path until the reinstall
   wipes them. Nothing on i2 is deleted as part of this move.
+
+---
+
+## 15. The edge to i4's NVMe — a plan, and the measurement that says not yet
+
+**Nothing has been moved.** This section is the preflight for `proxy` (`.71`) and the one number
+that stops it short.
+
+### 15.1 What actually has to travel
+
+`proxy` is not one rootfs. Its config, measured on i2:
+
+| Piece | Where it is now | Size | What breaks if it is missed |
+|---|---|---|---|
+| `root` | pool `fast`, declared **`size: 65GiB`** | **36.1 G used** | i4 has no `fast` pool — the device must be repointed to `tank` or the copy validates and then fails |
+| `eth0` | `nictype: bridged`, **`parent: br0`**, pinned MAC | — | i4's LAN bridge is **`br-lan`**, not `br0`; the NIC must be repointed or the edge comes up dark on `.71` |
+| `raw-mount` → `/data` | **host path** `/usr/src/proxy/data` | **140 M** | NPM's 209 `proxy_host` confs and its data live here; an empty `/data` is a running edge with no doors |
+| `site` → `/usr/src/innotel-site` | host path | 92 K | the site deploy targets |
+| `sitedeploy` → `/usr/src/innotel-deploy` | host path | 20 K | the deploy door |
+
+Those three host paths are **bind mounts, not storage volumes** — `incus copy` carries the device
+*definitions*, not the data behind them, so they have to be `rsync`ed to i4 separately or the copy
+starts with empty directories.
+
+Good news, verified on i4: it already has the `default` profile with **`eth0` on `br-lan`** and
+`root` on `tank`, and the `docker` profile with `security.nesting` — the two profiles `proxy`
+references. The copy's config surgery is therefore two settings, not a rebuild.
+
+### 15.2 The blocker: i4 has the disk and not the RAM
+
+| | i4 (measured 2026-11-15) | `proxy` |
+|---|---|---|
+| Memory total | **7 341 MiB** | cap 7 424 MiB |
+| Memory in use | 4 220 MiB | **live 4.84 GiB** |
+| Memory available | **3 121 MiB** | needs 4.84 GiB |
+| Swap | 4 G file, **1.2 G already used** | — |
+| `/` free | 132 G | 36.1 G |
+
+**3.1 GiB available against a 4.84 GiB working set is a ~1.7 GiB deficit**, and the only place for
+it is a 4 G swap file that is already a third consumed. i4 already runs `vault` (1.14 GiB), `sage`
+(1.01 GiB), `terminal` (489 MiB), `telno`, `telno-turn`, `vpn` and `ontrak-tix-db` (284 MiB).
+
+The NVMe is the right *disk* for the edge and i4 is the wrong *size* for it today. Putting the
+estate's identity provider, NPM and **authoritative DNS** on a host that will swap under load is
+how a 20-minute window turns into an afternoon of 502s, so this is the decision point rather than
+a step to push through:
+
+1. **Free ~2 GiB on i4 first** — move `vault` (1.14 GiB) and `sage` (1.01 GiB) elsewhere and the
+   edge fits with headroom. Those two are now candidates for i3's RAM, which has 15.4 GiB.
+2. **Put `proxy` on i3 instead** — 15 403 MiB and 4 threads, so memory and CPU are comfortable and
+   the only cost is §11's F1: a 5 400 rpm disk under the estate's write-heaviest container. Slower,
+   but it does not swap.
+3. **Proceed on i4 as-is** — not recommended, and not something to do quietly.
+
+### 15.3 The window, and the rollback at every step
+
+Whichever host it goes to, the sequence is the same and the source is never deleted:
+
+| # | Step | Rollback if it fails |
+|---|---|---|
+| 0 | **Preflight, no outage:** `rsync` the three host paths to the target, compare sizes; capture `incus config show proxy` to `/root/proxy-config-before.txt`; confirm the target's `default`/`docker` profiles and bridge | nothing to roll back — the edge never stopped |
+| 1 | Stop `proxy` on i2 → **every public name and the estate's DNS go dark together** | `incus start proxy` on i2, ~30 s |
+| 2 | Copy: `incus copy i2src:proxy proxy --storage <pool>` (measured **36–40 MB/s**, so **~17 min** for 36.1 G) | `incus start proxy` on i2; delete the partial copy |
+| 3 | Fix the two settings — `root` pool → the target's pool, `eth0 parent` → the target's bridge — then start | stop the copy; `incus start proxy` on i2 |
+| 4 | Verify in this order: `ping .71` → NPM admin on `:81` → **Technitium answers a zone query** → Authentik discovery document → one public name end to end | stop the copy; `incus start proxy` on i2 |
+| 5 | Leave the i2 copy **stopped for a week**, not deleted | — |
+
+**Rollback is one command and it is the same at every step:** `incus start proxy` on i2 restores the
+edge with the address, the config and the data it had a minute earlier, because nothing on i2 was
+deleted, moved or edited. The `.71` address and the router's port-forwards never change, so DNS and
+the public doors come back as soon as the container runs — the zone's own answers depend on the
+container, not on its host.
+
+**Not done:** no window was taken and `proxy` still runs on i2. The remaining preflight is the
+`rsync` in step 0, and the open decision is which of §15.2's three options to take.

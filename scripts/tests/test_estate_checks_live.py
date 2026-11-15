@@ -135,16 +135,20 @@ ADDRESS_ROWS = {
          ("genie-preview", "192.168.1.24"), ("monarch", "192.168.1.56"),
          ("nas", "192.168.1.89"), ("ontrak", "192.168.1.21"),
          ("regcache", "192.168.1.79"), ("rizzaura", "192.168.1.62")],
-    I2: [("capstone", "192.168.1.30"),
-         # copilotkit joined i2 on 2026-11-14 (the dashboard behind the cpk names).
-         ("copilotkit", "192.168.1.114"),
+    # capstone (`.30`) has no row: it is stopped and its address is deliberately
+    # unpinned, so the fixture must not invent one back onto the host.
+    I2: [
+         # copilotkit joined i2 on 2026-11-14 (the dashboard behind the cpk names) and
+         # left again with the five others on 2026-11-15, so it is an i3 row now.
          # proxy was recreated here on 2026-10-26 and keeps the edge address.
          ("proxy", "192.168.1.71"),
-         # i3 was retired on 2026-11-02 and these eight were copied here; every
-         # address is pinned inside its container, so only the host key changed.
-         ("distro", "192.168.1.61"), ("magnate", "192.168.1.57"),
          ("monitor", "192.168.1.88"),
-         ("onyx", "192.168.1.60"), ("pi", "192.168.1.70"),
+         # `onyx` stayed when the rest moved on 2026-11-15: it mounts the USB block device.
+         ("onyx", "192.168.1.60")],
+    # i3 returned on 2026-11-15 and took six of i2's containers while i2 is reinstalled.
+    # Every address is pinned inside its container, so only the host key changed.
+    I3: [("copilotkit", "192.168.1.114"), ("distro", "192.168.1.61"),
+         ("magnate", "192.168.1.57"), ("pi", "192.168.1.70"),
          ("signara", "192.168.1.44"), ("subscribe", "192.168.1.58")],
     # i4 holds six satellites (sage, telno, telno-turn, terminal, vault, vpn); the edge
     # container itself moved to i2 and the media/business containers stay on i1. The
@@ -153,7 +157,11 @@ ADDRESS_ROWS = {
     # remembered.
     I4: [("sage", "192.168.1.94"), ("telno", "192.168.1.95"),
          ("telno-turn", "192.168.1.96"), ("terminal", "192.168.1.22"),
-         ("vault", "192.168.1.73"), ("vpn", "192.168.1.43")],
+         ("vault", "192.168.1.73"), ("vpn", "192.168.1.43"),
+         # The database answers on `.68:5432`; the container itself has been stopped
+         # since 2026-10-24 with the volume kept, and the row is what makes its absence
+         # a failure rather than a silence.
+         ("ontrak-tix-db", "192.168.1.68")],
 }
 
 
@@ -299,12 +307,13 @@ class LimitsLiveCase(LiveCase):
 
 #: i3 was retired on 2026-11-02; the estate is three hosts and a retired one in this
 #: table would make every inventory run exit 2 against a machine that cannot answer.
-INVENTORY_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i4": f"root@{I4}"}
-KNOWN_REMOTES = [I1, I2, I4]
+INVENTORY_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
+KNOWN_REMOTES = [I1, I2, I3, I4]
 
 
 def _inventory_rules(pools=None, remotes=None) -> dict:
-    pools = pools or {"i1": ["incus"], "i2": ["default", "fast", "tank"], "i4": ["default", "tank"]}
+    pools = pools or {"i1": ["incus"], "i2": ["default", "fast", "tank"],
+                      "i3": ["incus", "tank"], "i4": ["default", "tank"]}
     remotes = remotes or {host: list(KNOWN_REMOTES) for host in INVENTORY_HOSTS}
     rules = {}
     for host, target in INVENTORY_HOSTS.items():
@@ -332,7 +341,8 @@ class InventoryLiveCase(LiveCase):
 
     def test_an_unknown_pool_fails_the_run(self):
         chk = _load("check-estate-inventory")
-        pools = {"i1": ["incus"], "i2": ["default", "fast", "tank", "scratch"], "i4": ["default", "tank"]}
+        pools = {"i1": ["incus"], "i2": ["default", "fast", "tank", "scratch"],
+                 "i3": ["incus", "tank"], "i4": ["default", "tank"]}
         code, _ = self.run_check(chk, INVENTORY_HOSTS, _inventory_rules(pools=pools))
         self.assertEqual(code, 1)
 
@@ -349,7 +359,7 @@ class InventoryLiveCase(LiveCase):
 # check-host-disk: a root filesystem past the line must fail/warn the run
 ####################################################################################
 
-DISK_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i4": f"root@{I4}"}
+DISK_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
 
 
 def _disk_rules(percents: dict | None = None) -> dict:

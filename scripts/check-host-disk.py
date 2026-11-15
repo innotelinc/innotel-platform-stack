@@ -51,6 +51,10 @@ CHECK = "host_disk"
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
     "i2": "root@192.168.1.52",
+    # `i3` is a host again as of 2026-11-15 and took six of `i2`'s containers, so its `/`
+    # is now the one to watch: 98 G at 19 % before the move, on a 362 G zfs pool used for
+    # container rootfs. Its disk is also the slowest in the estate (5 400 rpm).
+    "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
 
