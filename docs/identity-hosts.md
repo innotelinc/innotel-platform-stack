@@ -49,7 +49,7 @@ after the person has already signed in correctly. That is what the Orion NAS doo
 | `scripts/conform-project.sh` | `auth.innotel.us` | template for new projects — this is where the policy is enforced |
 | `scripts/sync-mail-identities.py` | `auth.innotel.us` | default `AUTHENTIK_API_URL`; both names serve the same instance, measured by the shared client id |
 | `scripts/check-orion-signin.py` | both, canonical warned | asserts the *agreement*, not the brand |
-| the classroom gate (`classroom-sso`, `deploy/compose/atheniq-sso.yml` in `atheniq`) | `auth.innotel.us` | **half** moved 2026-11-14: the app-side gate's `--oidc-issuer-url` names the canonical host and port 3001 answers with it. The public name still answers with the cerulean one, so whatever terminates `class.atheniq.courses` is not that gate — `check-atheniq-doors.py` keeps reporting the note until that layer is found, and this table must not claim otherwise |
+| the classroom gate (`classroom-sso`, `deploy/compose/atheniq-sso.yml` in `atheniq`) | `auth.innotel.us` | moved 2026-11-14 and the check's note cleared the same day. The gate was never the problem: NPM held two hosts naming `auth.innotel.us` and served the cerulean one (see the section at the end of this file) |
 | the generation gate beside it (`generation-sso`, same file) | `auth.cerulean.innotel.us` | **not** part of that change — a separate door (`ai.lms.innotel.us`), left as it was |
 | Stalwart's directory discovery (`scripts/stalwart-oidc-discovery-proxy.py`, `stalwart-directory-watchdog.sh`, `stalwart-oidc-discovery-setup.sh`) | `auth.cerulean.innotel.us` | **captured, not chosen** — see below |
 | `docs/sso-cleanup-2026-11-02.md`, `docs/mail-sso-directory-2026-11-06.md` | `auth.cerulean.innotel.us` | incident records: they say what was measured then, and are not rewritten |
@@ -84,3 +84,34 @@ the 500-at-the-callback class; `redirect_wrong_brand` is the drift as soon as it
 The edge side of the Orion change — what to re-run, in what order, and why the redirect the
 running process emits is what proves it rather than the env file — is
 [orion-issuer-apply.md](orion-issuer-apply.md).
+
+## Two edge faults found while clearing the classroom's note (2026-11-14)
+
+`check-atheniq-doors.py` kept reporting `issuer_alias` for `class.atheniq.courses` long
+after the gate itself was moved. The gate was not the cause. NPM held **two** proxy hosts
+naming `auth.innotel.us` — 35 (the cerulean record) and 37 — and nginx says so itself on
+every config test: `conflicting server name "auth.innotel.us" on 0.0.0.0:80, ignored`.
+The first one loaded serves the name, so the door answered with the cerulean issuer while
+`192.168.1.59:3001` answered `auth.innotel.us` to a direct request. Dropping the name from
+host 35 (it keeps `auth.cerulean.innotel.us`) made the public door answer
+`https://auth.innotel.us/application/o/authorize/…`, and the check went to
+`0 failure(s), 0 warning(s), 1 note(s)`; the remaining note is `alias_moved`, which is the
+documented end state for a retired name.
+
+The same duplicate explains the mail mirror's `exit-code 2`, which had been retrying
+quietly. From inside the `mail` container a handshake with `auth.innotel.us` returned
+`21 (unable to verify the first certificate)` while the same handshake from the edge
+returned `0`; the name was being served by the cerulean host record. Two changes closed it:
+
+* the mirror now reads Authentik at `http://192.168.1.71:9000`, the LAN listener the edge
+  proxies to, instead of over public TLS. That is the same shape as its `STALWART_URL` and
+  takes certificate trust out of the path. Backup of the old file:
+  `/etc/innotel/mail-identities.env.bak-*` in the container. First run afterwards:
+  `Result=success ExecMainStatus=0`.
+* certificate 157 (`ai`, `catalog`, `learn` — no `classroom.`) was issued and hosts 291 and
+  289 moved onto it; 128 was deleted once no host referenced it. The served SANs for all
+  three names now list exactly those three, which finishes the retirement's fourth step.
+
+Worth knowing before the next identity change: a test that passes on the edge can fail on a
+container because *which* host record wins is decided by load order, not by the API's
+listing. `nginx -t` names the conflict; the API does not.

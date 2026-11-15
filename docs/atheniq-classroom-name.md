@@ -97,12 +97,14 @@ warning. Both classroom names are consistently on one identity host, which is th
 requirement [identity-hosts.md](identity-hosts.md) states; the brand is the estate's
 direction. It is a note because `EstateCheckNotPinned` pages on a warning older than an
 hour, and this one cannot clear until the provider changes — a page that cannot end is one
-people learn to close. (On 2026-11-14 the **app-side** gate was moved to `auth.innotel.us`: `classroom-sso`'s
-`--oidc-issuer-url` and `192.168.1.59:3001` agree. The name still answers publicly with the
-cerulean issuer — ten of ten requests, from inside the edge and from outside it — so the
-layer that terminates `class.atheniq.courses` is not the gate on 3001. The note keeps
-firing, which is correct: it is reporting a door that has not moved, not a check that is
-stale.)
+people learn to close. (On 2026-11-14 the gate was moved to `auth.innotel.us`, but the note did not clear
+until the edge stopped serving a **second** host that also claimed `auth.innotel.us`: nginx
+logged `conflicting server name "auth.innotel.us"` and answered with the cerulean record.
+With that name removed from the duplicate, the public door answers
+`https://auth.innotel.us/application/o/authorize/…` and the check reports
+`0 failure(s), 0 warning(s), 1 note(s)` — the note being `alias_moved`, the end state.
+The measurements above stay as taken; see [identity-hosts.md](identity-hosts.md) for the
+duplicate-host failure, which also kept the mail mirror failing.)
 
 For the alias it accepts exactly two states and no third: **gated the same way**, or
 **redirecting to the classroom** (published as a `note`, so the retirement is visible on the
