@@ -40,6 +40,17 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-inventory.py
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-address-latency.py --prom ${TEXTFILE_DIR}/estate-check-address-latency.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-host-disk.py --prom ${TEXTFILE_DIR}/estate-check-host-disk.prom
 
+# And that a container's PID 1 is actually reaping (2026-11-15). Two containers leaked
+# zombies for weeks and nothing reported it: `openmaic-mineru` on i1 and `linkwarden` on
+# i4 each ran a supervisor as PID 1 that never called `wait()`, so every lost child stayed
+# in the table. Neither was broken enough to page — the containers answered and every
+# check above passed — but the leak is monotonic, and a `pids` limit is what eventually
+# fails. The fix was `init: true` in both compose files; this counts the symptom, because
+# that fix is a file on two hosts and nothing else would notice it being reverted. The
+# warning line sits above i2's one deliberate `epmd` zombie (a k3s pod with no `kubectl`
+# to change it), so a normal host stays quiet. Reads `i3` too: it is an estate host again.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-zombie-processes.py --prom ${TEXTFILE_DIR}/estate-check-host-zombies.prom
+
 # And that a mountpoint is still the thing it is named for. On 2026-11-14 the vault's USB
 # drive dropped off the bus and came back as a different device node: `srv-vault.mount`
 # went inactive, `/srv/vault` stayed as an empty directory, and the read-only view, the
