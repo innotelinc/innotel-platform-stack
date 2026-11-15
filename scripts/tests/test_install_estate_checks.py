@@ -20,8 +20,11 @@ twice.
 """
 from __future__ import annotations
 
+import os
 import re
+import stat
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -110,6 +113,153 @@ class InstallerCase(unittest.TestCase):
                               check=False, cwd="/", env={"PATH": "/usr/bin:/bin"})
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.split(), self.files)
+
+
+class DriftGuard(unittest.TestCase):
+    """What lands has to be the revision's copy, not merely *a* copy of it.
+
+    A copy can be right in every run and still be the wrong file — an uncommitted edit, a
+    checkout on a branch, or a deployed check silently replaced an hour after it landed.
+    None of that shows up in the checks themselves, so the installer holds every file it
+    lands to `scripts/<name>` at the revision, and `--verify` repeats the comparison later.
+    These tests drive both halves against a throwaway install directory.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.dest = Path(self.dir.name) / "installed"
+        # The unit goes somewhere that is not /etc during a test: installing it into the live
+        # directory would make the suite rewrite the host's own job.
+        self.unit_dest = Path(self.dir.name) / "systemd"
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def run_installer(self, *args: str) -> "subprocess.CompletedProcess[str]":
+        env = dict(os.environ, DEST=str(self.dest), UNIT_DEST=str(self.unit_dest))
+        return subprocess.run(["bash", str(INSTALLER), *args], capture_output=True,
+                              text=True, check=False, env=env)
+
+    def install(self) -> None:
+        done = self.run_installer("--ref", "HEAD")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_a_fresh_install_verifies_clean(self):
+        self.install()
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("DRIFT", done.stderr)
+
+    def test_a_check_that_changed_after_the_install_is_named(self):
+        self.install()
+        target = self.dest / "check-alert-delivery.py"
+        target.write_text(target.read_text(encoding="utf-8") + "\n# hand edit\n", encoding="utf-8")
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("DRIFT", done.stderr)
+        self.assertIn("check-alert-delivery.py", done.stderr)
+
+    def test_a_check_the_revision_dropped_is_drift_too(self):
+        self.install()
+        (self.dest / "check-retired-thing.py").write_text("# retired\n", encoding="utf-8")
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("check-retired-thing.py", done.stderr)
+
+    def test_drift_is_accepted_only_when_said_out_loud(self):
+        self.install()
+        (self.dest / "check-alert-delivery.py").write_text("# replaced\n", encoding="utf-8")
+        accepted = self.run_installer("--verify", "--ref", "HEAD", "--allow-drift")
+        self.assertEqual(accepted.returncode, 0)
+        self.assertIn("allow-drift", accepted.stderr)
+
+    def test_reinstalling_clears_the_drift(self):
+        self.install()
+        (self.dest / "check-alert-delivery.py").write_text("# replaced\n", encoding="utf-8")
+        self.install()
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_a_revision_it_cannot_resolve_is_refused(self):
+        # Failing open would print `ok` for a copy it never compared, which is worse than
+        # having no guard at all.
+        done = self.run_installer("--verify", "--ref", "no-such-revision")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("cannot resolve", done.stderr)
+
+    def test_verify_without_an_install_directory_is_refused(self):
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("no install directory", done.stderr)
+
+    def test_the_unit_is_installed_beside_the_checks(self):
+        # The unit and the checks are one list in two files. A unit left in a checkout is a
+        # timer running yesterday's ExecStart lines beside today's scripts, and every check
+        # still reports: the drift this whole file is about, one file over.
+        self.install()
+        installed = self.unit_dest / "estate-checks.service"
+        self.assertEqual(installed.read_bytes(), UNIT.read_bytes())
+        self.assertEqual(stat.S_IMODE(installed.stat().st_mode), 0o644)
+
+    def test_the_timer_travels_with_the_unit(self):
+        # A service installed without its timer never runs, and that is silent.
+        self.install()
+        self.assertEqual((self.unit_dest / "estate-checks.timer").read_bytes(),
+                         (ROOT / "systemd" / "estate-checks.timer").read_bytes())
+
+    def test_a_unit_that_changed_after_the_install_is_named(self):
+        self.install()
+        target = self.unit_dest / "estate-checks.service"
+        target.write_text(target.read_text(encoding="utf-8") + "\n# hand edit\n",
+                          encoding="utf-8")
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("DRIFT", done.stderr)
+        self.assertIn("estate-checks.service", done.stderr)
+
+    def test_a_unit_missing_beside_the_checks_is_named(self):
+        self.install()
+        (self.unit_dest / "estate-checks.service").unlink()
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("MISSING", done.stderr)
+        self.assertIn("estate-checks.service", done.stderr)
+
+    def test_an_install_that_changes_nothing_leaves_the_unit_alone(self):
+        # Rewriting identical bytes bumps the mtime, systemd reads that as a changed unit,
+        # and `NeedDaemonReload=yes` on a host where nothing moved is the kind of standing
+        # warning that teaches people to ignore the warning.
+        self.install()
+        installed = self.unit_dest / "estate-checks.service"
+        before = installed.stat()
+        second = self.run_installer("--ref", "HEAD")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        after = installed.stat()
+        self.assertEqual((after.st_mtime_ns, after.st_ino), (before.st_mtime_ns, before.st_ino))
+        self.assertIn("(unchanged)", second.stdout)
+
+    def test_an_install_starts_nothing(self):
+        # Reloading re-reads the text; starting is what would hide the 203/EXEC the checklist
+        # is about, and that stays a person's step. A fake `systemctl` on PATH is the only way
+        # to see a call the script makes without waiting for one it does not.
+        fake = Path(self.dir.name) / "bin"
+        fake.mkdir()
+        marker = Path(self.dir.name) / "systemctl-called"
+        (fake / "systemctl").write_text(f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> {marker}\n",
+                                          encoding="utf-8")
+        (fake / "systemctl").chmod(0o755)
+        env = dict(os.environ, DEST=str(self.dest), UNIT_DEST=str(self.unit_dest),
+                   PATH=f"{fake}:{os.environ['PATH']}")
+        done = subprocess.run(["bash", str(INSTALLER), "--ref", "HEAD"], capture_output=True,
+                              text=True, check=False, env=env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertFalse(marker.exists(), "the installer called systemctl")
+        self.assertIn("systemctl start estate-checks.service", done.stdout)
+
+    def test_an_unknown_argument_is_refused(self):
+        done = self.run_installer("--yes-please")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("unknown argument", done.stderr)
 
 
 if __name__ == "__main__":

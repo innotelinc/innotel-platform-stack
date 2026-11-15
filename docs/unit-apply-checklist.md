@@ -19,13 +19,18 @@ per piece that says it landed rather than that it was copied.
    from the unit's own `ExecStart=` lines (the scripts *and* the tables passed to
    `--pins/--expect`), adds the shared `estate_check.py` and the sibling files a check
    reads, and prints `MISSING`/`FAIL` rather than exiting 0 over a copy that did not land.
+   It also installs `systemd/estate-checks.{service,timer}` into `/etc/systemd/system` and
+   reloads systemd, so the unit and the scripts it names cannot be applied from different
+   revisions — and `--verify` checks both halves.
 3. **The env file, before `enable --now`.** `EnvironmentFile=-` is *optional* on purpose
    in most units, so a missing credential does not stop the job — it makes it fail
    differently. `estate-notify` is the exception: with no `/etc/innotel/ntfy.env` it exits
    `CANNOT RUN` rather than pretend to have notified anyone. Every one is `0600`.
 4. **The unit and its timer**, into `/etc/systemd/system`, then `systemctl daemon-reload`.
    A unit edited in place without the reload keeps running the old text, which is why a
-   fixed `ExecStart=` can look unfixed.
+   fixed `ExecStart=` can look unfixed. For `estate-checks` step 2 already did this (its
+   unit directory defaults to `/etc/systemd/system`), so there is nothing left to copy —
+   only `systemctl cat estate-checks.service` to see that the text is the one you meant.
 5. **`systemctl enable --now`**, then force one run rather than waiting for the cadence:
    `systemctl start <unit>` and read `systemctl show -p Result -p ExecMainStatus <unit>`.
    The status is the verdict; "active" is only whether it is still going.
