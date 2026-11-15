@@ -231,13 +231,13 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-traffic.py --p
 # is why the dashboard's "Checks reporting" number was one behind the unit's own list.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stuck-processes.py --prom ${TEXTFILE_DIR}/estate-check-stuck-processes.prom
 
-# The two doors carried over the reverse tunnel from 192.168.1.93 (2026-11-03):
-# `deploy.innotel.us` (Coolify, 172.18.0.1:8090) and `fax-staging.lab.innotel.us`
-# (172.18.0.1:8091). Inbound to .93 is proxied by the Windows box at .17, which
-# dropped about half the connects; the VM itself looked healthy throughout. Asks
-# three things that fail separately and silently: the name answers over HTTPS with
-# the panel's own page, the edge's tunnel listener is up, and the certificate has
-# runway left. See check-deploy-door.py.
+# The two doors that were carried over the reverse tunnel from 192.168.1.93 until the
+# guest was retired on 2026-11-14: `deploy.innotel.us` (Coolify, 172.18.0.1:8090) and
+# `fax-staging.lab.innotel.us` (172.18.0.1:8091). Inbound to .93 was proxied by the
+# Windows box at .17, which dropped about half the connects; the VM itself looked
+# healthy throughout, which is what the check was written for. With the guest gone and
+# both proxy hosts deleted, the check now reports the retirement as a note — it keeps
+# its place here so the series does not disappear silently. See check-deploy-door.py.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-deploy-door.py --prom ${TEXTFILE_DIR}/estate-check-deploy-door.prom
 
 # And that the Telno node still holds the records its legacy database has (2026-11-02).

@@ -103,10 +103,14 @@ quietly. From inside the `mail` container a handshake with `auth.innotel.us` ret
 `21 (unable to verify the first certificate)` while the same handshake from the edge
 returned `0`; the name was being served by the cerulean host record. Two changes closed it:
 
-* the mirror now reads Authentik at `http://192.168.1.71:9000`, the LAN listener the edge
-  proxies to, instead of over public TLS. That is the same shape as its `STALWART_URL` and
-  takes certificate trust out of the path. Backup of the old file:
-  `/etc/innotel/mail-identities.env.bak-*` in the container. First run afterwards:
+* the mirror keeps HTTPS, and the container pins the name to the LAN edge:
+  `/etc/hosts` gained `192.168.1.71 auth.innotel.us` (backup `/etc/hosts.bak-*`), and
+  `AUTHENTIK_API_URL` stayed `https://auth.innotel.us`. This is not a workaround for the
+  chain — from inside that container the *public* address hairpins to a different edge and
+  answers `CN = auth.cerulean.innotel.us`, which is a name mismatch, while the LAN edge
+  answers `CN = innotel.us` with `Verify return code: 0`. Going through the edge the
+  estate actually runs is both correct and verifiable; it is the public hairpin that is
+  wrong, and it is a router question, not a certificate one. First run afterwards:
   `Result=success ExecMainStatus=0`.
 * certificate 157 (`ai`, `catalog`, `learn` — no `classroom.`) was issued and hosts 291 and
   289 moved onto it; 128 was deleted once no host referenced it. The served SANs for all
