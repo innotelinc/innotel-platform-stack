@@ -1551,3 +1551,23 @@ Still open:
   the one instance this rebalance was supposed to start with is the one still on `i1`.
 - `blueprint`, `regcache` and `clearpath` report `RUNNING` on `i2` while not answering, even from
   `i2` itself, which means their guests lost networking rather than their instances stopping.
+
+### The network regression on i2 was a bridge mismatch, not a guest failure
+
+`blueprint`, `clearpath` and `regcache` reported `RUNNING` with correct addresses on `eth0` and
+still could not reach the gateway from inside, while `rizzaura` on the same host was fine. The
+host side explains it:
+
+```
+20: veth3bd442fc@if19: ... master br0        <- rizzaura
+29: vethb2598520@if28: ... master incusbr0   <- blueprint
+31: vethce6c4caa@if30: ... master incusbr0   <- regcache
+33: veth8747a217@if32: ... master incusbr0   <- clearpath
+```
+
+Their veths were enslaved to `incusbr0` (the bridge Incus creates by name default), not `br0`,
+so their traffic never left the host. A guest with a valid address, an `UP` link and 100% packet
+loss to its own gateway is a bridge membership problem on the host, and restarting the guest
+cannot fix it — a restart recreates the veth on the same wrong bridge. The fix is the device
+parent (`incus config device override <instance> eth0 parent=br0`), which persists, rather than
+moving the live veth, which does not.
