@@ -71,7 +71,8 @@ END = "# END estate-check-hosts"
 #: a live one that is missing here is a host the scheduled checks cannot reach at all.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
-    # `i2` was decommissioned on 2026-11-16 (`docs/estate-rebalance-2026-11-15.md` §19) and is
+    "i2": "root@192.168.1.52",
+    # `i2` is up and running on 2026-11-16 (owner) (`docs/estate-rebalance-2026-11-15.md` §19) and is
     # out of this table: the block it writes is what the scheduled checks reach hosts with, so
     # a host here that cannot answer is a check that waits 25 seconds to say so. A replacement
     # host joins here the day it has an address.

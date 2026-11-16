@@ -94,6 +94,7 @@ CHECK = "address_latency"
 #: since 2026-10-09; on `i4` before that, which is where the WiFi-hop reading came from).
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
+    "i2": "root@192.168.1.52",
     # `i2` (192.168.1.52) was **decommissioned on 2026-11-16** and is not read any more
     # (`docs/estate-rebalance-2026-11-15.md` §19). Its row is deleted rather than marked
     # optional: a host named here that cannot answer is a failure, not a warning, so

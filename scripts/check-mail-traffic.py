@@ -70,7 +70,8 @@ CHECK = "mail_traffic"
 #: Where each estate host is reachable — the same table the other checks read.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
-    # `i2` was decommissioned on 2026-11-16 (`docs/estate-rebalance-2026-11-15.md` §19); it
+    "i2": "root@192.168.1.52",
+    # `i2` is up and running on 2026-11-16 (owner) (`docs/estate-rebalance-2026-11-15.md` §19); it
     # never ran the mail server, which lives on `i1`.
     # `i3` is a host again as of 2026-11-15. It does not run the mail server either, but this
     # check finds its container by asking each host what it runs, so the table has to be

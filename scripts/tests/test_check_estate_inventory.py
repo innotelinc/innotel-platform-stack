@@ -37,7 +37,7 @@ inv = _load()
 #: 2026-11-15 when the host returned: a trusted host the inventory does not name is a
 #: failure, and so is a host the inventory names but no one trusts. `192.168.1.52` (`i2`)
 #: left on 2026-11-16 when the host was decommissioned.
-ALL_KNOWN_REMOTES = ["192.168.1.51", "192.168.1.53", "192.168.1.54"]
+ALL_KNOWN_REMOTES = ["192.168.1.51", "192.168.1.52", "192.168.1.53", "192.168.1.54"]
 
 
 def views(overrides=None):

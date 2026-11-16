@@ -50,7 +50,8 @@ CHECK = "host_disk"
 #: Where each estate host is reachable — the same table the other checks read.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
-    # `i2` was decommissioned on 2026-11-16 (`docs/estate-rebalance-2026-11-15.md` §19), so
+    "i2": "root@192.168.1.52",
+    # `i2` is up and running on 2026-11-16 (owner) (`docs/estate-rebalance-2026-11-15.md` §19), so
     # there is no `/` there to watch; the host this check now cares about most is `i3`.
     # `i3` is a host again as of 2026-11-15 and took six of the containers that were on
     # is now the one to watch: 98 G at 19 % before the move, on a 362 G zfs pool used for

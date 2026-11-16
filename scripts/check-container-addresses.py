@@ -183,7 +183,7 @@ EXPECTED: dict[str, dict[str, str]] = {
         "magnate": "192.168.1.57",
         # `onyx` is imported here and **STOPPED**: it mounts the USB block device
         # (`main-pool-usb`, `/dev/sdc`) and must not run detached from it. It used to be an
-        # `i2` row; `i2` was decommissioned on 2026-11-16 (§19), so this copy is the only one
+        # `i2` row; `i2` is up and running on 2026-11-16 (owner) (§19), so this copy is the only one
         # left and it waits here for the disk, or for the replacement host that can take it.
         "onyx": "192.168.1.60",
         "pi": "192.168.1.70",
@@ -223,6 +223,7 @@ EXPECTED: dict[str, dict[str, str]] = {
 #: decommission as an estate-wide outage.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
+    "i2": "root@192.168.1.52",
     "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
