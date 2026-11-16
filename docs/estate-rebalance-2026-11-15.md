@@ -915,10 +915,13 @@ would not.
 
 ---
 
-## 15. The edge to i4's NVMe — a plan, and the measurement that says not yet
+## 15. The edge to i4's NVMe — executed 2026-11-15, 27 minutes dark
 
-**Nothing has been moved.** This section is the preflight for `proxy` (`.71`) and the one number
-that stops it short.
+**Moved on 2026-11-15.** `proxy` has run on `i4` since 18:57 EDT. The window it cost was the copy,
+not the start — **18:30 → 18:57**, 27 minutes in which every public name and the estate's DNS were
+dark together. The preflight in 15.1 was right about the three bind mounts and the two config
+settings, and the 15.2 deficit was paid by moving `vault` and `sage` to `i1` first, measured rather
+than estimated.
 
 ### 15.1 What actually has to travel
 
@@ -940,7 +943,7 @@ Good news, verified on i4: it already has the `default` profile with **`eth0` on
 `root` on `tank`, and the `docker` profile with `security.nesting` — the two profiles `proxy`
 references. The copy's config surgery is therefore two settings, not a rebuild.
 
-### 15.2 The blocker: i4 has the disk and not the RAM
+### 15.2 The deficit, and how it was closed
 
 | | i4 (measured 2026-11-15) | `proxy` |
 |---|---|---|
@@ -954,17 +957,19 @@ references. The copy's config surgery is therefore two settings, not a rebuild.
 it is a 4 G swap file that is already a third consumed. i4 already runs `vault` (1.14 GiB), `sage`
 (1.01 GiB), `terminal` (489 MiB), `telno`, `telno-turn`, `vpn` and `ontrak-tix-db` (284 MiB).
 
-The NVMe is the right *disk* for the edge and i4 is the wrong *size* for it today. Putting the
-estate's identity provider, NPM and **authoritative DNS** on a host that will swap under load is
-how a 20-minute window turns into an afternoon of 502s, so this is the decision point rather than
-a step to push through:
+**The deficit closed, and the numbers are the record.** `vault` (1 166 MiB live, 9.3 G rootfs) and
+`sage` (1 034 MiB, 3.7 G) were stopped on i4 and `free -m` moved from **3 104 MiB available to
+4 701 MiB** in the same minute — 1 597 MiB back, which covers `proxy`'s 4 977 MiB working set once
+its own page cache (the 37 G of sites and certs) is counted as reclaimable rather than resident.
+Both were shut down in place, copied to `i1` over a TLS remote, and started there:
 
-1. **Free ~2 GiB on i4 first** — move `vault` (1.14 GiB) and `sage` (1.01 GiB) elsewhere and the
-   edge fits with headroom. Those two are now candidates for i3's RAM, which has 15.4 GiB.
-2. **Put `proxy` on i3 instead** — 15 403 MiB and 4 threads, so memory and CPU are comfortable and
-   the only cost is §11's F1: a 5 400 rpm disk under the estate's write-heaviest container. Slower,
-   but it does not swap.
-3. **Proceed on i4 as-is** — not recommended, and not something to do quietly.
+| Step | What it took | Evidence |
+|---|---|---|
+| trust | `i1`'s client certificate added to i4's trust store, then `incus remote add i4src … --auth-type=tls --accept-certificate` on `i1` | the OIDC remote cannot authenticate without a device flow, so it cannot carry a copy |
+| copy | `incus copy i4src:vault vault --storage incus`, then the same for `sage` | 9.3 G + 3.7 G; `i1` has 50 G free |
+| fix | `vault`'s `eth0` repointed `br-lan` → `br0`, `root` pool → `incus`; `sage` needs neither (its NIC and root come from the shared profiles) | `default` on `i1` is `eth0 br0` + `root incus` |
+| start | both RUNNING on `i1`, `systemctl is-system-running` = `running` | `.73` and `.94` answered 3/3 pings and `vault` answered `HTTP 200` at 18:28 |
+| keep the rollback | `incus config set vault boot.autostart=false`, same for `sage`, on `i4` | without it a reboot would have two hosts claiming `.73` and `.94` |
 
 ### 15.3 The window, and the rollback at every step
 
@@ -985,5 +990,70 @@ deleted, moved or edited. The `.71` address and the router's port-forwards never
 the public doors come back as soon as the container runs — the zone's own answers depend on the
 container, not on its host.
 
-**Not done:** no window was taken and `proxy` still runs on i2. The remaining preflight is the
-`rsync` in step 0, and the open decision is which of §15.2's three options to take.
+**What the copy actually cost:** 37 G at **34 MiB/s** (11 MiB/s in the middle stretch), so the
+window was 27 minutes against the 17 the preflight predicted from the earlier 36–40 MB/s reading.
+The estimate was optimistic because it came from fresh containers, not from a 37 G zfs rootfs
+carrying NPM's `letsencrypt` tree. The three host paths were `tar`-streamed to `i4` twice: once
+before the stop to prove the copy path, and again after it so `database.sqlite` reflects a stopped
+NPM rather than a racing one.
+
+**Verified after the start, in the order §15.3 asks for:** `ping .71` 3/3 from `i4` itself; NPM's
+containers up inside the container (`innotel-site`, `metrics-node-exporter`, `access-denied`,
+`gateway-sso` healthy, `orion-locker-sso`); `:80` and `:443` listening on both stacks; and from
+`i1`, `--resolve innotel.us:443:192.168.1.71` → **200**, `www.innotel.us` → **301**, plain `:80` →
+**301**. The `000` seen twice on the way was curl sending the IP as SNI with no `--resolve`, not a
+dark edge — worth writing down because it reads exactly like one.
+
+**Rollback is unchanged and still armed:** `i2` keeps the stopped original with its data untouched,
+so `incus start proxy` there restores the edge on the same address. Nothing on `i2` was deleted, and
+the `.71` address and port-forwards never moved.
+
+## 16. The estate checks, installed on the edge for the first time
+
+The unit had never run on a schedule anywhere. `i4` carried 34 stale files in
+`/opt/innotel/estate-checks` from a manual run, there was no
+`/etc/systemd/system/estate-checks.service` on any of the four hosts, and no timer. With the edge
+now on `i4`, the merged checks (37 files, commit `9a6f7d3`) were installed there with
+`scripts/install-estate-checks.sh`, the timer enabled, and one run forced: `Result=success`,
+`ExecMainStatus=1`, 2 min 50 s wall, **35 `.prom` files** written.
+
+Two things had to be true for the checks to answer anything, and neither was:
+
+| Failure in the first run | Why | What fixed it |
+|---|---|---|
+| `installed_checks`, `unit_drift`: *“/usr/src/projects/complete/ips has no origin/main”* | both default to the estate's checkout path; the edge's checkout is `/root/platform-stack` | a symlink `/usr/src/projects/complete/ips → /root/platform-stack` on the edge — a host fact, not a repo change |
+| every ssh-reading check: *“Permission denied (publickey,password)”* | `estate_check.ssh` runs `BatchMode=yes`, so the edge's key has to be in each host's `authorized_keys` | the edge's `id_ed25519.pub` appended (deduplicated) to `i1`, `i2` and `i3`; key-only ssh now returns `hostname` from all three |
+
+**What they say now:** `installed_checks` **1** (clean), `host_zombies` **1**, `unit_drift` **0**
+with **2** findings — `swap-ceiling-check.service` and `wifi-powersave-off.service` differ between
+the hosts and `systemd/` (`55b5bd7` vs `878395d`, `39ef6ec` vs `20a0a79`). That is the check working,
+and neither unit is one this change touched.
+
+**15 of 35 checks are red, and that is the estate's first honest verdict rather than a new failure.**
+The unit has never run, and the reds include `container_address` (the address table has just been
+moved to match tonight's placements — §15 and §17), `mail_traffic`, `dmarc_alignment`,
+`edge_vhost_pins`, `edge_vhost_targets`, `edge_sso_door`, `npm_config_drift` (still missing
+`NPM_ADMIN_EMAIL`), `media_doors`, `mount_stacks`, `orion_signin`, `alert_delivery`,
+`authentik_privilege`, `mail_relay`, and `address_latency` — which dials every address in the table,
+including `.60`, and `onyx` is deliberately stopped (§17).
+
+**The scrape path is the next thing to wire.** No host runs node-exporter on the metal;
+`metrics-node-exporter` is a container inside `proxy` that mounts a textfile directory **from its
+own filesystem**, so the 35 files the unit writes to `/var/lib/node_exporter/textfile` on `i4` are
+read by nobody yet. The checks now publish; nothing consumes them.
+
+## 17. `onyx` — on `i3`, stopped, and staying stopped
+
+`onyx` is off `i2` and off the estate on purpose. It mounts the USB block device (`main-pool-usb` →
+`/dev/sdc`), that device is attached to `i3` (`/dev/sdc`, `8,32`), and `i2` has no `/dev/sdc` at
+all — so the instance that was running there was running without its device. Both are stopped now:
+
+| Host | State | rootfs dataset | data volume |
+|---|---|---|---|
+| `i2` | **STOPPED** (was RUNNING) | `fast/containers/onyx`, 8.23 G | `fast/tank/custom/default_onyx-data`, 56.9 M |
+| `i3` | **STOPPED** — the placement | `incus/containers/onyx`, 10.6 G, created today | `incus/tank/custom/default_onyx-data`, 56.3 M |
+
+`i3`'s copy came from `incus export onyx -` streamed over ssh today, so it is the newer of the two.
+The 10.6 G against 8.23 G is `used` on two different zfs pools, not a difference in file count: a
+stopped zfs dataset is unmounted, so a byte-for-byte comparison needs both mounted and that was not
+done. It stays stopped until `i2` is reinstalled, which is what the copy is being preserved for.

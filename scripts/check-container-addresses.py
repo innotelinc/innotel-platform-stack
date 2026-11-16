@@ -156,6 +156,11 @@ EXPECTED: dict[str, dict[str, str]] = {
         "ontrak": "192.168.1.21",
         "regcache": "192.168.1.79",
         "rizzaura": "192.168.1.62",
+        # `sage` (.94) and `vault` (.73) arrived from `i4` on 2026-11-15 to make room for
+        # the edge, which needed the ~2 GiB they held and `i4` did not have. `i4` keeps
+        # both stopped as the rollback, so the address answers on exactly one host.
+        "sage": "192.168.1.94",
+        "vault": "192.168.1.73",
     },
     # `capstone` (`.30`, Zeus telephony) is **not** a row any more. It stopped on
     # 2026-11-02 and cannot be started on `i2`: the host reports 4.8 GiB total (1.3 GiB
@@ -173,12 +178,10 @@ EXPECTED: dict[str, dict[str, str]] = {
         # `onyx` stayed when the rest moved on 2026-11-15: it mounts the USB block device
         # (`main-pool-usb`, `/dev/sdc`) and is not to run detached from it.
         "onyx": "192.168.1.60",
-        # `proxy` was recreated on i2 on 2026-10-26 22:00 EDT and is no longer an
-        # i4 container. The address is unchanged (.71), which is why only the host row
-        # moves. Its `/data` bind mount now exists (verified 2026-10-28: raw-mount
-        # path=/data, source=/usr/src/proxy/data, 209 proxy_host confs readable), so
-        # rule 4 watches it rather than reporting the 2026-10-26 defect.
-        "proxy": "192.168.1.71",
+        # `proxy` left for `i4` on 2026-11-15 (`estate-rebalance` §15) and the row went
+        # with the running container: `i2` is being reinstalled, so what stays here is a
+        # stopped copy as the rollback. The address is unchanged (.71) — as it was when
+        # the edge came here in October — which is why only the host row moved again.
     },
     # `i3` (`192.168.1.53`) is a host again as of 2026-11-15 and took six of `i2`'s
     # containers while `i2` is reinstalled. Every one of them keeps the address it had —
@@ -198,11 +201,14 @@ EXPECTED: dict[str, dict[str, str]] = {
         # absence. It answers `.68:5432` and `ontrak-tix-db-1` on the host is stopped with
         # its volume intact — no data was deleted (`estate-rebalance` §12.4).
         "ontrak-tix-db": "192.168.1.68",
-        "sage": "192.168.1.94",
+        # `proxy` (.71) arrived from `i2` on 2026-11-15 and is the edge again
+        # (`estate-rebalance` §15). `sage` and `vault` left the other way the same
+        # evening, because the edge needs more RAM than this host had free with them
+        # running; their stopped copies remain here as the rollback.
+        "proxy": "192.168.1.71",
         "telno": "192.168.1.95",
         "telno-turn": "192.168.1.96",
         "terminal": "192.168.1.22",
-        "vault": "192.168.1.73",
         "vpn": "192.168.1.43",
     },
 }
@@ -238,7 +244,11 @@ BINDS: dict[str, dict[str, dict[str, str]]] = {
 #: Checked inside the container (rule 4), because a bind mount that did not arrive
 #: leaves an address-correct container that still cannot serve.
 DATA_MOUNTS: dict[str, dict[str, str]] = {
-    "i2": {"proxy": "/data"},
+    #: The edge's `/data` is a host bind mount (`estate-rebalance` §15.1), so rule 4 asks the
+    #: host that actually runs `proxy` for its mount table — `i2` after the 2026-10-26
+    #: recreation, `i4` after the 2026-11-15 move. Pointing this at a host that no longer
+    #: holds the container makes the probe answer about something else and pass.
+    "i4": {"proxy": "/data"},
 }
 
 #: What each address is for. Reported, so a failure names the thing that broke.
