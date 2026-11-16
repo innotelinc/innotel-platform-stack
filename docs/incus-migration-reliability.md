@@ -76,3 +76,34 @@ agent's own cleanup — aborts the transfer the same way and is indistinguishabl
 
 Verified on the 2026-11-16 monarch move (i1 -> i2): 25.4 GB, entry counts matched, docker
 state intact.
+
+## Observed outcome: monarch moved to i2 (2026-11-16)
+
+The 25.4 GB `monarch` rootfs was moved from i1 (`.51`) to i2 (`.52`) with `incus-migrate-safe`,
+started detached so the client could die without killing the copy, and read from the source
+through a read-only zfs mount.
+
+| Result | Value |
+| --- | --- |
+| Bytes sent | 35,607,666,492 (diff pass over a pre-built `incus init --empty` target) |
+| Entries verified | 335,213 source = 335,213 destination |
+| Verified at | 2026-11-16 12:18:34 EST |
+| Throughput | ~10.6 MB/s average at `--bwlimit=20M` |
+| Lease | claimed by the mover, released on exit |
+
+Start proof on the destination: instance `RUNNING` within 3 s, systemd up, `docker.service`
+active, 36 of 38 compose services running at the sample point, and `/data/media` resolving to
+`/dev/nvme0n1p2[/tank/media-downloads]` with `movies music temp tv xxx`. The instance was then
+stopped with `boot.autostart=false` so the destination stays quiet until it is deliberately
+started.
+
+Two checks the first attempt got wrong, both worth repeating:
+
+- `systemctl` inside a freshly started container fails with `Failed to connect to bus` for the
+  first few seconds; poll `systemctl is-system-running` instead of sampling once.
+- A `$(...)` inside an `ssh` payload is expanded on the *intermediate host*, not in the
+  container. Run `incus exec ... -- ls /data/media | wc -l` so the pipeline, not the shell
+  expansion, crosses the boundary.
+
+i1 afterwards: PSI `some avg10` 1.99 %, load 0.64, `media-sync.timer` enabled and cycling, no
+instance named `monarch` — the renamed `monarch-retired` remains stopped with its dataset intact.
