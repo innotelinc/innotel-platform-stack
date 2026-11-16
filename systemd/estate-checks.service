@@ -120,6 +120,12 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stalwart-oidc-prefl
 # on this host and a version of the scripts deployed years ago still compares that
 # year's `main` against that year's repos. ~15 s a run (17 shallow clones, all small).
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-group-compose-freshness.py --prom ${TEXTFILE_DIR}/estate-check-group-compose-freshness.prom
+# It needs the provider's API, and without it exits 2 — a red series rather than a pass,
+# which is how it was found on 2026-11-16 having never actually run here: the host unit
+# carried the check but no AUTHENTIK_API_URL/AUTHENTIK_TOKEN, so the estate's strongest
+# identity rule was silently unrunnable. Both come from the EnvironmentFile above, and
+# the URL is the provider's *published* address (`http://192.168.1.71:9000`): this host
+# cannot route to the container's bridge address, and the public name 504s under load.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-authentik-privilege.py --prom ${TEXTFILE_DIR}/estate-check-authentik-privilege.prom
 
 # A gate's callback, not its front page: oauth2-proxy's session cookie is larger
