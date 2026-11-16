@@ -1458,6 +1458,29 @@ One trap worth naming: `pkill -f "rsync -a --partial /tank"` run over SSH **kill
 because the pattern appears in the script's argv, and the session dies mid-script looking like a
 network failure. Bracketed patterns (`pkill -f "[r]sync -a --partial"`) are the only safe form.
 
+### `rizzaura` and `regcache` moved; `nas` is blocked on a custom volume
+
+`rizzaura` and `regcache` are `RUNNING` on `i2`; `nas` is not, and the reason is the useful
+part. Three failures in a row, each hiding the next:
+
+1. `incus copy rizzaura i2:rizzaura --instance-only` while the source was still running returns
+   `Unable to perform live container migration. CRIU isn't installed on the target server`. The
+   `incus stop --timeout 90` had reported nothing and the container was still `RUNNING` when the
+   copy started, so **the stop has to be confirmed by reading the state back**, not by the exit
+   code of `incus stop`.
+2. `incus copy nas i2:nas --instance-only` then fails on its own: `Failed add validation for
+   device "data": Failed to get storage pool "incus": Storage pool not found`. `nas` carries a
+   device pointing at the pool by name, and `i2` has no pool called `incus` — its pool is `fast`.
+3. Retrying with `--device data,pool=fast` still fails, and for a different reason:
+   `Failed loading custom volume: Storage volume not found`. Overriding the pool name does not
+   create the volume — the custom volume has to be copied into `i2`'s pool first, and only then
+   can the instance be created. Renaming a pool in the copy arguments is not a substitute for
+   moving the volume.
+
+`regcache` answers on `192.168.1.79` (2/2 pings at 0.48 ms) with port 22 **closed**, which is
+consistent with a cache node that never ran an SSH server rather than with a failed boot — the
+same shape as `clearpath` earlier.
+
 ### Two `rsync` jobs were copying the same 131 GB
 
 When the copy was inspected there were **two** jobs writing `/tank/media-downloads/` to `.52`: one
