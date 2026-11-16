@@ -354,6 +354,23 @@ def _internal(domain: str) -> bool:
     return any(domain == owned or domain.endswith("." + owned) for owned in INTERNAL_DOMAINS)
 
 
+#: Names that cannot answer, so no receiver exists to report on mail sent to them
+#: (RFC 2606/6761). Mail addressed there leaves the estate as a delivery failure and is
+#: never "seen" by anybody. Counting one as outbound made this check fail with nothing to
+#: fix on 2026-11-16: a single null-MX probe to `estate-probe.invalid` was the
+#: "1 message(s) did leave the estate in that window, so reports were due" that turned a
+#: quiet domain into "the reporting path is broken".
+RESERVED_TLDS = ("invalid", "test", "example", "localhost")
+RESERVED_DOMAINS = ("example.com", "example.net", "example.org")
+
+
+def _undeliverable(domain: str) -> bool:
+    """Whether an address at `domain` is guaranteed to produce no DMARC report."""
+    return (domain in RESERVED_DOMAINS
+            or any(domain.endswith("." + d) for d in RESERVED_DOMAINS)
+            or domain.rsplit(".", 1)[-1] in RESERVED_TLDS)
+
+
 def _mail_traffic_module():
     """`check-mail-traffic.py`, loaded by path — it already owns reading this log.
 
@@ -389,7 +406,7 @@ def outbound_messages(days: int, runner=None) -> int | None:
         if not match or not match.group("event").startswith("queue."):
             continue
         domain = traffic._domain(traffic._first_recipient(match.group("fields")))
-        if domain and not _internal(domain):
+        if domain and not _internal(domain) and not _undeliverable(domain):
             count += 1
     return count
 

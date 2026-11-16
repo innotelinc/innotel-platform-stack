@@ -120,6 +120,40 @@ Worth knowing before the next identity change: a test that passes on the edge ca
 container because *which* host record wins is decided by load order, not by the API's
 listing. `nginx -t` names the conflict; the API does not.
 
+## The mail container's own names, pinned to the edge (2026-11-16)
+
+Three units in the `mail` container (`mailjet-inbound-check`, `resend-inbound-check`,
+`oasis-mail-admin`) were failing their own health checks with
+`SSL: CERTIFICATE_VERIFY_FAILED … Hostname mismatch` on `mailjet.innotel.us` and
+`mail.innotel.us`. The certificate was never the problem — asked on the edge,
+`mail.innotel.us` answers `CN=mail.innotel.us` and `mailjet.innotel.us` answers the
+`*.innotel.us` wildcard, both verifying. What the container received was
+`CN = auth.cerulean.innotel.us`, and the reason is the discovery cache's outbound rule:
+`stalwart-oidc-redirect.sh` installs one DNAT per *resolved upstream IPv4*, and
+`auth.cerulean.innotel.us` resolves to `73.68.203.71` — the estate's **single WAN
+address**, shared by every public name. So
+`-A OUTPUT -d 73.68.203.71 --dport 443 -j DNAT --to-destination 127.0.0.1:8443`
+captured *every* HTTPS request the container made to an estate name and handed it to the
+proxy, which answers with its own leaf. No certificate change can satisfy a client whose
+request was routed to a different service.
+
+The remedy is the one already used for `auth.innotel.us`: pin the names to the LAN edge in
+the container's `/etc/hosts` (`/etc/hosts.bak-<epoch>` kept), so the lookup never reaches
+the public address the DNAT matches.
+
+| Name | Edge host → upstream | SAN it is served with |
+| --- | --- | --- |
+| `mail.innotel.us` | 95 → `192.168.1.15:3000` | `mail.innotel.us` |
+| `mailjet.innotel.us` | 282 → `192.168.1.15:8100` | `*.innotel.us` |
+| `admin.mail.innotel.us` | 221 → `192.168.1.15:8080` | `admin.mail.innotel.us` |
+| `admin.oasis.innotel.us` | 223 → `192.168.1.15:8091` | `admin.oasis.innotel.us` |
+
+Stalwart is deliberately untouched: it reads its own `/etc/stalwart-oidc/hosts` through
+`BindReadOnlyPaths`, and the loopback pin in that file is what the discovery cache needs.
+The general lesson matches the one above — *which* host answers a name is decided by the
+path the request takes, so a container that must verify a public name needs the address it
+can reach, not the address the world sees.
+
 ## Retired with the guest, and the last duplicate (2026-11-14)
 
 `192.168.1.93` was retired, so `deploy.innotel.us` and `fax-staging.lab.innotel.us` were
