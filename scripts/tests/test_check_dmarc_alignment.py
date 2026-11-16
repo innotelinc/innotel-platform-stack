@@ -297,7 +297,11 @@ class MainCase(unittest.TestCase):
     def test_a_fresh_rua_with_no_reports_yet_is_a_note_not_a_failure(self):
         # The state that made this check permanently red: a rua published today has
         # nothing to report on, and "could not answer" is not a finding about the estate.
-        code, body = self._mailbox_run(date.today().isoformat(), "--grace-days", "3")
+        # `--outbound` is pinned so this test never reads the live log: with outside mail
+        # flowing the age of the rua is what decides, and a unit test must not depend on
+        # what the estate happened to send today.
+        code, body = self._mailbox_run(
+            date.today().isoformat(), "--grace-days", "3", "--outbound", "4")
         self.assertEqual(code, 0)
         self.assertIn('innotel_estate_check_last_status{check="dmarc_alignment"} 1', body)
         self.assertIn('innotel_estate_check_failures{check="dmarc_alignment"} 0', body)
@@ -307,7 +311,8 @@ class MainCase(unittest.TestCase):
         self.assertIn('innotel_estate_check_dmarc_reports{check="dmarc_alignment"} 0', body)
 
     def test_silence_past_the_grace_window_is_a_broken_reporting_path(self):
-        code, body = self._mailbox_run((date.today() - timedelta(days=30)).isoformat())
+        code, body = self._mailbox_run(
+            (date.today() - timedelta(days=30)).isoformat(), "--outbound", "3")
         self.assertEqual(code, 1)
         self.assertIn('innotel_estate_check_last_status{check="dmarc_alignment"} 0', body)
         self.assertIn('innotel_estate_check_failures{check="dmarc_alignment"} 1', body)
@@ -333,6 +338,25 @@ class MainCase(unittest.TestCase):
     def test_an_empty_reports_directory_is_still_exit_two(self):
         # Unchanged on purpose: an archive someone pointed at is not the rua's age.
         self.assertEqual(dmarc.main(["--reports-dir", str(Path(tempfile.mkdtemp()))]), 2)
+
+    def test_a_quiet_domain_with_no_outbound_mail_exits_zero(self):
+        # End to end through `main`: the outbound count is what turns silence into a
+        # note, so a mailbox with nothing in it and a log showing no outside mail must
+        # not page. The count is injected here because a test must not read the estate.
+        code, body = self._mailbox_run(date.today().isoformat(), "--outbound", "0")
+        self.assertEqual(code, 0)
+        self.assertIn('innotel_estate_check_last_status{check="dmarc_alignment"} 1', body)
+        self.assertIn('innotel_estate_check_failures{check="dmarc_alignment"} 0', body)
+        self.assertIn("no-outbound-mail", body)
+
+    def test_outbound_mail_with_no_reports_still_fails_end_to_end(self):
+        # The other half of the same decision: once mail did leave, silence is a broken
+        # reporting path and `main` must exit non-zero.
+        code, body = self._mailbox_run(
+            (date.today() - timedelta(days=30)).isoformat(), "--outbound", "9")
+        self.assertEqual(code, 1)
+        self.assertIn('innotel_estate_check_failures{check="dmarc_alignment"} 1', body)
+        self.assertNotIn("no-outbound-mail", body)
 
     def test_it_writes_the_shared_family_and_its_own_series(self):
         directory = self._dir(report(records=(("203.0.113.9", 4, "none", "fail", "fail", "atheniq.courses"),)))
