@@ -143,7 +143,8 @@ ADDRESS_ROWS = {
          # copilotkit joined i2 on 2026-11-14 (the dashboard behind the cpk names) and
          # left again with the five others on 2026-11-15, so it is an i3 row now.
          # proxy left for i4 the same evening; i2 keeps only a stopped copy.
-         ("monitor", "192.168.1.88"),
+         # `monitor` (`.88`) left with SigNoz on 2026-11-16, so the fixture drops it
+         # with the table it mirrors.
          # `onyx` stayed when the rest moved on 2026-11-15: it mounts the USB block device.
          ("onyx", "192.168.1.60")],
     # i3 returned on 2026-11-15 and took six of i2's containers while i2 is reinstalled.
