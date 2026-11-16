@@ -1414,3 +1414,42 @@ key after a reinstall fails every non-interactive tool that talks to the box, no
 free; `i2` = 8 cores, 468 GB root with 432 GB free, 14 357 MB RAM free, pool `fast` of type `dir`.
 The `dir` pool choice matters: it means no ZFS snapshot/replication path exists for these moves,
 so every transfer is a filesystem copy over the network.
+
+### Two instances are on `i2`, measured
+
+`clearpath` (`.83`) and `blueprint` (`.76`) were stopped on `i1`, copied with
+`incus copy <name> i2:<name> --instance-only`, started on `i2`, and verified from outside: `.83`
+answers 2/2 pings at 0.67 ms and `.76` answers 2/2 at 0.52 ms, both `RUNNING` on `i2` while the
+`i1` sources are left `STOPPED` as rollback copies. Those two were chosen first because they are
+the only candidates that need nothing from the host: `blueprint` is 587 MiB and `clearpath` is a
+bare 256 MiB image, and neither binds a host path.
+
+Each move needs `incus start` to be retried after the copy: the first attempt returns
+`Instance is busy running a "create" operation` while the transfer is still finalising, and
+`incus list i2:<name> --format csv -c s` returns **empty** during that window rather than a
+state, so an empty answer is "still copying", not "absent".
+
+### `monarch`: stopped for the move, and that is what is still open
+
+`monarch` was stopped to make a consistent copy, which took its media stack down; the copy then
+aborted on the host bind, and restarting the container on `i1` did **not** restore the stack —
+`monarch` returns to `RUNNING` with **0 docker containers** and `.56:22/14011/14012/14002` all
+closed. The same failure happened earlier in this session and was fixed by re-applying the compose
+project (`docker compose -p monarch --env-file .env -f docker-compose.yml up -d --no-build`),
+which is what produced the 37 containers the first time. Restarting the instance is not the same
+as starting its stack.
+
+### The media copy, and the load it caused
+
+`/tank/media-downloads` is 131 GB. Throughput was measured rather than assumed: ~96 MB/s while
+the transfer was mostly large files (23 214 MB in the first 240 s), then ~13 MB/s, then ~3 MB/s as
+it reached directories of small files — 118 959 → 120 415 MB took seven minutes. It was killed
+twice: once by my own `netplan apply` (see above), and once by `SIGHUP` because
+`nohup cmd &` inside an SSH session did not survive its parent; `setsid nohup` is what detaches
+properly. Resumed with `--partial` each time, it reached 121 122 MB of 131 000 MB.
+
+The cost landed on `i1`: after the moves and during the copy, load average (4 cores) went
+85 → 36 → **137.89**, and at that load `sshd` accepts the TCP connection but never completes the
+banner exchange, so every command to the host fails as `Connection timed out during banner
+exchange` while `ping` and a raw connect to port 22 both succeed. A retry loop is what gets
+commands through; the port being open is not evidence the host can answer.
