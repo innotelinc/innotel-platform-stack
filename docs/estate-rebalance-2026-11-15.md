@@ -1667,3 +1667,36 @@ of the string; `source` cannot be appended there. Overriding only `pool` is both
 sufficient, because `source: nas-data` is already in the device config and a volume of that name
 now exists in the target pool. `i2:nas` started and answers on `.89`; `i1` keeps the stopped copy
 as `nas-retired`.
+
+## The host-bind instances: what a move actually costs
+
+`ontrak`, `workloads` and `genie-preview` are not portable the way the others were. Their devices
+are host paths, not pool volumes, so `--device root,pool=fast` is not enough — every one of those
+paths has to exist on the target before the copy is started, or the instance is created and then
+fails to start with a missing mount:
+
+| instance | device | host path on `i1` | size |
+| --- | --- | --- | --- |
+| `ontrak` | `genie-workspace` | `/srv/genie-workspace` | 18 M |
+| `ontrak` | `kvm` | `/dev/kvm` (unix-char) | — |
+| `ontrak` | `vault` (read-only) | `/srv/vault-ro` | 28 G |
+| `workloads` | `archive` (`shift`) | `/srv/evac/dev-critical` | 17 G |
+| `workloads` | `archive2` (`shift`) | `/srv/evac/copilotkit-fs` | on `tank/evac`, 23.3 G total |
+| `workloads` | `archive3` (`shift`) | `/srv/evac/copilotkit-docker` | on `tank/evac`, 23.3 G total |
+| `genie-preview` | `genie-workspace` | `/srv/genie-workspace` | 18 M |
+
+`i2` already has `/dev/kvm` and the CPU flags for it (`vmx`/`svm` on 16 lines), so the unix-char
+device needs no work. The disk paths all need to be recreated and filled first — `/srv/vault-ro`
+is 28 G of read-only vault mirror, and `tank/evac` is 23.3 G of evacuated archives. `shift: "true"`
+on the `workloads` archives means those mounts are idmapped, which is the same class of feature
+that made `monarch`'s first `i2` start fail with an idmapped-storage error.
+
+The plan, in order:
+1. Copy `/srv/vault-ro` and `tank/evac` across (they are plain host data, not Incus volumes, so
+   they move with `rsync --partial` or `zfs send`, not `incus copy`) and recreate the paths on
+   `i2` at the same absolute locations.
+2. Move `genie-preview` first — its only bind is 18 M, so it is the cheap test of the whole shape.
+3. Then `ontrak` (17 G instance + 28 G read-only mount + a `/dev/kvm` pass-through that has to be
+   exercised, not just created).
+4. `workloads` last, because its three `shift` mounts are the ones with a known failure mode on
+   `i2` and Coolify's database is the least forgiving thing to have down.
