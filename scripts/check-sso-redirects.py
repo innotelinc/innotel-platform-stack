@@ -98,15 +98,38 @@ NPM_CONTAINER = "cerulean-npm"
 DOCKER: list[str] = []
 
 
-def docker_prefix() -> list[str]:
-    """`docker …` here, or through incus into the edge container."""
+def docker_prefixes() -> list[list[str]]:
+    """Every way the Docker CLI might be reached here, best first.
+
+    **incus before a local `docker` on purpose.** `i4` carries a `docker` binary that
+    cannot see the `proxy` container's containers, so asking it first answered "no such
+    container" for the identity provider and the audit exited saying it could not run.
+    The edge's runtime is incus; a local CLI is only the fallback.
+    """
     if DOCKER:
-        return DOCKER
-    if shutil.which("docker"):
-        return ["docker"]
+        return [DOCKER]
+    prefixes: list[list[str]] = []
     if shutil.which("incus"):
-        return ["incus", "exec", "proxy", "--", "docker"]
-    return ["docker"]
+        prefixes.append(["incus", "exec", "proxy", "--", "docker"])
+    if shutil.which("docker"):
+        prefixes.append(["docker"])
+    return prefixes or [["docker"]]
+
+
+def docker_prefix() -> list[str]:
+    return docker_prefixes()[0]
+
+
+def container_address(name: str) -> str | None:
+    """The container's own address, asked of whichever Docker can actually see it."""
+    fmt = "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"
+    for prefix in docker_prefixes():
+        out = subprocess.run([*prefix, "inspect", "-f", fmt, name],
+                             capture_output=True, text=True)
+        addresses = out.stdout.split()
+        if addresses:
+            return addresses[0]
+    return None
 
 
 class CouldNotRun(RuntimeError):
@@ -273,18 +296,6 @@ def main() -> int:
     DOCKER = shlex.split(args.docker) if args.docker else []
     AUTH = args.auth.rstrip("/")
     API = AUTH + "/api/v3"
-    if args.auth_from:
-        found = docker("inspect", "-f",
-                       "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}",
-                       args.auth_from)
-        addresses = found.stdout.split()
-        if not addresses:
-            print(f"check-sso-redirects: {args.auth_from} has no address — the audit cannot "
-                  "be made", file=sys.stderr)
-            return 2
-        AUTH = f"http://{addresses[0]}:9000"
-        API = AUTH + "/api/v3"
-
     def emit(result: Audit | None, ran: bool) -> None:
         if not args.prom:
             return
@@ -293,12 +304,22 @@ def main() -> int:
         except OSError as error:
             print(f"check-sso-redirects: could not write {args.prom}: {error}", file=sys.stderr)
 
+    if args.auth_from:
+        address = container_address(args.auth_from)
+        if address is None:
+            print(f"check-sso-redirects: no container named {args.auth_from} is visible to "
+                  "any Docker CLI here — the audit cannot be made", file=sys.stderr)
+            emit(None, ran=False)
+            return 2
+        AUTH = f"http://{address}:9000"
+        API = AUTH + "/api/v3"
+
     try:
         token = authentik_token()
         providers = api(token, "/providers/oauth2/?page_size=200")["results"]
         hosts = npm_hosts()
-    except CouldNotRun as error:
-        print(f"check-sso-redirects: {error}", file=sys.stderr)
+    except (CouldNotRun, urllib.error.URLError, TimeoutError, OSError) as error:
+        print(f"check-sso-redirects: {error} — the audit cannot be made", file=sys.stderr)
         emit(None, ran=False)
         return 2
     print(f"providers: {len(providers)}   NPM hostnames: {len(hosts)}")
