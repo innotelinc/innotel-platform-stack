@@ -1613,3 +1613,25 @@ containers: 37
 Two partial artifacts are left on `i2` and are not production state: a `genesis` instance at
 `STOPPED` from an interrupted copy, and a `nas-data` volume record whose transfer died with
 `websocket: close 1006 (abnormal closure): unexpected EOF`.
+
+## Second pass: sage moved, atheniq reverted, i2 cleaned
+
+`sage` moved the same way as the small instances — stop, `incus copy --instance-only`, start on
+`i2` — and `.71` answers from the moved copy. `i2` now runs six: `monarch`, `clearpath`,
+`blueprint`, `regcache`, `rizzaura` and `sage`.
+
+The two 25 GiB instances behave differently from monarch's. `atheniq` (26.3 GiB) and `atlas`
+(25.6 GiB) never finished: after ten minutes the `create` operation was still open on both hosts
+with a **completely empty log**, `incus start` on either side answered `Instance is busy running a
+"create" operation`, and cancelling on `i2` was refused with `This operation can't be cancelled`.
+atheniq was put back on `i1` (`RUNNING`, `.59` answering) and the partial `i2` copy deleted.
+Leaving a production instance stopped behind an operation that cannot be cancelled is worse than
+not moving it.
+
+The rule this leaves: a copy whose log stays empty while both operation lists stay non-empty is
+stalled, not slow — restore the source instead of waiting on it, and treat 25 GiB-and-up copies
+as jobs that need watching for tens of minutes rather than a single command.
+
+Cleanup on `i2` also removed the stale `genesis` copy, so the only volumes left there are the six
+instance rootfs volumes; the failed `nas-data` volume record had already disappeared with its
+transfer.
