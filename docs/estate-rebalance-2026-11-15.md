@@ -1278,3 +1278,35 @@ Stopped for relief: `terminal` (396 MiB), `ontrak-tix-db` (156 MiB), and the sta
 Docker pair `fax-staging-portal-1` (4.49 % CPU) + `fax-staging-db-1`. Both Incus
 containers still carry `boot.autostart=true`, so a reboot brings them back until that is
 changed.
+
+## 21. 2026-11-16 — `pm3` reinstalled as `i2`: bare metal Ubuntu 26.04.1
+
+`pm3` (`192.168.1.3`) is `i2` now: Ubuntu 26.04.1 LTS, kernel `7.0.0-43-generic`, 8 cores,
+15 150 MB RAM, one 476.9 G NVMe with a 468 G root (13 G used), hostname `i2`, root and
+`innotel` by key, **`192.168.1.52` and `192.168.1.3`** on `enx50a0300d1cc4`, and Incus 6.0.5
+from `resolute/universe` with one pool, `fast` (driver `dir`).
+
+Three kexec attempts were needed, and each failure left one rule: `systemctl kexec` re-loads a
+kernel of systemd's choosing (the Ubuntu kernel came up without `autoinstall`, `ds=` or `ip=`,
+answering ICMP with every port closed); `kexec` carries a kernel and an initrd but not the ISO
+mount, and casper only searches mountable devices for `/casper/filesystem.squashfs` unless told
+where the image is; and casper's no-medium path (`scripts/casper:970`) is an interactive shell
+unless `panic=` is on the command line (`scripts/functions:45-85`), which on a box with no
+monitor is a machine that needs hands on it. The install that worked added
+`url=http://192.168.1.54:8080/ubuntu-26.04.1-live-server-amd64.iso` (fetched with `wget`,
+`scripts/casper:267`, into initramfs RAM) and `panic=120`, so a failure reboots back in two
+minutes. Evidence: ISO GETs at 23:13:56, 23:14:30, 23:15:04, `/meta-data` + `/user-data` at
+23:15:41, reboot at 23:21:11, `root@.52` reporting `hostname i2` by 23:23:22.
+
+**The container restore did not come from the archive.** `i2-preserve-full-20261115.tgz` (15.9 G)
+passes `tar tzf` (272 486 entries, 143 s), but its Incus volume directories were empty when it
+was taken: the eight estate instances are a single directory entry each, and only four OnTrak
+rootfs trees carry data (~950 MB each). `incus admin recover` was driven as far as it goes — pool
+`fast` recreated as `dir`, `backup.yaml` rewritten from `driver: zfs` to `driver: dir`, metadata
+symlinks rebuilt — and then parked the volumes with no config rather than inventing data. Nothing
+is lost: six are `RUNNING` on `i3`, `onyx` is `STOPPED` there, `proxy` is `RUNNING` on `i4`, all
+at their original addresses. Moving any of them to `i2` is an `incus copy` from the live host,
+with the source stopped first.
+
+`192.168.1.3` is deliberately still on the box — a second address on the same NIC, and a lifeline
+on a machine with no console. Removing it is one netplan edit, left to the operator.
