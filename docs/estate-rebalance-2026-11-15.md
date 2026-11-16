@@ -1571,3 +1571,17 @@ loss to its own gateway is a bridge membership problem on the host, and restarti
 cannot fix it — a restart recreates the veth on the same wrong bridge. The fix is the device
 parent (`incus config device override <instance> eth0 parent=br0`), which persists, rather than
 moving the live veth, which does not.
+
+Correction to the fix above: the durable change is in the **profile**, not the instance. `i2`'s
+`default` profile carried `eth0` as `network: incusbr0`, and an instance-level override is
+rejected outright:
+
+```
+Error: Invalid devices: Device validation failed for "eth0":
+Cannot use "parent" property in conjunction with "network" property
+```
+
+`network` and `parent` are mutually exclusive, so the profile device has to be replaced with a
+bridged one (`incus profile device add default eth0 nic name=eth0 nictype=bridged parent=br0`)
+before any veth can land on `br0`. `i1`'s `default` profile already uses `parent: br0`, which is
+why the same instance behaves differently on the two hosts.
