@@ -1532,3 +1532,22 @@ The cost landed on `i1`: after the moves and during the copy, load average (4 co
 banner exchange, so every command to the host fails as `Connection timed out during banner
 exchange` while `ping` and a raw connect to port 22 both succeed. A retry loop is what gets
 commands through; the port being open is not evidence the host can answer.
+
+## Where the estate stands (2026-11-16)
+
+On `i2`: `clearpath` (`.83`), `blueprint` (`.76`), `regcache` (`.79`) and `rizzaura` (`.62`) —
+four instances `RUNNING`, each with its `i1` source kept `STOPPED` as a rollback copy. The
+`/tank/media-downloads` mirror is complete and in sync (145 306 004 461 bytes, with the timer's
+last pass sending 17 309 bytes and exiting 0), and `media-sync.timer` was re-enabled after the
+failed copy.
+
+On `i1`: everything else still runs there, including `monarch`, restored after its copy rolled
+back — 37 containers with `.56:14002/14011/14012` open.
+
+Still open:
+- `nas` cannot move until its `data` custom volume is copied into `i2`'s pool; the instance name
+  and the pool name are not interchangeable.
+- `monarch`'s 30 GiB rootfs rolled back on `i2`'s `dir` pool with an idmapped-storage error, so
+  the one instance this rebalance was supposed to start with is the one still on `i1`.
+- `blueprint`, `regcache` and `clearpath` report `RUNNING` on `i2` while not answering, even from
+  `i2` itself, which means their guests lost networking rather than their instances stopping.
