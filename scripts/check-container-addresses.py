@@ -173,15 +173,6 @@ EXPECTED: dict[str, dict[str, str]] = {
     # was asserting a service the estate does not run — and `check-address-latency`, which
     # reads this table, failed every run on a deliberately stopped container. Re-add the
     # row with the address the day it is placed on a host that can hold it.
-    "i2": {
-        # `onyx` stayed when the rest moved on 2026-11-15: it mounts the USB block device
-        # (`main-pool-usb`, `/dev/sdc`) and is not to run detached from it.
-        "onyx": "192.168.1.60",
-        # `proxy` left for `i4` on 2026-11-15 (`estate-rebalance` §15) and the row went
-        # with the running container: `i2` is being reinstalled, so what stays here is a
-        # stopped copy as the rollback. The address is unchanged (.71) — as it was when
-        # the edge came here in October — which is why only the host row moved again.
-    },
     # `i3` (`192.168.1.53`) is a host again as of 2026-11-15 and took six of `i2`'s
     # containers while `i2` is reinstalled. Every one of them keeps the address it had —
     # it is pinned in the container's own netplan — so only the host key moved, which is
@@ -190,6 +181,11 @@ EXPECTED: dict[str, dict[str, str]] = {
         "copilotkit": "192.168.1.114",
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
+        # `onyx` is imported here and **STOPPED**: it mounts the USB block device
+        # (`main-pool-usb`, `/dev/sdc`) and must not run detached from it. It used to be an
+        # `i2` row; `i2` was decommissioned on 2026-11-16 (§19), so this copy is the only one
+        # left and it waits here for the disk, or for the replacement host that can take it.
+        "onyx": "192.168.1.60",
         "pi": "192.168.1.70",
         "signara": "192.168.1.44",
         "subscribe": "192.168.1.58",
@@ -221,9 +217,12 @@ EXPECTED: dict[str, dict[str, str]] = {
 #: leave six dialled addresses unread. A host in this table must exist — the check exits 2
 #: on one it cannot read, so a retired host left behind reads as an estate-wide outage
 #: rather than as a stale row.
+#: `i2` (192.168.1.52) was **decommissioned on 2026-11-16**
+#: (`docs/estate-rebalance-2026-11-15.md` §19) and is out of this table for the reason
+#: written above: a host named here that cannot be read exits 2, which would report the
+#: decommission as an estate-wide outage.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
-    "i2": "root@192.168.1.52",
     "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }

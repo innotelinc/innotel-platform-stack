@@ -66,8 +66,8 @@ CHECK = "mount_stack"
 #: Where each estate host is reachable — the same table the other checks read.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
-    "i2": "root@192.168.1.52",
-    # `i3` is a host again as of 2026-11-15 and runs `onyx`, the NFS client this check
+    # `i2` was decommissioned on 2026-11-16 (`docs/estate-rebalance-2026-11-15.md` §19).
+    # `i3` is a host again as of 2026-11-15 and holds `onyx`, the NFS client this check
     # was written about (2026-10-29: 32 769 stale entries in `/srv/onyx-pool`).
     "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",

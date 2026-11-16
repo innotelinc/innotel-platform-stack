@@ -133,8 +133,8 @@ CHECK = "container_limits"
 #: containers declare 1-2, so a cap above the host would be a real finding here.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
-    "i2": "root@192.168.1.52",
-    # `i3` (2c/4t, 15 403 MiB) took six of `i2`'s containers on 2026-11-15. Its caps are
+    # `i2` was decommissioned on 2026-11-16 (`docs/estate-rebalance-2026-11-15.md` §19).
+    # `i3` (2c/4t, 15 403 MiB) took six of its containers on 2026-11-15. Its caps are
     # the interesting ones now: the moved set sums to ~14.4 GiB of its RAM, which is
     # overcommit rather than reservation, and `copilotkit`'s cap was cut 10 GiB -> 4 GiB
     # in the move. A cap that does not fit the host is exactly what this check is for.

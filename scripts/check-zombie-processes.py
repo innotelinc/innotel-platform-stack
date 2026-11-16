@@ -58,15 +58,16 @@ from estate_check import Audit, Finding, METRIC, read_host, ssh, write_prom  # n
 CHECK = "host_zombies"
 
 #: Where each estate host is reachable — the same table the other checks read. `i3`
-#: belongs here from the start: it is a host in the estate again as of 2026-11-15.
+#: belongs here from the start: it is a host in the estate again as of 2026-11-15. `i2` was
+#: decommissioned on 2026-11-16 (`docs/estate-rebalance-2026-11-15.md` §19), and the
+#: deliberate `epmd` that set the old baseline went with it.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
-    "i2": "root@192.168.1.52",
     "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
 
-#: Above the estate's known baseline (i2's deliberate `epmd`), below a real leak.
+#: Above the known baseline (nothing on the estate reaps parents deliberately), below a real leak.
 WARN_ZOMBIES = 3
 FAIL_ZOMBIES = 25
 

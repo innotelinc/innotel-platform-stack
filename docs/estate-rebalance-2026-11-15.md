@@ -1,6 +1,6 @@
 # Estate rebalance — inventory and options, i1 / i2 / i3 / i4
 
-**Status: partially applied 2026-11-15 — see §11 (15:45–16:05 EST), §12 (21:10–22:00 EST), §13 (the Tix cap under load, and a check that counts zombies) and §14 (i2 → i3 displacement, in progress while i2 is reinstalled).** The inventory below is
+**Status: partially applied 2026-11-15 — see §11 (15:45–16:05 EST), §12 (21:10–22:00 EST), §13 (the Tix cap under load, and a check that counts zombies) §14 (i2 → i3 displacement), §18 (i3 back — and no check could reach it) and §19 (`i2` decommissioned; the rollback copies on it are gone).** The inventory below is
 the **pre-change snapshot**, kept as measured. §11 records what was applied with before and
 after numbers, and **four corrections to findings in this page** — including one that would
 have deleted the production Tix database. Read §11 before acting on §4, §5, §7 or §9.
@@ -1004,9 +1004,11 @@ containers up inside the container (`innotel-site`, `metrics-node-exporter`, `ac
 **301**. The `000` seen twice on the way was curl sending the IP as SNI with no `--resolve`, not a
 dark edge — worth writing down because it reads exactly like one.
 
-**Rollback is unchanged and still armed:** `i2` keeps the stopped original with its data untouched,
-so `incus start proxy` there restores the edge on the same address. Nothing on `i2` was deleted, and
-the `.71` address and port-forwards never moved.
+**Rollback was armed on `i2` for exactly one day, and it is gone.** `i2` kept the stopped original
+with its data untouched, so `incus start proxy` there restored the edge on the same address — and
+nothing on the router ever moved. `i2` was **decommissioned on 2026-11-16** (§19) and the stopped
+copy went with it, so that sentence is now history rather than a plan. Read §19 before anything
+here is used as a recovery procedure.
 
 ## 16. The estate checks, installed on the edge for the first time
 
@@ -1063,7 +1065,8 @@ all — so the instance that was running there was running without its device. B
 `i3`'s copy came from `incus export onyx -` streamed over ssh today, so it is the newer of the two.
 The 10.6 G against 8.23 G is `used` on two different zfs pools, not a difference in file count: a
 stopped zfs dataset is unmounted, so a byte-for-byte comparison needs both mounted and that was not
-done. It stays stopped until `i2` is reinstalled, which is what the copy is being preserved for.
+done. `i2` was decommissioned on 2026-11-16 (§19), so the copy this was waiting to return to no
+longer exists: **`i3` holds the only `onyx`**, still stopped.
 
 > **One correction to "stays stopped": it did not stay stopped on its own.** `onyx`'s imported
 > config carried `boot.autostart=true`, so `i3`'s first clean boot after the move started it. §18 has
@@ -1178,7 +1181,8 @@ tree it could not check (*"something did not land — do NOT reload the unit yet
 it asks for: `git sparse-checkout disable` in the real checkout (56 scripts materialised at
 `17a12bc`), install from there, then `daemon-reload`.
 
-**One thing to keep true:** the two `onyx` copies must never both run. They hold the same address
-(`.60`) and the same `tank` volume name, and only `i3` has the USB device — so if the `i2` volume
-call completes before the reinstall does, `boot.autostart` on both is the only thing standing between
-the estimator and two instances of one identity.
+**There is one `onyx` left, not two.** `i2` was decommissioned on 2026-11-16 (§19) and its copy went
+with it, which retires the "never both run" risk this paragraph was written for: `i3` holds the only
+instance, stopped, with `boot.autostart=false`, waiting for its disk or for the replacement host.
+That also means there is no second copy to fall back to — the estimator's data is the `tank` volume
+on `i3` and nothing else.

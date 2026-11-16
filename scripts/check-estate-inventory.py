@@ -62,9 +62,13 @@ CHECK = "estate_inventory"
 #: Incus 6.0.5), so it is a host this check asserts against again. The 2026-11-02 lesson
 #: still holds in both directions: a host left here after it is gone makes the whole run
 #: exit 2, because a host that does not answer is never silence.
+#: `i2` was **decommissioned on 2026-11-16** (`docs/estate-rebalance-2026-11-15.md` §19)
+#: and is out of the table; the same rule that said a retired host must not stay says so for
+#: it. The estate is three hosts until a replacement lands, and the owner's plan is to add
+#: one at a later date — the day it has an address, it is a row here, in `POOLS` and in
+#: `ROLE` at the same time, or this check fails closed.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
-    "i2": "root@192.168.1.52",
     "i3": "root@192.168.1.53",
     "i4": "root@192.168.1.54",
 }
@@ -76,8 +80,6 @@ NAME_OF_ADDRESS: dict[str, str] = {address: name for name, address in ADDRESS_OF
 #: name → the storage pools that host is allowed to have. A pool not listed is a failure.
 POOLS: dict[str, set[str]] = {
     "i1": {"incus"},
-    # `tank` came over with `i3`'s containers on 2026-11-02; measured on i2 the same day.
-    "i2": {"default", "fast", "tank"},
     # `incus` (zfs, 362 G) holds the container rootfs; `tank` was created on 2026-11-15
     # because `onyx` mounts a custom volume named `tank/onyx-data` and a container's device
     # is validated against the pool's name, not its size. It is a dataset of the same
@@ -93,9 +95,8 @@ OPTIONAL: set[str] = set()
 
 #: What each host is for. Reported, so a finding says what the host is.
 ROLE: dict[str, str] = {
-    "i1": "estate (edge — every address is dialled here)",
-    "i2": "estate (apps, mail, media, monitoring, signing)",
-    "i3": "estate (displacement target since 2026-11-15 — six of i2's containers, on br0)",
+    "i1": "estate (edge — every address is dialled here; mail, media, apps)",
+    "i3": "estate (took six containers on 2026-11-15: signara, magnate, distro, pi, subscribe, copilotkit)",
     "i4": "estate (terminal, vault, vpn, sage, telno — bridged on br-lan)",
 }
 

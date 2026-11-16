@@ -71,8 +71,8 @@ CHECK = "stuck_processes"
 #: Where each host is reachable — the same table every host check reads.
 HOSTS: dict[str, str] = {
     "i1": "root@192.168.1.51",
-    "i2": "root@192.168.1.52",
-    # `i3` is a host again as of 2026-11-15. A host that has just taken eight containers
+    # `i2` was decommissioned on 2026-11-16 (`docs/estate-rebalance-2026-11-15.md` §19).
+    # `i3` is a host again as of 2026-11-15. A host that has just taken six containers
     # is the one most likely to have something stuck in it, and the 2026-10-27 finding
     # this check exists for was a `docker exec` nobody was watching.
     "i3": "root@192.168.1.53",

@@ -30,7 +30,7 @@ this repository's business. The list comes from the revision, so a unit the esta
 
 Usage:
     ./scripts/check-unit-drift.py
-    ./scripts/check-unit-drift.py --host i1=192.168.1.51 --host i2=192.168.1.52
+    ./scripts/check-unit-drift.py --host i1=192.168.1.51 --host i3=192.168.1.53
     ./scripts/check-unit-drift.py --unit-dir /tmp/units --ref HEAD
     ./scripts/check-unit-drift.py --prom /var/lib/node_exporter/textfile/estate-check-unit-drift.prom
 
