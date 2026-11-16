@@ -139,18 +139,14 @@ ADDRESS_ROWS = {
          ("sage", "192.168.1.94"), ("vault", "192.168.1.73")],
     # capstone (`.30`) has no row: it is stopped and its address is deliberately
     # unpinned, so the fixture must not invent one back onto the host.
-    I2: [
-         # copilotkit joined i2 on 2026-11-14 (the dashboard behind the cpk names) and
-         # left again with the five others on 2026-11-15, so it is an i3 row now.
-         # proxy left for i4 the same evening; i2 keeps only a stopped copy.
-         # `monitor` (`.88`) left with SigNoz on 2026-11-16, so the fixture drops it
-         # with the table it mirrors.
-         # `onyx` stayed when the rest moved on 2026-11-15: it mounts the USB block device.
-         ("onyx", "192.168.1.60")],
-    # i3 returned on 2026-11-15 and took six of i2's containers while i2 is reinstalled.
+    # `i2` was decommissioned on 2026-11-16, so it has no rows: the fixture mirrors the
+    # address table, and a host left in one and not the other is how this pair drifts.
+    # i3 returned on 2026-11-15 and took six of i2's containers; `onyx` — the one that had
+    # stayed on i2 — is an i3 row now, because the i3 copy is the only one left.
     # Every address is pinned inside its container, so only the host key changed.
     I3: [("copilotkit", "192.168.1.114"), ("distro", "192.168.1.61"),
-         ("magnate", "192.168.1.57"), ("pi", "192.168.1.70"),
+         ("magnate", "192.168.1.57"), ("onyx", "192.168.1.60"),
+         ("pi", "192.168.1.70"),
          ("signara", "192.168.1.44"), ("subscribe", "192.168.1.58")],
     # i4 holds six satellites (sage, telno, telno-turn, terminal, vault, vpn); the edge
     # container itself moved to i2 and the media/business containers stay on i1. The
@@ -310,12 +306,12 @@ class LimitsLiveCase(LiveCase):
 
 #: i3 was retired on 2026-11-02; the estate is three hosts and a retired one in this
 #: table would make every inventory run exit 2 against a machine that cannot answer.
-INVENTORY_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
-KNOWN_REMOTES = [I1, I2, I3, I4]
+INVENTORY_HOSTS = {"i1": f"root@{I1}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
+KNOWN_REMOTES = [I1, I3, I4]
 
 
 def _inventory_rules(pools=None, remotes=None) -> dict:
-    pools = pools or {"i1": ["incus"], "i2": ["default", "fast", "tank"],
+    pools = pools or {"i1": ["incus"],
                       "i3": ["incus", "tank"], "i4": ["default", "tank"]}
     remotes = remotes or {host: list(KNOWN_REMOTES) for host in INVENTORY_HOSTS}
     rules = {}
@@ -344,7 +340,7 @@ class InventoryLiveCase(LiveCase):
 
     def test_an_unknown_pool_fails_the_run(self):
         chk = _load("check-estate-inventory")
-        pools = {"i1": ["incus"], "i2": ["default", "fast", "tank", "scratch"],
+        pools = {"i1": ["incus", "scratch"],
                  "i3": ["incus", "tank"], "i4": ["default", "tank"]}
         code, _ = self.run_check(chk, INVENTORY_HOSTS, _inventory_rules(pools=pools))
         self.assertEqual(code, 1)
@@ -362,7 +358,7 @@ class InventoryLiveCase(LiveCase):
 # check-host-disk: a root filesystem past the line must fail/warn the run
 ####################################################################################
 
-DISK_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
+DISK_HOSTS = {"i1": f"root@{I1}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
 
 
 def _disk_rules(percents: dict | None = None) -> dict:
@@ -382,17 +378,17 @@ class HostDiskLiveCase(LiveCase):
         self.assertEqual(code, 0)
         body = self.text(prom)
         self.assertIn('innotel_estate_check_last_status{check="host_disk"} 1', body)
-        self.assertIn('innotel_estate_check_host_disk_percent{check="host_disk",host="i2",mount="/"} 42', body)
+        self.assertIn('innotel_estate_check_host_disk_percent{check="host_disk",host="i3",mount="/"} 42', body)
 
     def test_a_full_root_filesystem_fails_the_run(self):
         chk = _load("check-host-disk")
-        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules({"i2": 93}))
+        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules({"i3": 93}))
         self.assertEqual(code, 1)
         self.assertIn('innotel_estate_check_failures{check="host_disk"} 1', self.text(prom))
 
     def test_a_tight_root_filesystem_warns(self):
         chk = _load("check-host-disk")
-        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules({"i2": 85}))
+        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules({"i3": 85}))
         self.assertEqual(code, 0, "85 % is a warning, not a failure")
         self.assertIn('innotel_estate_check_warnings{check="host_disk"} 1', self.text(prom))
 

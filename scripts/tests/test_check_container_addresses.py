@@ -84,7 +84,7 @@ class AddressCase(unittest.TestCase):
         # for having no address. A VM reports one only with an agent in the guest, so
         # "not in the table" is not the table being stale.
         result = chk.audit(
-            estate({("i2", "ontrak-winpack-build"): dict(state="RUNNING", address=None, kind="virtual-machine")})
+            estate({("i3", "ontrak-winpack-build"): dict(state="RUNNING", address=None, kind="virtual-machine")})
         )
         self.assertTrue(result.ok)
         self.assertEqual(result.warnings, [])

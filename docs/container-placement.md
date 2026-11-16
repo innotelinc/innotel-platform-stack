@@ -15,6 +15,16 @@ evening pass moved the edge services back onto i1, right-sized i1's CPU caps, an
 put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
 
+## Changes applied 2026-11-16 — `i2` is decommissioned
+
+`i2` (`192.168.1.52`) is **out of the estate**. Its work is already elsewhere: six containers on
+`i3` (`signara`, `magnate`, `distro`, `pi`, `subscribe`, `copilotkit`), `proxy` on `i4`. The stopped
+copies that were kept on `i2` as rollback — `proxy`, `onyx`, `vault`, `sage` — went with the host,
+so nothing on this page can be rolled back to `i2` any more. `estate-rebalance` §19 records what
+else went with it, what was cleaned up on the surviving hosts, and what a replacement host has to be
+able to hold. The tables below describe `i1`, `i3` and `i4`; `i2` columns in the dated sections are
+the record of where things were, not where they are.
+
 ## Changes applied 2026-11-15 — `i3` is rebuilt and back in the estate
 
 - **`i3` (`192.168.1.53`) answers again** after being retired on 2026-11-02. It is a fresh

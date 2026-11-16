@@ -35,8 +35,9 @@ inv = _load()
 
 #: The 192.168.1.53 (`i3`) remote was removed on 2026-11-02 with the host and restored on
 #: 2026-11-15 when the host returned: a trusted host the inventory does not name is a
-#: failure, and so is a host the inventory names but no one trusts.
-ALL_KNOWN_REMOTES = ["192.168.1.51", "192.168.1.52", "192.168.1.53", "192.168.1.54"]
+#: failure, and so is a host the inventory names but no one trusts. `192.168.1.52` (`i2`)
+#: left on 2026-11-16 when the host was decommissioned.
+ALL_KNOWN_REMOTES = ["192.168.1.51", "192.168.1.53", "192.168.1.54"]
 
 
 def views(overrides=None):
@@ -75,21 +76,21 @@ class InventoryCase(unittest.TestCase):
         self.assertIn("192.168.1.99", result.failures[0].message)
 
     def test_a_storage_pool_the_inventory_does_not_name_is_a_failure(self):
-        # A pool appeared on a host beside the one it is allowed to have.
-        result = inv.audit(views({"i2": inv.HostView("i2", remotes=ALL_KNOWN_REMOTES, pools=["default", "fast", "scratch"])}))
+        # A pool appeared on a host beside the one it is allowed to have. (`i2`, this case's
+        # original host, was decommissioned on 2026-11-16, so the case reads on `i4`.)
+        result = inv.audit(views({"i4": inv.HostView("i4", remotes=ALL_KNOWN_REMOTES, pools=["default", "tank", "scratch"])}))
         self.assertFalse(result.ok)
         self.assertEqual([f.code for f in result.failures], ["unknown_pool"])
         self.assertIn("scratch", result.failures[0].message)
 
     def test_a_named_pool_that_is_gone_is_a_warning_not_a_failure(self):
-        # i2's pools are gone but the host is otherwise as the inventory describes.
-        result = inv.audit(views({"i2": inv.HostView("i2", remotes=ALL_KNOWN_REMOTES, pools=[])}))
+        # i3's pools are gone but the host is otherwise as the inventory describes.
+        result = inv.audit(views({"i3": inv.HostView("i3", remotes=ALL_KNOWN_REMOTES, pools=[])}))
         self.assertTrue(result.ok, [f.message for f in result.failures])
-        self.assertEqual([f.code for f in result.warnings], ["missing_pool"] * 3)
-        self.assertIn("default", result.warnings[0].message)
-        self.assertIn("fast", result.warnings[1].message)
-        # `tank` came over with i3's containers on 2026-11-02.
-        self.assertIn("tank", result.warnings[2].message)
+        self.assertEqual([f.code for f in result.warnings], ["missing_pool"] * 2)
+        # `incus` holds the rootfs (362 G zfs); `tank` is the dataset `onyx`'s volume needs.
+        self.assertIn("incus", result.warnings[0].message)
+        self.assertIn("tank", result.warnings[1].message)
 
     def test_the_bench_is_no_longer_optional(self):
         # i4 was the test bench whose absence was only a warning. On 2026-10-02 it took

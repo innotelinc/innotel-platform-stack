@@ -31,7 +31,9 @@ set -uo pipefail
 CHECK=0
 [ "${1:-}" = "--check" ] && CHECK=1
 
-INCUS_HOSTS=${INCUS_HOSTS:-"192.168.1.51 192.168.1.52 192.168.1.53 192.168.1.54"}
+# `i2` (192.168.1.52) was decommissioned on 2026-11-16 and is no longer an Incus host;
+# the default covers the three that are, plus whatever a replacement gets when it lands.
+INCUS_HOSTS=${INCUS_HOSTS:-"192.168.1.51 192.168.1.53 192.168.1.54"}
 DEV_HOSTS=${DEV_HOSTS:-"192.168.1.74"}
 INCUS_PASSWORD=${INCUS_PASSWORD:-}
 DEV_PASSWORD=${DEV_PASSWORD:-$INCUS_PASSWORD}
