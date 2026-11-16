@@ -1535,18 +1535,18 @@ commands through; the port being open is not evidence the host can answer.
 
 ## Where the estate stands (2026-11-16)
 
-On `i2`, eight instances now run: `monarch` (`.56`, 37 containers, `14002/14011/14012` open),
+On `i2`, nine instances now run: `monarch` (`.56`, 37 containers, `14002/14011/14012` open),
 `clearpath` (`.83`), `blueprint` (`.76`), `regcache` (`.79`), `rizzaura` (`.62`), `sage` (`.94`),
-`nas` (`.89`, samba on 139/445, with its 23 GiB `nas-data` volume copied into `fast`) and `atlas`
-(`.90`, gitea + convex). Each `i1` source is kept `STOPPED` as a rollback copy —
+`nas` (`.89`, samba on 139/445, with its 23 GiB `nas-data` volume copied into `fast`), `atlas`
+(`.90`, gitea + convex) and `genie-preview` (`.24`). Each `i1` source is kept `STOPPED` as a rollback copy —
 `monarch-retired`, `nas-retired`, `atlas-retired`, and the others under their own names.
 
 The `/tank/media-downloads` mirror is complete and in sync (145 306 004 461 bytes, with the
 timer's last pass sending 17 309 bytes and exiting 0), and `media-sync.timer` was re-enabled
 after the failed copy.
 
-On `i1`: `atheniq` (`.59`), `genesis` (`.66`), `genie-preview` (`.24`), `mail` (`.15`),
-`ontrak` (`.21`), `vault` (`.73`) and `workloads` (`.113`) still run there.
+On `i1`: `atheniq` (`.59`), `genesis` (`.66`), `mail` (`.15`), `ontrak` (`.21`), `vault`
+(`.73`) and `workloads` (`.113`) still run there.
 
 Still open:
 - `sage` is on `.94`, and the estate already declares that. `.71` is the `proxy` host (its
@@ -1558,8 +1558,8 @@ Still open:
   `incus config device override sage eth0 ipv4.address=192.168.1.94` is rejected with
   `Cannot use manually specified ipv4.address when using unmanaged parent bridge` — a stable
   address needs a DHCP reservation or static configuration inside the guest.
-- `ontrak`, `workloads` and `genie-preview` carry host binds and have not been examined for
-  moves.
+- `ontrak` and `workloads` still carry host binds and stay on `i1`; `genie-preview` moved, and the
+  paths those two need (28 G `/srv/vault-ro`, 23.3 G `tank/evac`) are not staged on `i2` yet.
 
 ### The network regression on i2 was a bridge mismatch, not a guest failure
 
@@ -1726,3 +1726,30 @@ command sessions before its output arrived, so it is not a safe way to bounce do
 instance; and `sysctl -w` alone did not survive, which is why the setting lives in a `sysctl.d`
 file rather than in a one-off command. Any other ID-mapped instance on `i2` will hit the same
 quota, so the file is a host requirement, not an `atlas` fix.
+
+
+## genie-preview moved, and the device-override limit it exposed
+
+`genie-preview`'s only host bind is `/srv/genie-workspace` (18 M, 10 entries), which was staged on
+`i2` first. The first copy then failed in the instance-record stage with `Invalid device type ""`:
+`--device root,pool=fast` does not work on an instance that already carries its own host-path disk
+device. `incus copy genie-preview i2:genie-preview --instance-only --storage fast` is the way to
+retarget the pool and leaves the bind untouched. The moved instance came up on `.24` with all 10
+workspace entries visible inside it, and `i1` keeps `genie-preview-retired`.
+
+## atheniq: the copy runs at a seventh of atlas's speed, and the outage that implies
+
+The second attempt used `--storage fast` and this time it did progress — 2.7 GB on `i2` after about
+390 s, roughly 7 MB/s against atlas's 25–30 MB/s over the same link. It had not finished when the
+wait ended, and that exposed the expensive part of the method: while an instance's create operation
+is still open, `incus start` refuses with `Instance is busy running a "create" operation`. Stopping
+the source in order to copy it therefore means **the service is down for the entire transfer**, not
+just while the copy is prepared.
+
+atheniq was restored by stopping the copy unit, deleting the local operation
+(`incus operation delete <uuid>` answers `deleted` even when another operation still lists) and
+starting it on `i1`, where `.59` answers again, and the partial `i2` copy was deleted.
+
+The rule this leaves: measure the first two minutes of a copy before committing to moving a
+production instance. atlas at 25–30 MB/s is a ten-minute outage, atheniq at 7 MB/s is an hour-long
+one, and that difference decides whether it is a move or an incident.
