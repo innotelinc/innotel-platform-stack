@@ -1355,9 +1355,13 @@ re-applied (37 containers). Final state: **15/15 containers `RUNNING`** on `i1`,
 25/587/993, `monarch` 14011/14012/14002, `atheniq .59`, `atlas .90`, `blueprint .76`,
 `genesis .66` all answering. Load fell 85 → 36.
 
-`clearpath` (`.83`) is the one incomplete address: `RUNNING`, `exec` works, `eth0` up with
-`192.168.1.83/24` and `systemd-networkd` active, but no listeners at all on 22/80/443 — its
-services did not come back after the forced restart.
+`clearpath` (`.83`) was the last address not answering, and it turned out not to be damage.
+It is `RUNNING`, `exec` works, `eth0` is up with `192.168.1.83/24` and `systemd-networkd` is
+active, but nothing listens on 22/80/443 because **there is no service to listen**: it is a bare
+Ubuntu 24.04 image container with `limits.memory: 256MiB`, `limits.cpu: "2"`, no
+`/usr/sbin/sshd`, and `systemctl list-unit-files --state=enabled` returns nothing. It has never
+served SSH; its `.83` answering ICMP is the container's stack, not a service. The first reading
+of this — that its services failed to come back after the forced restart — was wrong.
 
 **No instance was moved to `i2`.** The move path was prepared — `i2` listens on `:8443` and issued
 a trust token, and `incus remote add` on `i1` only stopped at its interactive fingerprint
@@ -1368,3 +1372,45 @@ are `RUNNING` again on `i1`. `proxy` was left untouched on `i4`, as required.
 Dedupe mapping, measured across hosts: only `sage` and `vault` exist on two hosts, `RUNNING` on
 `i1` and `STOPPED` on `i4`. The `i4` copies are inert rollback copies, so no duplicate process
 runs anywhere in the estate; nothing was deleted.
+
+### What a move actually requires: four prerequisites, none of them obvious
+
+Issuing `incus copy monarch i2:monarch` failed four times before it could start, each time for a
+different reason, and each failure is a fact about the estate rather than about the command:
+
+1. **Trust.** `incus remote add i2 https://192.168.1.52:8443 --token=<332-char token>
+   --accept-certificate` succeeded only after `core.https_address :8443` was set on `i2`. Without
+   `--accept-certificate` the add stops at an interactive fingerprint prompt and dies on EOF in a
+   non-interactive shell. Proof it worked: `incus info i2:` returns `api_status: stable`,
+   `auth: trusted`.
+2. **Profiles.** `Requested profile "docker" doesn't exist`. `i1` defines `default`, `docker`,
+   `large`, `medium`, `small`; a fresh `i2` has only `default`, and even that one had **no devices
+   at all** — no `root` disk, no `eth0` — so a copied instance would have neither. All five were
+   copied across (`incus profile show <p>` on `i1`, `incus profile edit <p>` on `i2`), and `i2`'s
+   `default` was given `root` (pool `fast`) and `eth0` (`nictype=bridged parent=br0`) to match
+   `i1`'s. Note `incus profile show` in 6.0.5 has **no `--format` flag**; asking for it writes an
+   empty profile that `edit` then accepts, so the failure is silent.
+3. **A bridge.** The estate's NICs are `parent: br0`, and `i1` runs `br0` as a bridge over
+   `enp1s0` with the host's own `192.168.1.51/24` **on the bridge**. `i2` had no bridge at all,
+   only `enx50a0300d1cc4` with `192.168.1.52/24`. `br0` was created on `i2` with the address
+   moving onto it and the physical port as a member, guarded by a `systemd-run --on-active=180`
+   rollback that would have restored the previous netplan had SSH been lost; reachability was
+   confirmed on `.52` and the rollback cancelled. Incus's API stayed reachable over the new bridge
+   (`auth: trusted`).
+4. **Host storage, and the honest limit of a copy.** `monarch` bind-mounts
+   `/tank/media-downloads` (131 GB, from the `tank` ZFS pool) at `/data/media`. The copy aborts on
+   `Missing source path "/tank/media-downloads"`, which is correct: copying the container without
+   its media would move a media server that has no media. The path was created on `i2` and the
+   131 GB was copied with `rsync -a --partial` at **~96 MB/s**, measured.
+
+Two failures in that sequence were self-inflicted and worth recording: starting `rsync` seconds
+before `netplan apply` killed it at 0 bytes when the interface was rebuilt, and `rsync`'s own
+`ssh` does not inherit `-o StrictHostKeyChecking=no`, so it refused at `Host key verification
+failed` because `i1`'s `known_hosts` still carried **pm3's pre-reinstall ED25519 key for
+`.52`** (line 20). `ssh-keygen -R 192.168.1.52` plus a fresh `ssh-keyscan` fixed it; a stale host
+key after a reinstall fails every non-interactive tool that talks to the box, not just `ssh`.
+`i1` and `i2` differ in the ways that matter for a move: `i1` = 4 cores, `tank` ZFS pool (458 GB,
+407 GB used) with container volumes in `tank/incus/containers`, root filesystem 98 GB with 50 GB
+free; `i2` = 8 cores, 468 GB root with 432 GB free, 14 357 MB RAM free, pool `fast` of type `dir`.
+The `dir` pool choice matters: it means no ZFS snapshot/replication path exists for these moves,
+so every transfer is a filesystem copy over the network.
