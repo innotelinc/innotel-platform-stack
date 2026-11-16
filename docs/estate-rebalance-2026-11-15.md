@@ -1551,16 +1551,15 @@ On `i1`: `atheniq` (`.59`), `atlas` (`.90`), `genesis` (`.66`), `genie-preview` 
 Still open:
 - `atlas` (25.6 GiB) is still on `i1`; its copy is expected to hit the same stalled-create
   behaviour that `atheniq` did, so it needs a watched job rather than a fire-and-forget copy.
-- `sage`'s address drifted and cannot be pinned from the host. It answered `.71` on `i1`; `.71` still answers ping
-  and offers OpenSSH 8.9p1 from MAC `10:66:6a:80:7b:e8`, which matches no instance on `i1` or
-  `i2` — an outside device picked up that lease. The moved copy is not the same guest identity:
-  its volatile MAC changed from `10:66:6a:fb:a7:48` to `10:66:6a:0e:d1:59`, so the LAN DHCP gave
-  it `.94` instead. It cannot be pinned at the Incus layer: `br0` is an unmanaged parent bridge, so
+- `sage` is on `.94`, and the estate already declares that. `.71` is the `proxy` host (its
+  hostname is `proxy`, OpenSSH 8.9p1, MAC `10:66:6a:80:7b:e8`), not a stale sage copy, and
+  `scripts/edge-vhost-targets.tsv` pins `sage.innotel.tech` to `192.168.1.94:443`. The moved copy
+  carries a new volatile MAC (`10:66:6a:fb:a7:48` → `10:66:6a:0e:d1:59`), so DHCP renumbered it to
+  the address the edge expects; `.94` answers on 22 and 443. It cannot be pinned at the Incus
+  layer, because `br0` is an unmanaged parent bridge and
   `incus config device override sage eth0 ipv4.address=192.168.1.94` is rejected with
-  `Cannot use manually specified ipv4.address when using unmanaged parent bridge`. A stable
-  address therefore needs a DHCP reservation on the LAN router, or static configuration inside
-  the guest; `.94` currently answers on 22 and 443. Any reference to `sage` by its old `.71` needs
-  updating, because that address now belongs to something else.
+  `Cannot use manually specified ipv4.address when using unmanaged parent bridge` — a stable
+  address needs a DHCP reservation or static configuration inside the guest.
 - `ontrak`, `workloads` and `genie-preview` carry host binds and have not been examined for
   moves.
 
