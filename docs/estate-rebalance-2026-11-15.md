@@ -1037,10 +1037,17 @@ moved to match tonight's placements — §15 and §17), `mail_traffic`, `dmarc_a
 `authentik_privilege`, `mail_relay`, and `address_latency` — which dials every address in the table,
 including `.60`, and `onyx` is deliberately stopped (§17).
 
-**The scrape path is the next thing to wire.** No host runs node-exporter on the metal;
-`metrics-node-exporter` is a container inside `proxy` that mounts a textfile directory **from its
-own filesystem**, so the 35 files the unit writes to `/var/lib/node_exporter/textfile` on `i4` are
-read by nobody yet. The checks now publish; nothing consumes them.
+**The scrape path needed the checks to run *inside* the edge, and that is where they run now.** No
+host runs node-exporter on the metal, and `metrics-node-exporter` is a container inside `proxy` that
+mounts its textfile directory **from its own filesystem** — a file written to
+`/var/lib/node_exporter/textfile` on `i4`'s metal never appears inside the container (proved by
+writing one and failing to find it). So those 35 host-written files are still read by nobody; the
+host copy is a spare, not the publisher. The container runs its own copy of the same unit and the
+same checks (`/opt/innotel/estate-checks`) on its own timer, and Prometheus scrapes
+`node-exporter:9100` there: **32 series before, 33 after**, with `host_zombies` arriving as the new
+one. An earlier version of this paragraph said the checks "publish and nothing consumes them" — that
+was true of the host copies only, and it is why the checks were moved to run where the scrape
+happens.
 
 ## 17. `onyx` — on `i3`, stopped, and staying stopped
 
@@ -1057,3 +1064,121 @@ all — so the instance that was running there was running without its device. B
 The 10.6 G against 8.23 G is `used` on two different zfs pools, not a difference in file count: a
 stopped zfs dataset is unmounted, so a byte-for-byte comparison needs both mounted and that was not
 done. It stays stopped until `i2` is reinstalled, which is what the copy is being preserved for.
+
+> **One correction to "stays stopped": it did not stay stopped on its own.** `onyx`'s imported
+> config carried `boot.autostart=true`, so `i3`'s first clean boot after the move started it. §18 has
+> the measurement; `boot.autostart` is `false` now, which is what makes "stays stopped" true across a
+> reboot rather than only until the next one.
+
+## 18. `i3` is back — seven containers, one wrong start, and no check could reach it
+
+`i3` was powered off for the physical move and answered again at **01:21 UTC on 2026-11-16**
+(`uptime`: 3 minutes at 01:24). Six of its seven containers started themselves and kept their
+addresses; `copilotkit` did not start; `onyx` started and should not have.
+
+| Container | After the clean boot | Address | What was checked |
+|---|---|---|---|
+| `distro` | RUNNING | `.61` | ping from `i3`, `i4` |
+| `magnate` | RUNNING | `.57` | ping `2/2` from `i1` |
+| `pi` | RUNNING | `.70` | ping from `i3`, `i4` |
+| `signara` | RUNNING | `.44` | `signara-alertmanager-1` up, `9093/-/healthy` → `OK` |
+| `subscribe` | RUNNING | `.58` | ping from `i3`, `i4` |
+| `copilotkit` | **STOPPED** — started by hand | `.114` | 1.59 GiB, `node` + 3 `postgres`, 8 listening sockets |
+| `onyx` | **started, stopped again** | `.60` | §18.1 |
+| `ontrak-winpack-build` | STOPPED | — | the Windows build VM, stopped on purpose (§12.2) |
+
+**A ping sweep five minutes after the boot reported 0/3 against all six.** That was the bridge while
+the containers were still bringing `eth0` up, not a network fault: seconds later `magnate` answered
+2/2 from `i1` and all six answered from `i3` and `i4`. Worth writing down because "0/3 on every
+address" reads exactly like the failure §14 spends its length avoiding.
+
+### 18.1 `onyx` started because the import carried `boot.autostart`
+
+§17 said `onyx` stays stopped. It did — until the host rebooted. The imported config carries
+`boot.autostart=true`, so the clean boot started a container whose device is **not on this host**:
+`ls -l /dev/sdc` on `i3` returns nothing, because the USB disk did not move with the machine. It ran
+with only its `tank` volume — `incus/tank/custom/default_onyx-data`, 40 G with **57 M** used against
+the 56.3 M §17 measured — and its `onyx-data.img` is still 21 474 836 480 bytes dated **Oct 19
+22:50**, with the volume's directories carrying their October dates, so nothing was written while it
+was up. It is stopped again and `boot.autostart` is now **`false`**, which is the part §17 was
+missing: the placement stayed stopped by hand, not by policy, and one reboot showed the difference.
+
+`incus stop onyx` also outlived the 90-second ssh call that issued it — the call timed out and the
+stop completed anyway. A timeout there is not a failed stop.
+
+**`copilotkit` did not start on its own**, and `boot.autostart` is unset on it (which Incus treats as
+true), so why it stayed down is not established. Started by hand it is healthy. It is the one
+container whose boot behaviour differed from the other six.
+
+### 18.2 No check could read `i3`, and the reason was one line of ssh config
+
+The edge asks every host for its inventory with key-only ssh, through a block that
+`scripts/trust-estate-hosts.py` writes into `/root/.ssh/config`:
+
+```
+Host 192.168.1.51 192.168.1.52 192.168.1.54
+  IdentityFile /root/.ssh/container-address
+```
+
+**`.53` was not in that list**, and i3 was rebuilt on 2026-11-15, so the key was not authorized there
+either: `authorized_keys` on i3 held one line (`codebuff@i4`) and ssh from the edge answered
+`Permission denied (publickey,password)`. Both halves are fixed — the key is in i3's
+`authorized_keys` (2 lines now) and `.53` is in the host block — after which
+`ssh -o BatchMode=yes root@192.168.1.53 hostname` answers `i3`.
+
+**This is why `unit_drift`'s host list has to be read carefully.** It printed *"0 finding(s) of 15
+unit(s) compared (this host, i1, i2, i3)"* while `i2` was unreachable and named in the same run — so
+the parenthesis is the hosts it **tried**, not the ones that answered. Adding `i3` to the unit's host
+list makes the check *ask* i3; the ssh block is what makes an answer arrive.
+
+### 18.3 The verdict with all four hosts answering
+
+`alert_delivery` is **green** (`0 failure(s)`, `last_status 1`) — the probe runs `amtool` inside
+`signara-alertmanager-1` where that container now lives — and `installed_checks` is green again
+(*"every installed check and both unit files match origin/main"*).
+
+**12 checks are red.** §16 recorded 15, but the two runs did not see the same estate, so the count
+moved for several reasons at once:
+
+| Check | What it says now | Cause |
+|---|---|---|
+| `container_address`, `container_limits`, `estate_inventory`, `host_disk`, `host_zombies`, `mount_stack`, `stuck_processes`, `unit_drift` | *"could not read a host: i2 (root@192.168.1.52) … exit status 255"* | `i2` is off for the reinstall — `ssh: connect to host 192.168.1.52 port 22: No route to host` |
+| `edge_vhost_targets` | 101 findings: 0 drift, **25 dead targets** | the vhosts pointing into `i2`'s Docker stacks, plus `.56` (`monarch`, stopped) and `.60` (`onyx`, stopped) |
+| `address_latency` | **3 failures of 31 dialled**: `.52`, `.56`, `.60` | `i2` off, `monarch` stopped, `onyx` stopped on purpose |
+| `media_doors` | 2 failures: `media.innotel.us` and `iptv.innotel.us` → **502** | `monarch` (`.56`) is stopped |
+| `mail_traffic` | *159 message(s) accepted in the last 24 h and not one delivery completed* | real, and not caused by the move |
+
+`address_latency` going from **32 dialled addresses to 31** is the `monitor` row leaving the table:
+`.88` was one of its four failures, and SigNoz no longer exists to answer it.
+
+**Do not read `Result=success ExecMainStatus=0` as "everything passed".** Every `ExecStart=` in the
+unit is `-`-prefixed so one failing check cannot stop the others, which leaves the unit's status as
+whatever the *last* check returned: this run reported `0` with 12 red, §16's first run reported `1`
+with 15. The `.prom` files are the verdict.
+
+### 18.4 Three assumptions fixed, and a deploy path that could not verify itself
+
+`17a12bc` follows the containers that moved:
+
+- `check-alert-delivery.py` had Alertmanager pinned to `i2` from the 2026-11-02 move. `signara` came
+  back to `i3`, so the check ran `incus exec signara` on a host that no longer holds it. The target
+  follows the container now, verified first on `i3`.
+- `estate-checks.service` passed only `i1` and `i2` to `check-unit-drift.py`, so the host carrying six
+  of `i2`'s containers was compared nowhere. `i3` joined the list.
+- `check-container-addresses.py` kept `monitor` (`.88`) as an `i2` row after SigNoz was removed, and
+  `check-address-latency.py` dials every row in that table — so a removed service was reported as a
+  dark door. The row and its `ROLES` entry are gone, recorded the way `capstone`'s removal is.
+
+**Deploying it exposed a deploy path that could not verify itself.** The edge container installs from
+`/root/platform-stack`, a **copy with no `.git`**, while its real checkout is
+`/usr/src/projects/complete/ips` — a sparse checkout whose `scripts/` was empty on disk. The
+installer compares every file it lands against `origin/main` and refused to install the units from a
+tree it could not check (*"something did not land — do NOT reload the unit yet"*), leaving
+`installed_checks` red with **8** findings for one run. That is the guard working. The fix is the one
+it asks for: `git sparse-checkout disable` in the real checkout (56 scripts materialised at
+`17a12bc`), install from there, then `daemon-reload`.
+
+**One thing to keep true:** the two `onyx` copies must never both run. They hold the same address
+(`.60`) and the same `tank` volume name, and only `i3` has the USB device — so if the `i2` volume
+call completes before the reinstall does, `boot.autostart` on both is the only thing standing between
+the estimator and two instances of one identity.
