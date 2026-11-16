@@ -1218,3 +1218,63 @@ while `i2` is parked and wrong the moment it rejoins, so rejoining is one revert
 address rows back to wherever the instances run. The sentences in §15, §17 and §18.4 that say "no
 rollback copies" describe the 2026-11-16 interval only; this section supersedes them, and the copies
 are intact on `i2`.
+
+## 20. pm3's reinstall: the staged kernel was staged correctly and triggered wrongly
+
+Measured 2026-11-15, and it needs a hand on the box.
+
+**What worked.** The installer was prepared and load-tested on pm3: the Ubuntu 26.04.1
+live-server ISO (`2,927,861,760` B), `vmlinuz` (`0ad39b13…`, 17,295,752 B) and `initrd`
+(`7aeb757e…`, 99,677,109 B) extracted, and `kexec -l` with
+`autoinstall ds=nocloud-net;s=http://192.168.1.54:8080/ console=tty0 console=ttyS0,115200 ip=dhcp ---`
+returned success, then `kexec -u` unloaded it with Proxmox still running. The autoinstall
+served from i4 validates (`version: 1`, `hostname: i2`, addresses `.52` + `.3`, two keys,
+six late-commands) and pm3 fetched it itself (`200/200`).
+
+**What broke.** At 22:19 UTC the trigger was `systemctl kexec`, not `kexec -e`. systemd
+re-loads a kernel of its own instead of executing the staged image, so the Ubuntu kernel
+came up **without** `autoinstall`, `ds=` or `ip=`. The result, measured 22:28–22:31 UTC:
+`.3` answers ICMP in 0.54 ms, **every port 1–200 plus 3128/8006/8080/8443/9100 closed**,
+VM 200 `i2` silent, and the config server logged **7 GETs total — all of them my own
+preflights, none from the installer**. It never received a storage plan, so
+`local-lvm` was never wiped: the box is running Proxmox's userspace under a foreign
+kernel, with `vmbr0` up and no daemons alive.
+
+**Recovery needs a power cycle**, because pm3 has no BMC, no serial console and no
+watchdog (`RuntimeWatchdogUSec` empty, no `/dev/watchdog`). EFI order is unchanged —
+`Boot0001* proxmox` → `\EFI\PROXMOX\SHIMX64.EFI` — so the next boot is Proxmox again,
+and VM 200 has `onboot: 1`, so `i2` and its `.52` come back with it. Nothing in this
+incident touched the disks.
+
+**The corrected trigger** is `scripts/reinstall-pm3-as-i2.sh`: preflight (`pveversion`,
+the two image files, the autoinstall fetch, `qm list`), then `kexec -l` with the same
+command line minus `console=ttyS0` (that desktop has no serial port) plus `nomodeset`
+(unknown GPU on a headless install), then **`kexec -e`**, which executes exactly what was
+staged. It never returns.
+
+**Preserved before any of this**, on i4 (`.54`), all readable:
+
+| file | size | sha256 |
+|---|---|---|
+| `i2-preserve-docker-stacks.tgz` | 212 M | `a23bc7ea9e7fc2ff0cac9a0fc6373750d42df4b269e5c511e2aebeb0f4a1687b` |
+| `i2-preserve-configs-20261115.tgz` | 118,534 B | `5faf6d9e1626e0b6772d6ca5e87cad5db4cf5c27dc247e7a3eca7b3e1abcfbed` |
+| `i2-preserve-full-20261115.tgz` | 15.9 G | integrity check outstanding |
+| `pm3-config-20261115.tgz` | Proxmox network/WireGuard/pve/ssh config | — |
+| `pm3-facts-20261115.txt` | `lsblk`, `pvesm`, `qm config 200`, `efibootmgr` | — |
+
+### 20.1 i4 was not full of busy containers — it was full of my own verification job
+
+`uptime` read **34.44 / 37.28 / 21.19 on 2 CPUs** at 22:16 UTC with 158 MB free. Every
+Incus container measured **0.0 % of a core** at that moment. The load was host-side, and
+the largest single consumer was the `tar tzf` integrity check of the 15.9 G archive
+(`gzip` 31.9 %, 4:56 elapsed) that I had started on the same box. Killing it dropped load
+to **1.63 / 3.91 / 9.57** and raised available memory from **1721 MB to 2272 MB** within
+a minute. That is the honest shape of "CPU pressure on i4".
+
+Of what remained, one container mattered: `proxy` at **62.6 % of one core** and
+**4.59 GiB RSS** — the edge, Prometheus and Grafana, so it was not stopped.
+
+Stopped for relief: `terminal` (396 MiB), `ontrak-tix-db` (156 MiB), and the staging
+Docker pair `fax-staging-portal-1` (4.49 % CPU) + `fax-staging-db-1`. Both Incus
+containers still carry `boot.autostart=true`, so a reboot brings them back until that is
+changed.
