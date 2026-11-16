@@ -1,6 +1,6 @@
 # Estate rebalance — inventory and options, i1 / i2 / i3 / i4
 
-**Status: partially applied 2026-11-15 — see §11 (15:45–16:05 EST), §12 (21:10–22:00 EST), §13 (the Tix cap under load, and a check that counts zombies) §14 (i2 → i3 displacement), §18 (i3 back — and no check could reach it) and §19 (`i2` decommissioned; the rollback copies on it are gone).** The inventory below is
+**Status: partially applied 2026-11-15 — see §11 (15:45–16:05 EST), §12 (21:10–22:00 EST), §13 (the Tix cap under load, and a check that counts zombies) §14 (i2 → i3 displacement), §18 (i3 back — and no check could reach it) and §19 (**`i2` came back the same evening — recovered and parked**, not decommissioned).** The inventory below is
 the **pre-change snapshot**, kept as measured. §11 records what was applied with before and
 after numbers, and **four corrections to findings in this page** — including one that would
 have deleted the production Tix database. Read §11 before acting on §4, §5, §7 or §9.
@@ -1186,3 +1186,35 @@ with it, which retires the "never both run" risk this paragraph was written for:
 instance, stopped, with `boot.autostart=false`, waiting for its disk or for the replacement host.
 That also means there is no second copy to fall back to — the estimator's data is the `tank` volume
 on `i3` and nothing else.
+
+## 19. `i2` came back the same evening — recovered and parked, not decommissioned
+
+`i2` (`192.168.1.52`) booted again at **21:20 UTC on 2026-11-15** with everything still on it: its
+eight Incus instances (`proxy`, `distro`, `magnate`, `onyx`, `pi`, `signara`, `subscribe` and the
+stopped `copilotkit`), the pools `default`, `fast` and `tank`, and **all six host-Docker stacks** —
+`christ`, `christ-gateway`, `christ-switch`, `christ-telno`, `scif-api-1`, `scif-database-1`, every
+one of them `(healthy)`. The decommission recorded in `d4027bd` therefore did not happen, and the
+data-loss warning about those stacks is closed: they are running.
+
+**It came up with seven of its instances running, which is the hazard.** Those instances are still
+configured to start on boot and they duplicate addresses that now answer from `i3` and `i4`: `proxy`
+`.71` on both `i2` and `i4`, and `distro` `.61`, `magnate` `.57`, `pi` `.70`, `signara` `.44`,
+`subscribe` `.58` on both `i2` and `i3`, every one pinned. Two instances of one address on one L2 is
+a MAC-level fight that `incus list` cannot show, and it reads as intermittent, unexplained failures
+in whatever dials it. `onyx` also started there — without `/dev/sdc`, which `i2` does not have.
+
+**Every instance on `i2` is stopped now**, with `boot.autostart=false` and no profile that sets it
+(all five profiles: `sets_autostart=0`), so the next boot leaves them down. `i2`'s only address on
+the wire is `192.168.1.52/24`. After the stops, each moved address resolves to exactly one MAC, and
+it is the intended host's: `.57` → `i3`'s `10:66:6a:f2:52:db`, `.71` → `i4`'s copy, while `i2`'s own
+`magnate` carried `10:66:6a:7b:75:d3`. They were never the same instance, only the same address.
+
+**The six Docker stacks on `i2` were left running on purpose.** They publish no estate LAN address,
+so they are not part of the conflict, and `christ-telno` is telephony — stopping them would be the
+outage the whole warning in §14 was trying to avoid. They stop the day someone says so.
+
+**What stands:** the check tables read three hosts (`i1`, `i3`, `i4`) as of `d4027bd`. That is right
+while `i2` is parked and wrong the moment it rejoins, so rejoining is one revert plus moving the
+address rows back to wherever the instances run. The sentences in §15, §17 and §18.4 that say "no
+rollback copies" describe the 2026-11-16 interval only; this section supersedes them, and the copies
+are intact on `i2`.
