@@ -60,10 +60,14 @@ from estate_check import Audit, Finding, METRIC, read_host, ssh, write_prom  # n
 CHECK = "alert_delivery"
 
 #: The Alertmanager host: it is the estate's one receiver, and it follows the `signara`
-#: container rather than a host of its own — the container kept `.44` when it moved off the
-#: retired `i3` to `i2` on 2026-11-02 (verified: `192.168.1.44:9093/-/healthy` → 200).
-AM_HOST = "i2"
-AM_TARGET = "root@192.168.1.52"  # signara — Alertmanager
+#: container rather than a host of its own. That container kept `.44` through both moves —
+#: off `i3` to `i2` on 2026-11-02 and back to `i3` on 2026-11-15 — so this target has to
+#: follow the container, not stay where it was first written down. It pointed at `i2`
+#: after the first move and reported "could not read a host" once `signara` was on the
+#: rebuilt `i3`; verified on `i3` before the change: `signara-alertmanager-1` up and
+#: `127.0.0.1:9093/-/healthy` → `OK` inside the container.
+AM_HOST = "i3"
+AM_TARGET = "root@192.168.1.53"  # signara — Alertmanager
 
 #: This check needs exactly two hosts — the one running Alertmanager and the one running
 #: the mail server — so it carries its own table rather than the four-host one the per-host

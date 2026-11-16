@@ -117,14 +117,16 @@ CHECK = "container_address"
 #: which is a false alarm in the loud direction: the check is supposed to report a dark
 #: address *someone dials*. The container itself is still there, empty; deleting it is a
 #: separate decision and no check depends on it.
-#: `monitor` (`.88`, SigNoz) joined on 2026-10-26: it was created on 2026-10-25 and was
-#: the estate's last running container no row named, so every run of this check warned
-#: about a container that was behaving. It is static in its own netplan
-#: (`/etc/netplan/50-static.yaml`, `dhcp4: false`) — the address is pinned, so it is a row,
-#: not a DHCP conversion waiting to happen. It moved from `i3` to `i2` with the rest of
-#: that host's containers on 2026-11-02.
+#: `monitor` (`.88`, SigNoz) **left this table on 2026-11-16**, the day after SigNoz left
+#: the estate. It had joined on 2026-10-26 as the last running container no row named;
+#: what was true then is not now — no `signoz` container runs on any of the four hosts,
+#: `.88` answers nothing, and the inventory `i2` published before it was switched off does
+#: not list a `monitor`. The row therefore asserted an address nothing owns, and
+#: `check-address-latency.py` dials every row in this table, so it kept a red check red
+#: for a service that had been removed. Same shape as `capstone` above: re-add the row
+#: with the address the day something is placed there.
 #: `sage` (`.94`), `telno` (`.95`) and `telno-turn` (`.96`) joined the same day, for the
-#: same reason `monitor` did: they run on `i4` and no row named them, so the check warned
+#: same reason `monitor` had: they run on `i4` and no row named them, so the check warned
 #: about three containers that were behaving. All three are static in their own netplan
 #: (`60-<name>.yaml`, `dhcp4: false`).
 EXPECTED: dict[str, dict[str, str]] = {
@@ -172,9 +174,6 @@ EXPECTED: dict[str, dict[str, str]] = {
     # reads this table, failed every run on a deliberately stopped container. Re-add the
     # row with the address the day it is placed on a host that can hold it.
     "i2": {
-        # Running since before the table was written; the check kept reporting it as
-        # "running and not in the table" on every run until 2026-10-28.
-        "monitor": "192.168.1.88",
         # `onyx` stayed when the rest moved on 2026-11-15: it mounts the USB block device
         # (`main-pool-usb`, `/dev/sdc`) and is not to run detached from it.
         "onyx": "192.168.1.60",
@@ -272,7 +271,6 @@ ROLES: dict[str, str] = {
     "192.168.1.76": "blueprint",
     "192.168.1.79": "regcache",
     "192.168.1.83": "Clearpath (`app.denovocredit.com`)",
-    "192.168.1.88": "`monitor` — SigNoz (traces, metrics, logs) and the monitoring stack",
     "192.168.1.89": "the NAS desktop (`nas.innotel.us`)",
     "192.168.1.94": "sage",
     "192.168.1.95": "telno",

@@ -275,6 +275,9 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-installed-checks.py
 # The same comparison for every other unit this host carries: the ones in `systemd/`
 # that are installed here, against the revision. A unit edited on a host during an
 # incident leaves the job running and the repository wrong.
-# i1 and i2 are read over ssh: only the edge's node_exporter is scraped, so a textfile
-# written on either host would be read by nobody.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-unit-drift.py --host i1=192.168.1.51 --host i2=192.168.1.52 --prom ${TEXTFILE_DIR}/estate-check-unit-drift.prom
+# i1, i2 and i3 are read over ssh: only the edge's node_exporter is scraped, so a textfile
+# written on any of them would be read by nobody. `i3` joined the list on 2026-11-16 — it
+# came back as a fourth Incus host on 2026-11-15 and carried six of `i2`'s containers, so
+# leaving it out meant a unit edited on the host now running `signara` and `magnate` was
+# compared nowhere.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-unit-drift.py --host i1=192.168.1.51 --host i2=192.168.1.52 --host i3=192.168.1.53 --prom ${TEXTFILE_DIR}/estate-check-unit-drift.prom
