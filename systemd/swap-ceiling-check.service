@@ -7,6 +7,12 @@ Wants=incus.service
 # and the timer runs every ten minutes, so wiring it would buzz the topic once per
 # run for as long as the condition lasts - the wallpaper this check just stopped
 # being (docs/incus-ceiling-check.md). The log line is the alert.
+#
+# i1 wanted that notification anyway, and carries it as a drop-in kept in
+# `hosts/i1/systemd/swap-ceiling-check.service.d/10-notify.conf` rather than here, so the
+# unit stays the one every host installs. Until 2026-11-15 that drop-in existed only on the
+# host, where nothing in the repository could see it; the unit drift check compares drop-ins
+# now, so it cannot go quiet again.
 
 [Service]
 Type=oneshot

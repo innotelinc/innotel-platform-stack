@@ -14,6 +14,16 @@ round.
 check compares it. This is the same comparison for every other unit the estate keeps — the
 units in `systemd/` that a host actually carries, against `systemd/<name>` at the revision.
 
+DROP-INS COUNT TOO
+------------------
+A unit file can be right while the definition that runs is not, because `*.d/*.conf` beside it
+changes it: `swap-ceiling-check.service` deliberately carries no `OnFailure=`, and i1 wired
+one anyway through `swap-ceiling-check.service.d/10-notify.conf` — a real override that lived
+only on that host until it was landed in `hosts/i1/systemd/`. So every drop-in of an estate
+unit is compared as well, against `systemd/<unit>.d/<file>` or, for the host it belongs to,
+`hosts/<host>/systemd/<unit>.d/<file>`. A drop-in the repository does not record is a
+finding in its own right, because that is exactly the override this check exists to surface.
+
 WHY IT REACHES OTHER HOSTS
 --------------------------
 Only the edge's node_exporter is scraped, so a textfile written on `i1` or `i2` is read by
@@ -30,13 +40,12 @@ this repository's business. The list comes from the revision, so a unit the esta
 
 Usage:
     ./scripts/check-unit-drift.py
-    ./scripts/check-unit-drift.py --host i1=192.168.1.51 --host i3=192.168.1.53
+    ./scripts/check-unit-drift.py --host i1=192.168.1.51 --host i2=192.168.1.52
     ./scripts/check-unit-drift.py --unit-dir /tmp/units --ref HEAD
     ./scripts/check-unit-drift.py --prom /var/lib/node_exporter/textfile/estate-check-unit-drift.prom
 
-Exit codes: 0 = every unit installed on every host compared is the revision's copy,
-1 = one differs or a host could not be read, 2 = could not compare at all (no directory, no
-revision): never a pass.
+Exit codes: 0 = everything installed on every host compared is the revision's, 1 = something
+differs or a host could not be read, 2 = could not compare at all: never a pass.
 """
 from __future__ import annotations
 
@@ -75,13 +84,15 @@ class Unreadable(RuntimeError):
 
 @dataclass
 class Mismatch:
-    """One unit whose installed bytes are not the revision's."""
+    """One unit or drop-in whose installed bytes are not the revision's."""
 
     name: str
     installed: str
     revision: str
     #: Empty for this host, the `--host` name otherwise.
     host: str = ""
+    #: "drifted" (both sides exist) or "unknown" (installed, the revision has no copy).
+    kind: str = "drifted"
 
     @property
     def label(self) -> str:
@@ -104,6 +115,14 @@ def parse_hosts(specs: list[str]) -> list[tuple[str, str]]:
     return hosts
 
 
+def _listed(repo: Path, ref: str, tree: str) -> list[str]:
+    done = subprocess.run(["git", "-C", str(repo), "ls-tree", "-r", "--name-only",
+                           f"{ref}:{tree}"], capture_output=True, text=True)
+    if done.returncode != 0:
+        raise Unreadable(f"{repo} has no {tree} at {ref}")
+    return done.stdout.split()
+
+
 def repository_units(repo: Path, ref: str) -> list[str]:
     """Every unit the revision carries in `systemd/`, as basenames."""
     resolved = subprocess.run(
@@ -111,12 +130,36 @@ def repository_units(repo: Path, ref: str) -> list[str]:
         capture_output=True, text=True)
     if resolved.returncode != 0:
         raise Unreadable(f"{repo} has no {ref} to compare against")
-    listed = subprocess.run(["git", "-C", str(repo), "ls-tree", "--name-only",
-                             f"{ref}:systemd"], capture_output=True, text=True)
-    if listed.returncode != 0:
-        raise Unreadable(f"{ref} carries no systemd/ directory to compare against")
-    return sorted(name for name in listed.stdout.split()
-                  if name.endswith((".service", ".timer")))
+    names = [name for name in _listed(repo, ref, "systemd")
+             if name.endswith((".service", ".timer")) and "/" not in name]
+    if not names:
+        raise Unreadable(f"{ref} carries no units under systemd/")
+    return sorted(names)
+
+
+def repository_drop_ins(repo: Path, ref: str, host: str = "") -> dict[str, str]:
+    """`unit.d/file` -> its path in the repository, for this host and for every host.
+
+    The host's own directory wins: that is the file the host is supposed to be carrying, and
+    a universal `systemd/<unit>.d/` entry is the fallback for hosts that have no override of
+    their own. Either way the file is in the repository, which is the point.
+    """
+    expected: dict[str, str] = {}
+    for name in _listed(repo, ref, "systemd"):
+        if ".d/" in name and name.endswith(".conf"):
+            expected[name] = f"systemd/{name}"
+    if host:
+        tree = f"hosts/{host}/systemd"
+        for name in _listed_optional(repo, ref, tree):
+            if ".d/" in name and name.endswith(".conf"):
+                expected[name] = f"{tree}/{name}"
+    return expected
+
+
+def _listed_optional(repo: Path, ref: str, tree: str) -> list[str]:
+    done = subprocess.run(["git", "-C", str(repo), "ls-tree", "-r", "--name-only",
+                           f"{ref}:{tree}"], capture_output=True, text=True)
+    return done.stdout.split() if done.returncode == 0 else []
 
 
 def git_reader(repo: Path, ref: str):
@@ -171,17 +214,57 @@ def compare(unit_dir: Path, names: list[str], read, host: str = "") -> tuple[lis
     return found, compared
 
 
-def host_hashes(host: str, address: str, names: list[str]) -> dict[str, str]:
-    """The digest of every one of `names` that exists in the host's unit directory.
+def local_drop_ins(unit_dir: Path, names: list[str]) -> dict[str, str]:
+    """`unit.d/file` -> digest, for every drop-in of an estate unit on this host."""
+    found: dict[str, str] = {}
+    for name in names:
+        directory = unit_dir / f"{name}.d"
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*.conf")):
+            found[f"{directory.name}/{path.name}"] = digest(path.read_bytes())
+    return found
 
-    One `ssh` per host rather than one per unit: the listing is a shell loop, and the answer
-    is small enough to compare here. A host that does not answer raises, and the caller
-    turns that into a finding — an unreachable host is a broken comparison, not a pass.
+
+def compare_drop_ins(installed: dict[str, str], expected: dict[str, str], read,
+                     host: str = "") -> tuple[list[Mismatch], int]:
+    """Check every installed drop-in against the repository's copy.
+
+    A drop-in with no copy anywhere in the repository is reported as `unknown` rather than
+    skipped: it is an override kept only on a host, which is the thing this comparison exists
+    to make visible. A drop-in the repository keeps but the host does not carry is another
+    host's job and stays silent, exactly like a unit.
     """
+    found: list[Mismatch] = []
+    for name, installed_digest in sorted(installed.items()):
+        locus = expected.get(name)
+        if locus is None:
+            found.append(Mismatch(name, installed_digest, "", host, kind="unknown"))
+            continue
+        want = read(locus)
+        if want is None:
+            continue
+        revision = digest(want)
+        if installed_digest != revision:
+            found.append(Mismatch(name, installed_digest, revision, host))
+    return found, len(installed)
+
+
+def host_listing(host: str, address: str, names: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+    """The host's unit digests and drop-in digests, in one ssh.
+
+    One call per host rather than one per file: the listing is a shell loop and the answer is
+    small enough to compare here. A host that does not answer raises, and the caller turns
+    that into a finding — an unreachable host is a broken comparison, not a pass.
+    """
+    quoted = " ".join(shlex.quote(n) for n in names)
     # The trailing `true` matters: the loop exits with the status of its *last* file, so a
     # unit the host does not carry would make a sound listing look like an unreadable host.
-    listing = "cd /etc/systemd/system || exit 1; for f in " \
-        + " ".join(shlex.quote(n) for n in names) + '; do [ -f "$f" ] && sha256sum "$f"; done; true'
+    listing = (
+        "cd /etc/systemd/system || exit 1; "
+        f"for f in {quoted}; do [ -f \"$f\" ] && sha256sum \"$f\"; done; "
+        f"for u in {quoted}; do for f in \"$u.d\"/*.conf; do [ -f \"$f\" ] && sha256sum \"$f\"; "
+        "done; done; true")
     try:
         done = subprocess.run(
             ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={SSH_TIMEOUT}",
@@ -192,12 +275,18 @@ def host_hashes(host: str, address: str, names: list[str]) -> dict[str, str]:
     if done.returncode != 0:
         raise Unreadable(f"{host} ({address}) could not be read: "
                          f"{done.stderr.strip() or f'exit {done.returncode}'}")
-    hashes: dict[str, str] = {}
+    units: dict[str, str] = {}
+    drop_ins: dict[str, str] = {}
     for line in done.stdout.splitlines():
         parts = line.split()
-        if len(parts) == 2 and len(parts[0]) == 64:
-            hashes[parts[1].lstrip("*")] = parts[0][:12]
-    return hashes
+        if len(parts) != 2 or len(parts[0]) != 64:
+            continue
+        name, short = parts[1].lstrip("*"), parts[0][:12]
+        if "/" in name:
+            drop_ins[name] = short
+        else:
+            units[name] = short
+    return units, drop_ins
 
 
 def compare_hashes(host: str, hashes: dict[str, str], read) -> list[Mismatch]:
@@ -217,10 +306,17 @@ def audit(mismatches: list[Mismatch], compared: int, unreachable: list[str]) -> 
     """The findings every scheduled check publishes."""
     out = Audit()
     for mismatch in mismatches:
+        if mismatch.kind == "unknown":
+            out.findings.append(Finding(
+                "unknown", "fail",
+                f"{mismatch.label} is installed ({mismatch.installed}) and the repository "
+                "keeps no copy of it under systemd/ or this host's hosts/<host>/systemd/: an "
+                "override that exists only on the host"))
+            continue
         out.findings.append(Finding(
             "drifted", "fail",
-            f"{mismatch.label} is installed as {mismatch.installed} and the revision's "
-            f"systemd/{mismatch.name} is {mismatch.revision}: what runs is not what main says"))
+            f"{mismatch.label} is installed as {mismatch.installed} and the revision's copy "
+            f"is {mismatch.revision}: what runs is not what main says"))
     for reason in unreachable:
         out.findings.append(Finding(
             "unreachable", "fail",
@@ -228,7 +324,7 @@ def audit(mismatches: list[Mismatch], compared: int, unreachable: list[str]) -> 
     if not mismatches and not unreachable:
         out.findings.append(Finding(
             "units_match", "note",
-            f"all {compared} unit(s) compared are the revision's own copies"))
+            f"all {compared} file(s) compared are the revision's own copies"))
     return out
 
 
@@ -237,15 +333,19 @@ def report(mismatches: list[Mismatch], compared: int, unreachable: list[str],
     """The same verdict for a person reading the journal."""
     lines: list[str] = []
     for mismatch in mismatches:
+        if mismatch.kind == "unknown":
+            lines.append(f"{'LOCAL':8} {mismatch.label:44} installed {mismatch.installed:12} "
+                         f"no copy in {ref}")
+            continue
         lines.append(f"{'DRIFT':8} {mismatch.label:44} installed {mismatch.installed:12} "
                      f"revision {mismatch.revision}")
     for reason in unreachable:
         lines.append(f"{'UNREAD':8} {reason}")
     where = ", ".join(["this host", *hosts])
     if not mismatches and not unreachable:
-        lines.append(f"{'OK':8} {compared} unit(s) on {where} match {ref}")
+        lines.append(f"{'OK':8} {compared} file(s) on {where} match {ref}")
     lines.append("")
-    lines.append(f"{len(mismatches)} finding(s) of {compared} unit(s) compared "
+    lines.append(f"{len(mismatches)} finding(s) of {compared} file(s) compared "
                  f"({where}) against {ref}")
     return "\n".join(lines)
 
@@ -278,14 +378,24 @@ def main(argv: list[str] | None = None) -> int:
             write_prom(args.prom, CHECK, None, False)
         return 2
 
+    # This host's drop-ins: no host name is known here, so only a universal
+    # `systemd/<unit>.d/<file>` can vouch for one.
+    found, counted = compare_drop_ins(local_drop_ins(args.unit_dir, names),
+                                      repository_drop_ins(args.repo, args.ref), read)
+    mismatches += found
+    compared += counted
+
     for host, address in hosts:
         try:
-            hashes = host_hashes(host, address, names)
+            units, drop_ins = host_listing(host, address, names)
         except Unreadable as error:
             unreachable.append(str(error))
             continue
-        compared += len(hashes)
-        mismatches += compare_hashes(host, hashes, read)
+        compared += len(units) + len(drop_ins)
+        mismatches += compare_hashes(host, units, read)
+        found, _ = compare_drop_ins(drop_ins, repository_drop_ins(args.repo, args.ref, host),
+                                    read, host)
+        mismatches += found
 
     result = audit(mismatches, compared, unreachable)
     if args.prom:

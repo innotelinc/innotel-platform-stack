@@ -32,6 +32,8 @@ CHECK = SCRIPTS / "check-unit-drift.py"
 
 SERVICE = "[Service]\nExecStart=/usr/local/sbin/thing\n"
 TIMER = "[Timer]\nOnCalendar=*:0/30\n"
+DROP = "[Unit]\nOnFailure=estate-notify@%n\n"
+DROP_NAME = "thing.service.d/10-notify.conf"
 
 
 def _load():
@@ -134,22 +136,27 @@ class Hosts(unittest.TestCase):
 
     def test_the_listing_becomes_digests(self):
         # `sha256sum` prints `<64 hex>  <name>`; the comparison uses the first 12, the same
-        # width the local half reports, so the two read alike in a finding.
-        body = "a" * 64 + "  thing.service\n" + "b" * 64 + "  other.timer\n"
+        # width the local half reports. A name with a slash is a drop-in, one without is a
+        # unit, which is all the listing has to say.
+        body = ("a" * 64 + "  thing.service\n"
+                + "b" * 64 + "  other.timer\n"
+                + "c" * 64 + "  thing.service.d/10-notify.conf\n")
         with FakeSSH(stdout=body):
-            hashes = check.host_hashes("i1", "192.168.1.51", ["thing.service", "other.timer"])
-        self.assertEqual(hashes, {"thing.service": "a" * 12, "other.timer": "b" * 12})
+            units, drop_ins = check.host_listing("i1", "192.168.1.51",
+                                                ["thing.service", "other.timer"])
+        self.assertEqual(units, {"thing.service": "a" * 12, "other.timer": "b" * 12})
+        self.assertEqual(drop_ins, {"thing.service.d/10-notify.conf": "c" * 12})
 
     def test_a_host_that_does_not_answer_cannot_be_read(self):
         # The failure this check must not swallow: an unreachable host has no verdict.
         with FakeSSH(error=subprocess.TimeoutExpired(["ssh"], 8)):
             with self.assertRaises(check.Unreadable):
-                check.host_hashes("i1", "192.168.1.51", ["thing.service"])
+                check.host_listing("i1", "192.168.1.51", ["thing.service"])
 
     def test_a_host_that_answers_with_an_error_cannot_be_read(self):
         with FakeSSH(returncode=255):
             with self.assertRaises(check.Unreadable):
-                check.host_hashes("i1", "192.168.1.51", ["thing.service"])
+                check.host_listing("i1", "192.168.1.51", ["thing.service"])
 
     def test_a_host_digest_that_differs_is_drift_on_that_host(self):
         found = check.compare_hashes("i1", {"thing.service": "aaaa"},
@@ -184,18 +191,68 @@ class Verdict(unittest.TestCase):
         result = check.audit([], 3, [])
         self.assertTrue(result.ok)
         self.assertEqual([f.code for f in result.findings], ["units_match"])
-        self.assertIn("3 unit(s)", result.notes[0].message)
+        self.assertIn("3 file(s)", result.notes[0].message)
 
     def test_the_report_names_the_unit_the_host_and_the_count(self):
         body = check.report([check.Mismatch("thing.service", "aaaa", "bbbb", "i1")], 2, [],
                             "origin/main", ["i1", "i2"])
         self.assertIn("i1:thing.service", body)
-        self.assertIn("1 finding(s) of 2 unit(s)", body)
+        self.assertIn("1 finding(s) of 2 file(s)", body)
         self.assertIn("this host, i1, i2", body)
 
     def test_a_clean_report_says_which_hosts_were_compared(self):
         body = check.report([], 2, [], "origin/main", ["i1"])
-        self.assertIn("2 unit(s) on this host, i1 match", body)
+        self.assertIn("2 file(s) on this host, i1 match", body)
+
+
+class DropIns(unittest.TestCase):
+    """A unit file can be right while what runs is not: `*.d/*.conf` changes it."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.unit_dir = Path(self.dir.name)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_a_drop_in_beside_an_estate_unit_is_found(self):
+        (self.unit_dir / "thing.service.d").mkdir()
+        (self.unit_dir / "thing.service.d" / "10-notify.conf").write_text(DROP,
+                                                                         encoding="utf-8")
+        found = check.local_drop_ins(self.unit_dir, ["thing.service", "other.service"])
+        self.assertEqual(list(found), [DROP_NAME])
+
+    def test_a_drop_in_of_a_unit_the_estate_does_not_keep_is_not_read(self):
+        # Docker's drop-ins, systemd's: installed here, not this repository's business.
+        (self.unit_dir / "docker.service.d").mkdir()
+        (self.unit_dir / "docker.service.d" / "10-x.conf").write_text(DROP, encoding="utf-8")
+        self.assertEqual(check.local_drop_ins(self.unit_dir, ["thing.service"]), {})
+
+    def test_a_drop_in_matching_the_repository_is_silent(self):
+        installed = {DROP_NAME: check.digest(DROP.encode())}
+        found, compared = check.compare_drop_ins(
+            installed, {DROP_NAME: "systemd/" + DROP_NAME},
+            reader({"systemd/" + DROP_NAME: DROP.encode()}))
+        self.assertEqual((found, compared), ([], 1))
+
+    def test_a_drop_in_edited_on_the_host_is_drift(self):
+        installed = {DROP_NAME: check.digest((DROP + "# edit\n").encode())}
+        found, _ = check.compare_drop_ins(installed, {DROP_NAME: "systemd/" + DROP_NAME},
+                                          reader({"systemd/" + DROP_NAME: DROP.encode()}))
+        self.assertEqual([(m.kind, m.name) for m in found], [("drifted", DROP_NAME)])
+
+    def test_a_drop_in_no_one_recorded_is_an_override_not_silence(self):
+        # The case this half exists for: i1 wired OnFailure through a drop-in that lived
+        # only on that host, and nothing could see it.
+        installed = {DROP_NAME: check.digest(DROP.encode())}
+        found, compared = check.compare_drop_ins(installed, {}, reader({}))
+        self.assertEqual([(m.kind, m.name) for m in found], [("unknown", DROP_NAME)])
+        self.assertEqual(compared, 1)
+
+    def test_a_repository_drop_in_the_host_does_not_carry_is_silent(self):
+        found, compared = check.compare_drop_ins({}, {DROP_NAME: "systemd/" + DROP_NAME},
+                                                 reader({"systemd/" + DROP_NAME: DROP.encode()}))
+        self.assertEqual((found, compared), ([], 0))
 
 
 class EndToEnd(unittest.TestCase):
@@ -224,6 +281,15 @@ class EndToEnd(unittest.TestCase):
     def tearDown(self):
         self.dir.cleanup()
 
+    def commit(self) -> None:
+        """Land what the fixture added since it was built, so `HEAD` carries it."""
+        for args in (["-c", "user.name=t", "-c", "user.email=t@t", "add", "."],
+                     ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+                      "--no-verify", "-m", "more"]):
+            done = subprocess.run(["git", "-C", str(self.repo), *args],
+                                  capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+
     def run_check(self, *args: str):
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
@@ -234,7 +300,7 @@ class EndToEnd(unittest.TestCase):
     def test_a_host_holding_the_revision_s_copy_exits_zero(self):
         code, out, _ = self.run_check()
         self.assertEqual(code, 0)
-        self.assertIn("1 unit(s) on this host match", out)
+        self.assertIn("1 file(s) on this host match", out)
 
     def test_a_unit_edited_on_the_host_exits_one_and_is_named(self):
         (self.unit_dir / "thing.service").write_text(SERVICE + "# hand edit\n", encoding="utf-8")
@@ -242,6 +308,34 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("DRIFT", out)
         self.assertIn("thing.service", out)
+
+    def test_a_drop_in_the_repository_carries_is_compared(self):
+        (self.repo / "systemd" / "thing.service.d").mkdir()
+        (self.repo / "systemd" / "thing.service.d" / "10-notify.conf").write_text(
+            DROP, encoding="utf-8")
+        self.commit()
+        (self.unit_dir / "thing.service.d").mkdir()
+        (self.unit_dir / "thing.service.d" / "10-notify.conf").write_text(DROP,
+                                                                          encoding="utf-8")
+        code, out, _ = self.run_check()
+        self.assertEqual(code, 0, out)
+
+        (self.unit_dir / "thing.service.d" / "10-notify.conf").write_text(
+            DROP.replace("OnFailure", "OnFailure="), encoding="utf-8")
+        code, out, _ = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("DRIFT", out)
+        self.assertIn("10-notify.conf", out)
+
+    def test_a_drop_in_the_repository_never_heard_of_is_a_local_override(self):
+        # The finding the estate needs: an override that exists only on the host.
+        (self.unit_dir / "thing.service.d").mkdir()
+        (self.unit_dir / "thing.service.d" / "99-local.conf").write_text(DROP,
+                                                                         encoding="utf-8")
+        code, out, _ = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("LOCAL", out)
+        self.assertIn("99-local.conf", out)
 
     def test_a_revision_it_cannot_read_is_two_not_a_pass(self):
         out, err = io.StringIO(), io.StringIO()
