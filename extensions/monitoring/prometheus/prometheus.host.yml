@@ -45,3 +45,16 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  # The edge instance runs on this same metal. Scraping its node-exporter here is
+  # what let the second Prometheus inside `proxy` be stopped on 2026-11-16: one
+  # scraper per host, two jobs. The 33 estate checks run on both sides, so their
+  # series are dropped here — the host copy below stays authoritative and a
+  # failing check still raises exactly one alert, not two.
+  - job_name: node_proxy
+    static_configs:
+      - targets: ["192.168.1.71:9100"]
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "innotel_estate_check_.*"
+        action: drop

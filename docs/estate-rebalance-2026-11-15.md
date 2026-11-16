@@ -1801,3 +1801,55 @@ have started both and put ~10 GiB of resident demand on 7.3 GiB. Both are now
 `i1`. They were **not** deleted: they hold 29 G of the 86 G `/var/lib/incus` occupies on `i4`, and
 `sage`/`vault` are the only second copies of their data, so reclaiming that space is a decision for
 the owner, not a cleanup step.
+
+
+## Consolidation 2026-11-16: one monitor per machine, and the duplicates that are not duplicates
+
+**The monitoring stack was the only live duplication left.** `i4` ran `metrics-prometheus`,
+`metrics-grafana` and `metrics-node-exporter` twice on the same metal — once on the host
+(project `innotel-metrics`, config `/root/platform-stack/extensions/monitoring/docker-compose.host.yml`)
+and once inside the `proxy` instance (same project name, config
+`/usr/src/projects/complete/ips/extensions/monitoring/docker-compose.host.yml`). Both loaded the
+same `rules/` directory, so the same 23 rules were evaluated twice, and both carried the same 33
+`estate-check-*.prom` dumps, so every cadence ran the checks twice. Measured before the merge:
+`metrics-prometheus` 59 MiB, `metrics-grafana` 248 MiB, `metrics-node-exporter` 14 MiB inside
+`proxy`.
+
+**The merge was guarded, and the first attempt was stopped by the guard.** Before touching
+anything the two dump sets were compared: the host writes `agent-reaper.prom` and
+`edge-liveness.prom`, the instance writes `innotel_omniroute_selfheal_*` (and an empty
+`status.prom`). Neither set contains the other, so a naive "keep the host stack" would have
+silently dropped the OmniRoute self-heal alert. The merge therefore keeps **one scraper** (the
+host) with **two jobs**: the existing `node` job on the host's node-exporter, and a new
+`node_proxy` job on the edge's node-exporter, published at `192.168.1.71:9100`. The 33 estate
+checks are dropped from the `node_proxy` target with a `metric_relabel_configs` drop on
+`innotel_estate_check_.*`, so the host copy stays authoritative and a failing check still raises
+exactly **one** alert instead of two with different `instance` labels.
+
+Verified after the change: `up{job="node_proxy"}` = **1**, `innotel_omniroute_selfheal_last_status`
+resolves with `instance="192.168.1.71:9100"` (14 `innotel_omniroute_*` series exposed by the edge's
+node-exporter), `innotel_estate_check_last_status` reports **only** `instance="node-exporter:9100"`,
+`metrics-prometheus` on the host is `running`, and `sage.innotel.tech` and `innotel.tech` both answer
+**200**. `proxy` went from 3243 M to **2918 M** used (avail 2084 → **2409 M**) by stopping
+`metrics-prometheus` and `metrics-grafana`; 23 containers now run there. Both are stopped with
+`restart=no`, not deleted — `docker start metrics-prometheus metrics-grafana` is the rollback.
+
+**Three things I did not consolidate, and why.** The three Meilisearch containers are
+**per-application sidecars**, not copies: `tutor_local-meilisearch-1` (v1.36.0, LMS course index),
+`linkwarden-meilisearch-1` (v1.13.3, the bookmarks index) and `signara-meilisearch-1` (v1.10, its
+own corpus). Each holds a different index in a different 1.x layout, and every 1.x upgrade rewrites
+the index, so merging them is three reindex windows for one process — the judgement already
+recorded in the consolidation table above stands. `npm-edge` is **one container with four image
+tags**: `cerulean-npm` runs `2.16.2`; `2.16.0` and `2.16.3` referenced no container and were removed
+(2.2 GB of images), while `2.16.1` is kept because the group compose still pins it and
+`docs/sign-in-posture.md` names it as the last source-built image. The second `vault` is the stopped
+`i4` copy of the Vaultwarden instance on `.73`, i.e. rollback state, not a second service — and
+Technitium is a single container (`technitium/dns-server:latest` plus its SSO sidecar).
+
+**What is still duplicated on purpose.** `estate-checks.timer` still runs on both the host and the
+instance and still writes both dump sets, because I could not establish which side owns the host's
+writer, and switching it off blind risks the alert silence that `prometheus.host.yml` warns about at
+length. The series are now filtered at scrape time, so it costs CPU twice but cannot double-alert.
+Every other host keeps its own `innotel-metrics` stack by design (no mesh), and the stricter fix —
+one scheduler for the whole estate — belongs with a change to `systemd/estate-checks.service`, not
+with a monitoring cleanup.

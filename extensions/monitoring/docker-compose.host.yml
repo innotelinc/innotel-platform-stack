@@ -52,6 +52,13 @@ services:
   node-exporter:
     image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.9.1}
     container_name: metrics-node-exporter
+    # Published on the instance address for the host Prometheus on the same
+    # metal: it scrapes this endpoint so the containers inside `proxy` stay
+    # visible now that the second Prometheus there is retired (2026-11-16).
+    # Deliberate exception to this stack's loopback-only posture — metrics
+    # only, one peer, and the scrape needs to cross the Incus boundary.
+    ports:
+      - "192.168.1.71:9100:9100"
     restart: unless-stopped
     mem_limit: 128m
     memswap_limit: 128m
