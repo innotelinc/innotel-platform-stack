@@ -138,7 +138,6 @@ EXPECTED: dict[str, dict[str, str]] = {
         # `check-mail-sso` and `check-stalwart-oidc-cache` read, by address rather than
         # by host, which is why the check was the only thing that noticed.
         "atheniq": "192.168.1.59",
-        "atlas": "192.168.1.90",
         # `auvik` (`.72`) is **not** a row any more (2026-11-14). The container is
         # STOPPED with `boot.autostart: false` and nothing dials `.72` — none of the
         # edge's proxy_host blocks names it — so the row was asserting an address the
@@ -148,21 +147,38 @@ EXPECTED: dict[str, dict[str, str]] = {
         # container is started again.
         # Moved from i2 on 2026-10-30 (stopped, copied, started, then deleted there).
         # Each keeps the address pinned in its own netplan, so only the host key moved.
-        "blueprint": "192.168.1.76",
-        "clearpath": "192.168.1.83",
         "genesis": "192.168.1.66",
-        "genie-preview": "192.168.1.24",
         "mail": "192.168.1.15",
-        "monarch": "192.168.1.56",
-        "nas": "192.168.1.89",
         "ontrak": "192.168.1.21",
         "regcache": "192.168.1.79",
         "rizzaura": "192.168.1.62",
         # `sage` (.94) and `vault` (.73) arrived from `i4` on 2026-11-15 to make room for
         # the edge, which needed the ~2 GiB they held and `i4` did not have. `i4` keeps
         # both stopped as the rollback, so the address answers on exactly one host.
-        "sage": "192.168.1.94",
         "vault": "192.168.1.73",
+        # `workloads` (`.113`) runs here and no row named it, so the check warned about a
+        # container that was behaving (`i1 workloads: running and not in the table`).
+        "workloads": "192.168.1.113",
+    },
+    # `monarch` (`.56`) is an `i2` row. It was listed under `i1` and the check reported
+    # "i1 monarch: not present" on every run; i2 is up and running (owner, 2026-11-16) and
+    # the container is there. The address is pinned in its own netplan, so only the host
+    # key moves — the same shape as `atheniq` and `mail` above.
+    "i2": {
+        # These eight run on `i2` and the table still filed them under `i1`, where the check
+        # reported each one "not present" (`atlas`, `genie-preview`, `nas`) or warned that a
+        # container it could see was in no row (`blueprint`, `clearpath`, `regcache`,
+        # `rizzaura`, `sage`). The addresses are unchanged — each is pinned in its own
+        # netplan — so only the host key moves, as it did for `atheniq` and `mail` before.
+        "atlas": "192.168.1.90",
+        "blueprint": "192.168.1.76",
+        "clearpath": "192.168.1.83",
+        "genie-preview": "192.168.1.24",
+        "monarch": "192.168.1.56",
+        "nas": "192.168.1.89",
+        "regcache": "192.168.1.79",
+        "rizzaura": "192.168.1.62",
+        "sage": "192.168.1.94",
     },
     # `capstone` (`.30`, Zeus telephony) is **not** a row any more. It stopped on
     # 2026-11-02 and cannot be started on `i2`: the host reports 4.8 GiB total (1.3 GiB
@@ -185,7 +201,9 @@ EXPECTED: dict[str, dict[str, str]] = {
         # (`main-pool-usb`, `/dev/sdc`) and must not run detached from it. It used to be an
         # `i2` row; `i2` is up and running on 2026-11-16 (owner) (§19), so this copy is the only one
         # left and it waits here for the disk, or for the replacement host that can take it.
-        "onyx": "192.168.1.60",
+        # `onyx` (`.60`) is **not a row** while it is STOPPED waiting for its USB disk:
+        # nothing answers and the check dialled it every run. Same shape as `auvik`,
+        # `capstone`, `monitor` and `www`; re-add the row the day it runs.
         "pi": "192.168.1.70",
         "signara": "192.168.1.44",
         "subscribe": "192.168.1.58",
@@ -195,7 +213,11 @@ EXPECTED: dict[str, dict[str, str]] = {
         # (1 GiB hard, `swap=0`), which is what made its memory a number instead of an
         # absence. It answers `.68:5432` and `ontrak-tix-db-1` on the host is stopped with
         # its volume intact — no data was deleted (`estate-rebalance` §12.4).
-        "ontrak-tix-db": "192.168.1.68",
+        # `ontrak-tix-db` (`.68`) is **not a row** while its container is STOPPED: the
+        # volume is intact and its host-Docker original is stopped beside it, so nothing
+        # answers and nothing dials it. A row here made `check-address-latency.py` fail on a
+        # deliberately stopped container every run — the same false alarm the notes above
+        # describe for `auvik`, `capstone`, `monitor` and `www`. Re-add it the day it starts.
         # `proxy` (.71) arrived from `i2` on 2026-11-15 and is the edge again
         # (`estate-rebalance` §15). `sage` and `vault` left the other way the same
         # evening, because the edge needs more RAM than this host had free with them
@@ -203,7 +225,10 @@ EXPECTED: dict[str, dict[str, str]] = {
         "proxy": "192.168.1.71",
         "telno": "192.168.1.95",
         "telno-turn": "192.168.1.96",
-        "terminal": "192.168.1.22",
+        # `terminal` (`.22`) is **not a row** while it is STOPPED: the web terminal came
+        # back off in the 2026-11-15 rebalance and its vhost is dark behind it. Removing the
+        # row is what stops the latency check from dialling an address nothing owns;
+        # re-add it with the address the day the terminal runs again.
         "vpn": "192.168.1.43",
     },
 }
