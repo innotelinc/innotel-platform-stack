@@ -147,6 +147,13 @@ the public address the DNAT matches.
 | `mailjet.innotel.us` | 282 → `192.168.1.15:8100` | `*.innotel.us` |
 | `admin.mail.innotel.us` | 221 → `192.168.1.15:8080` | `admin.mail.innotel.us` |
 | `admin.oasis.innotel.us` | 223 → `192.168.1.15:8091` | `admin.oasis.innotel.us` |
+| `alerts.innotel.us` | 202 → `192.168.1.71:2586` | `*.innotel.us` |
+
+The last row is the notifier's own name: the same pin was why the mail server's checks
+could deliver mail but not push a notification (`ntfy: failed: … certificate is not valid
+for 'alerts.innotel.us'`). Any name a container has to reach by HTTPS belongs in this list
+— the DNAT matches the **address**, not the name, so every unlisted name is redirected to
+the discovery cache.
 
 Stalwart is deliberately untouched: it reads its own `/etc/stalwart-oidc/hosts` through
 `BindReadOnlyPaths`, and the loopback pin in that file is what the discovery cache needs.
