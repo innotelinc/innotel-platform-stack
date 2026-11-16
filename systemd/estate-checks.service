@@ -282,4 +282,4 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-installed-checks.py
 # compared nowhere. `i2` left the same day it was decommissioned (§19 of
 # `docs/estate-rebalance-2026-11-15.md`): a host in this list that cannot answer costs every
 # run a 25-second timeout and reports the decommission as drift.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-unit-drift.py --host i1=192.168.1.51 --host i2=192.168.1.52 --prom ${TEXTFILE_DIR}/estate-check-unit-drift.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-unit-drift.py --host i1=192.168.1.51 --host i3=192.168.1.53 --prom ${TEXTFILE_DIR}/estate-check-unit-drift.prom
