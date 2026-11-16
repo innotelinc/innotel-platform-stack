@@ -35,3 +35,10 @@ tv.innotel.us	192.168.1.56	14002	Sonarr — the owner's arrangement as of 2026-1
 # so the timer now depends on this forward. An unpinned vhost can drift the way `tv` did and
 # the watch door would go dark silently — which is the failure that check exists to catch.
 iptv.innotel.us	192.168.1.56	14016	Jellyfin direct publish — the watch door the estate checks, so it is pinned too
+# `mint` is pinned because the name was broken for a day with nothing watching it: its
+# vhost rewrote `Host` to the managed host it proxied to, and that host answers 403 to any
+# other name, so `mint.innotel.tech` served a Cloudflare error page while the site behind it
+# was healthy. On 2026-11-16 the site moved onto our own box (`mintmark-web`, 8930) and the
+# vhost forwards there unrewritten. Pinned so a regeneration cannot send the name back to a
+# managed host, and so a dark target fails this check instead of an App Store reviewer.
+mint.innotel.tech	192.168.1.113	8930	Mintmark site on our own box — one origin since 2026-11-16, no Host rewrite
