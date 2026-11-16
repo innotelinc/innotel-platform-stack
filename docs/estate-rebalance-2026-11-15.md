@@ -1585,3 +1585,31 @@ Cannot use "parent" property in conjunction with "network" property
 bridged one (`incus profile device add default eth0 nic name=eth0 nictype=bridged parent=br0`)
 before any veth can land on `br0`. `i1`'s `default` profile already uses `parent: br0`, which is
 why the same instance behaves differently on the two hosts.
+
+### monarch is serving from i2 (the earlier rollback reading was wrong)
+
+The move was recorded above as rolled back on the strength of `incus start i2:monarch` answering
+`Instance not found` and `i1` still listing `monarch` as `RUNNING`. Both readings were wrong in
+the same way: the 30 GiB copy had landed, `i1` had renamed its own copy to `monarch-retired`
+(`STOPPED`), and the `i2` instance appeared once its `create` operation had fully drained. A
+host that says "not found" while an operation list is still draining is not a host that has
+nothing.
+
+The instance started cleanly on `i2`'s `dir` pool — no idmapped-storage error — 25 docker unit
+lines still read `masked` inside the copy, and after unmasking `docker.service`,
+`docker.socket` and `docker-restore.service` and running compose, the host answers from the
+moved copy:
+
+```
+i2 monarch: RUNNING
+compose rc=0
+containers: 37
+.56:22 open   .56:14002 open   .56:14011 open   .56:14012 open
+```
+
+`i1` keeps `monarch-retired` as the rollback copy, stopped. Five instances now run on `i2`:
+`monarch`, `clearpath`, `blueprint`, `regcache` and `rizzaura`.
+
+Two partial artifacts are left on `i2` and are not production state: a `genesis` instance at
+`STOPPED` from an interrupted copy, and a `nas-data` volume record whose transfer died with
+`websocket: close 1006 (abnormal closure): unexpected EOF`.
