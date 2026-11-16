@@ -143,7 +143,11 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --
 # transport error is a warning after one retry, not a failure — on 2026-11-16 two
 # correct registrations failed the sweep with TLS resets and passed on the next probe,
 # and patching either would have been a change to something that already worked.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-redirects.py --docker 'incus exec proxy -- docker' --auth-from cerulean-authentik --deadline 420 --prom ${TEXTFILE_DIR}/estate-check-sso-redirects.prom
+# No `--docker` here on purpose: the check works out for itself whether the CLI is local
+# or behind `incus exec proxy` (see its `docker_prefix`). A quoted prefix in this file was
+# split into six arguments by systemd, which is a silent way for an audit that nobody is
+# watching to exit on argparse rather than run.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-redirects.py --auth-from cerulean-authentik --deadline 420 --prom ${TEXTFILE_DIR}/estate-check-sso-redirects.prom
 
 # And whether a sign-in on the Orion NAS door can actually finish (2026-11-14). The proxy
 # trusts an issuer, the estate serves one authentik under two names, and each name reports

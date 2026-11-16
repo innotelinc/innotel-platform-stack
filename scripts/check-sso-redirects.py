@@ -70,6 +70,7 @@ import argparse
 import json
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -89,9 +90,23 @@ API = AUTH + "/api/v3"
 NPM_DB = "cerulean-npm-db"
 NPM_CONTAINER = "cerulean-npm"
 
-#: How to reach the Docker CLI. On the edge that is `incus exec proxy -- docker`;
-#: `--docker` replaces it.
-DOCKER: list[str] = ["docker"]
+#: How to reach the Docker CLI, when it has to be said. Empty means "work it out":
+#: this runs both inside the `proxy` container (where `docker` is the CLI) and on the
+#: edge host beside it (where it is `incus exec proxy -- docker`). A unit file was tried
+#: first and systemd split the quoted prefix into six arguments, so the audit exited on
+#: argparse instead of running — the quoting, not the check, decided whether it ran.
+DOCKER: list[str] = []
+
+
+def docker_prefix() -> list[str]:
+    """`docker …` here, or through incus into the edge container."""
+    if DOCKER:
+        return DOCKER
+    if shutil.which("docker"):
+        return ["docker"]
+    if shutil.which("incus"):
+        return ["incus", "exec", "proxy", "--", "docker"]
+    return ["docker"]
 
 
 class CouldNotRun(RuntimeError):
@@ -111,7 +126,7 @@ USER_AGENT = "Mozilla/5.0 sso-redirect-audit"
 
 
 def docker(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run([*DOCKER, *args], input=stdin, capture_output=True, text=True)
+    return subprocess.run([*docker_prefix(), *args], input=stdin, capture_output=True, text=True)
 
 
 def authentik_token() -> str:
@@ -238,8 +253,10 @@ def main() -> int:
                         help="only check registered URIs, do not probe every hostname")
     parser.add_argument("--threads", type=int, default=12)
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here")
-    parser.add_argument("--docker", default="docker", metavar="CMD",
-                        help="how to reach the Docker CLI, e.g. 'incus exec proxy -- docker'")
+    parser.add_argument("--docker", default="", metavar="CMD",
+                        help="how to reach the Docker CLI, e.g. 'incus exec proxy -- docker' "
+                             "(default: detected — `docker` if present, else through `incus "
+                             "exec proxy`)")
     parser.add_argument("--auth", default=AUTH, metavar="URL",
                         help=f"provider base URL (default: {AUTH}); use the container "
                              "address so the edge proxy is not in the path")
@@ -253,7 +270,7 @@ def main() -> int:
                              "as not probed rather than as passing (0 = no limit)")
     args = parser.parse_args()
 
-    DOCKER = shlex.split(args.docker)
+    DOCKER = shlex.split(args.docker) if args.docker else []
     AUTH = args.auth.rstrip("/")
     API = AUTH + "/api/v3"
     if args.auth_from:
