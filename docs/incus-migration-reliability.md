@@ -121,3 +121,26 @@ instance named `monarch` — the renamed `monarch-retired` remains stopped with 
   `mount -t zfs -o ro <dataset> /var/tmp/<dir>`, count, then `umount` immediately.
 - A `find` or `du` left running by a timed-out client keeps the dataset pinned, so the following
   `umount` fails busy and the next mount fails too. Bound the walk and kill it by pid.
+
+## Final placement (2026-11-16)
+
+`monarch` runs permanently on i2 (`.52`) and comes back after a reboot:
+
+| Fact | Value |
+| --- | --- |
+| State | `RUNNING`, started 18:29 UTC (13:29 EST) |
+| `boot.autostart` | `true` — every peer instance on i2 is `true` |
+| Containers | 36 running, 0 restarting, 38 total |
+| Stopped by design | `monarch-init`, `monarch-seed` (exit 0 one-shots) |
+| `/data/media` | `/dev/nvme0n1p2[/tank/media-downloads]` — `movies music temp tv xxx` |
+| `limits.memory` | 7808MiB ceiling against 5.36GiB live |
+
+The move step left the instance stopped with `boot.autostart=false` so the destination stayed quiet;
+it was started 70 minutes later and adopted rather than restarted, because it was already healthy.
+i1 keeps `monarch-retired` stopped with `boot.autostart=false` plus a 25.4 GB dataset as rollback, and
+has no instance named `monarch`, so a stale `incus start|exec|copy monarch` fails closed instead of
+putting the workload back on the single spindle.
+
+`limits.memory` needs a note because it moved twice: the retired source reads 2048MiB, which is a
+retirement throttle, not the workload requirement, while the live instance carries 7808MiB because it
+holds 5.36GiB and i2 has 15150MiB total. Copy the live value, never the retired one.
