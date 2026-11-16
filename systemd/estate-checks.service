@@ -209,7 +209,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-media-doors.py --pr
 # one forged at the published admin port — has to be refused. The 2026-10-29
 # sign-in outage was a peer map reading `$remote_addr` after realip had rewritten
 # it; every case here still said 403, and nothing was watching.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --prom ${TEXTFILE_DIR}/estate-check-edge-sso-door.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --docker 'incus exec proxy -- docker' --prom ${TEXTFILE_DIR}/estate-check-edge-sso-door.prom
 
 # And the learner-facing door itself (2026-11-14): `class.atheniq.courses` is where every
 # classroom link in `atheniq-work` goes, and it has to be *behind* a sign-in rather than
