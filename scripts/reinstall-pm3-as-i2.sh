@@ -20,6 +20,17 @@
 # The ISO is therefore served over HTTP and named on the command line with `url=`; a GET of
 # the ISO and of /meta-data in the i2-install-http log is the proof the installer really ran.
 #
+# THIRD CHANGE (2026-11-16 04:1x UTC): casper's own no-medium path calls panic(), and
+# initramfs-tools' panic() reboots (`sleep $panic; reboot -f`) whenever panic= is on the
+# command line -- it only drops to an interactive shell without it. With no monitor on this
+# box, an interactive shell is the same as a dead machine, which is exactly the state both
+# failed attempts left behind. `panic=120` converts that failure mode into an automatic
+# reboot into Proxmox in two minutes, so the reinstall can be run remotely without risking
+# a box that needs hands on it. Verified at source in the ISO's initrd: scripts/functions
+# panic() lines 45-85, scripts/casper line 970 (no live medium), and the url= fetch at
+# scripts/casper line 267 (`wget "${URL}" -O "${target}"`, so the image lands in initramfs
+# RAM: 2.9 GB of pm3's 9.9 GB free is fine).
+#
 # Preconditions (all verified before the failures, re-checked here):
 #   /root/install/vmlinuz + /root/install/initrd on pm3 (extracted from the live-server ISO)
 #   http://192.168.1.54:8080/user-data serving the validated autoinstall
@@ -47,7 +58,7 @@ SSH 'pveversion; ls -l /root/install/vmlinuz /root/install/initrd | awk "{print 
 
 echo "== loading the installer kernel with the autoinstall command line"
 SSH "kexec -l /root/install/vmlinuz --initrd=/root/install/initrd \
-       --command-line=\"autoinstall ds=nocloud-net;s=${SERVE}/ console=tty0 ip=dhcp nomodeset url=${ISO} ---\" \
+       --command-line=\"autoinstall ds=nocloud-net;s=${SERVE}/ console=tty0 ip=dhcp nomodeset panic=120 url=${ISO} ---\" \
      && echo staged"
 echo "== executing (kexec -e never returns; ssh drops here)"
 SSH 'kexec -e' || true
