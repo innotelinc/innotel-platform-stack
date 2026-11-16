@@ -1439,6 +1439,33 @@ project (`docker compose -p monarch --env-file .env -f docker-compose.yml up -d 
 which is what produced the 37 containers the first time. Restarting the instance is not the same
 as starting its stack.
 
+Getting the stack back took four passes, and each pass failed for a different reason, so the
+sequence is worth keeping:
+
+1. `incus start monarch` returns cleanly and `.56:22` opens, but `docker ps` is still 0.
+2. `systemctl start docker` inside the container answers `Failed to connect to bus: No such file
+   or directory` — systemd in the container is not up yet, so the command is a no-op that must be
+   retried, not an error to act on.
+3. On the next pass dockerd is `active` and compose starts 4 -> 6 containers, then fails with
+   `Conflict. The container name "/authentik-ldap" is already in use by container 94d2c4e8...`.
+   The containers survived the stop, and compose will not adopt a name it does not own, so
+   `docker rm -f <name>` has to clear them before `up` can proceed.
+4. At load 140 the `incus exec` call itself starts failing with `Error: websocket: bad handshake`
+   and `Operation not found` — the same starvation that kills `sshd` also breaks the Incus API,
+   so a garbled container count from that window is not a measurement.
+
+One trap worth naming: `pkill -f "rsync -a --partial /tank"` run over SSH **kills its own shell**,
+because the pattern appears in the script's argv, and the session dies mid-script looking like a
+network failure. Bracketed patterns (`pkill -f "[r]sync -a --partial"`) are the only safe form.
+
+### Two `rsync` jobs were copying the same 131 GB
+
+When the copy was inspected there were **two** jobs writing `/tank/media-downloads/` to `.52`: one
+wrapped in `ionice -c 3 nice -n 19` with `--bwlimit=30M --info=stats2 --log-file=/var/log/media-sync.log`,
+and a plain `rsync -a --partial`. The destination had reached 122 955 MB of 131 000 MB. The
+throttled job is the one to keep (it logs to `/var/log/media-sync.log` and yields to production
+work); the duplicate only added disk contention to a host already at load 140.
+
 ### The media copy, and the load it caused
 
 `/tank/media-downloads` is 131 GB. Throughput was measured rather than assumed: ~96 MB/s while
