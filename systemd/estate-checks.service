@@ -128,6 +128,23 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-authentik-privilege
 # every gated name's callback and reads each proxy block's buffer.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --prom ${TEXTFILE_DIR}/estate-check-sso-callbacks.prom
 
+# And the half the check above cannot see: whether the provider will send the browser
+# back at all (2026-11-16). `redirect_uri` is the one part of a sign-in that is not
+# discovered at runtime — the app sends a value, Authentik compares it byte for byte,
+# and a hostname that moved without its registration being updated produces
+# "Redirect URI Error" while the app answers 200 and the provider answers 200. Found by
+# hand twice; three live Telno names were carrying sign-ins nobody could finish when it
+# was finally run as an audit. Two rules on two directions: every registered URI must be
+# served by an NPM host and accepted by the provider, and every hostname that starts an
+# OIDC flow must be asking for a URI that is registered.
+#
+# It reads the provider at the container's own address: the public name answers 504
+# through the edge under load, which would report every registration as unreadable. A
+# transport error is a warning after one retry, not a failure — on 2026-11-16 two
+# correct registrations failed the sweep with TLS resets and passed on the next probe,
+# and patching either would have been a change to something that already worked.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-redirects.py --docker 'incus exec proxy -- docker' --auth-from cerulean-authentik --deadline 420 --prom ${TEXTFILE_DIR}/estate-check-sso-redirects.prom
+
 # And whether a sign-in on the Orion NAS door can actually finish (2026-11-14). The proxy
 # trusts an issuer, the estate serves one authentik under two names, and each name reports
 # ITSELF — so the failure with no external signature is "the proxy trusts a different name

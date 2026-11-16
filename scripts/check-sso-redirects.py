@@ -38,32 +38,64 @@ the registered name.
 
 USAGE
 -----
-Run where the Docker CLI reaches the edge and Authentik — the `proxy` container
-on i4:
+It runs from `estate-checks.service` on the edge, where `docker` is the CLI *inside*
+the `proxy` container rather than on the host, so the prefix is an argument:
 
-    incus exec proxy -- python3 /root/check-sso-redirects.py
-    incus exec proxy -- python3 /root/check-sso-redirects.py --json report.json
-    incus exec proxy -- python3 /root/check-sso-redirects.py --no-probe-apps
+    ./scripts/check-sso-redirects.py --docker 'incus exec proxy -- docker' \
+        --prom /var/lib/node_exporter/textfile/estate-check-sso-redirects.prom
 
-Exit status: 0 when every check passes, 1 when anything fails.
+and by hand anywhere the two APIs are reachable:
+
+    ./scripts/check-sso-redirects.py
+    ./scripts/check-sso-redirects.py --json report.json --no-probe-apps
+
+Two facts were learned by running it on 2026-11-16 and are now rules here:
+
+* **An unreachable authorize endpoint is a warning, not a registration bug.** Two
+  registered callbacks (`bazarr`/`prowlarr` on `monarch`) came back as `Connection
+  reset by peer` and `SSL: UNEXPECTED_EOF_WHILE_READING` in the middle of a 300-name
+  sweep, and both authorize 200 when asked directly a minute later. The check retries
+  once and then says `UNREACHABLE`, which reads as "ask again", not as "fix the
+  provider" — the difference decides whether somebody patches a correct registration.
+* **The provider is read at the container address, not the public name.** Under load
+  the public name answers 504 through the edge and the audit then reports every
+  registration as unreadable; `--auth` names the address that bypasses the proxy.
+
+Exit status: 0 when every check passes, 1 when anything fails, 2 when the audit could
+not run at all (no provider token, no NPM rows) — never a pass.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import re
+import shlex
 import socket
 import subprocess
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from estate_check import Audit, Finding, write_prom  # noqa: E402
+
+CHECK = "sso_redirects"
 
 AUTH = "https://auth.cerulean.innotel.us"
 API = AUTH + "/api/v3"
 NPM_DB = "cerulean-npm-db"
 NPM_CONTAINER = "cerulean-npm"
+
+#: How to reach the Docker CLI. On the edge that is `incus exec proxy -- docker`;
+#: `--docker` replaces it.
+DOCKER: list[str] = ["docker"]
+
+
+class CouldNotRun(RuntimeError):
+    """The audit could not be made: exit 2, never a silent pass."""
 
 # The paths an estate app uses to start an OIDC sign-in. Probed in order, first
 # hand-off wins. Every one of these is in service somewhere in the estate.
@@ -79,14 +111,14 @@ USER_AGENT = "Mozilla/5.0 sso-redirect-audit"
 
 
 def docker(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(["docker", *args], input=stdin, capture_output=True, text=True)
+    return subprocess.run([*DOCKER, *args], input=stdin, capture_output=True, text=True)
 
 
 def authentik_token() -> str:
     out = docker("exec", "cerulean", "printenv", "AUTHENTIK_BOOTSTRAP_TOKEN")
     token = out.stdout.strip()
     if not token:
-        raise SystemExit("no AUTHENTIK_BOOTSTRAP_TOKEN in the cerulean container")
+        raise CouldNotRun("no AUTHENTIK_BOOTSTRAP_TOKEN in the cerulean container")
     return token
 
 
@@ -123,7 +155,7 @@ def npm_hosts() -> dict[str, dict]:
             }
     if not rows:
         detail = result.stderr.strip()[:200]
-        raise SystemExit(f"could not read NPM proxy hosts from {NPM_DB}: {detail}")
+        raise CouldNotRun(f"could not read NPM proxy hosts from {NPM_DB}: {detail}")
     return rows
 
 
@@ -153,8 +185,14 @@ def fetch(url: str, follow: bool = False, timeout: int = 15) -> tuple[int, dict,
         return 0, {}, str(error).encode()
 
 
-def authorize_verdict(client_id: str, redirect_uri: str, issuer: str | None = None) -> tuple[str, str]:
-    """Ask Authentik to accept a redirect_uri. Returns (verdict, detail)."""
+def authorize_verdict(client_id: str, redirect_uri: str, issuer: str | None = None,
+                      timeout: int = 15) -> tuple[str, str]:
+    """Ask Authentik to accept a redirect_uri. Returns (verdict, detail).
+
+    `UNREACHABLE` after one retry is deliberately *not* `FAIL`: a TLS reset on a busy
+    edge says nothing about whether the URI is registered, and treating it as a
+    registration bug invites a patch to a correct provider.
+    """
     query = urllib.parse.urlencode({
         "client_id": client_id,
         "redirect_uri": redirect_uri,
@@ -163,19 +201,23 @@ def authorize_verdict(client_id: str, redirect_uri: str, issuer: str | None = No
         "state": "audit",
     })
     base = (issuer or AUTH).rstrip("/")
-    status, headers, body = fetch(f"{base}/application/o/authorize/?{query}")
-    text = body.decode(errors="replace")
+    text = ""
+    for attempt in (1, 2):
+        status, _headers, body = fetch(f"{base}/application/o/authorize/?{query}", timeout=timeout)
+        text = body.decode(errors="replace")
+        if status:
+            break
     if status == 0:
-        return "FAIL", f"authorize unreachable: {text[:80]}"
+        return "UNREACHABLE", f"authorize unreachable twice ({text[:60]}) — ask again, not a registration fault"
     if status == 400 or "Redirect URI Error" in text:
         return "FAIL", "Authentik rejects this redirect_uri (Redirect URI Error)"
     return "PASS", f"authorize answered {status}"
 
 
-def discover_app(domain: str) -> dict | None:
+def discover_app(domain: str, timeout: int = 10) -> dict | None:
     """What this hostname actually asks Authentik for, if it starts an OIDC flow."""
     for path in SSO_ENTRY_PATHS:
-        status, headers, _ = fetch(f"https://{domain}{path}", timeout=10)
+        status, headers, _ = fetch(f"https://{domain}{path}", timeout=timeout)
         location = headers.get("Location", "")
         if status not in (301, 302, 303, 307, 308) or "client_id=" not in location:
             continue
@@ -189,16 +231,59 @@ def discover_app(domain: str) -> dict | None:
 
 
 def main() -> int:
+    global AUTH, API, DOCKER
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", default="", help="write the findings to this file")
     parser.add_argument("--no-probe-apps", action="store_true",
                         help="only check registered URIs, do not probe every hostname")
     parser.add_argument("--threads", type=int, default=12)
+    parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here")
+    parser.add_argument("--docker", default="docker", metavar="CMD",
+                        help="how to reach the Docker CLI, e.g. 'incus exec proxy -- docker'")
+    parser.add_argument("--auth", default=AUTH, metavar="URL",
+                        help=f"provider base URL (default: {AUTH}); use the container "
+                             "address so the edge proxy is not in the path")
+    parser.add_argument("--auth-from", default="", metavar="CONTAINER",
+                        help="read the provider at this container's own address "
+                             "(http://<ip>:9000) instead of through the edge, which answers "
+                             "504 under load and makes every registration look unreadable")
+    parser.add_argument("--timeout", type=int, default=15, help="seconds per request")
+    parser.add_argument("--deadline", type=int, default=0,
+                        help="seconds for the hostname sweep; unprobed names are reported "
+                             "as not probed rather than as passing (0 = no limit)")
     args = parser.parse_args()
 
-    token = authentik_token()
-    providers = api(token, "/providers/oauth2/?page_size=200")["results"]
-    hosts = npm_hosts()
+    DOCKER = shlex.split(args.docker)
+    AUTH = args.auth.rstrip("/")
+    API = AUTH + "/api/v3"
+    if args.auth_from:
+        found = docker("inspect", "-f",
+                       "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}",
+                       args.auth_from)
+        addresses = found.stdout.split()
+        if not addresses:
+            print(f"check-sso-redirects: {args.auth_from} has no address — the audit cannot "
+                  "be made", file=sys.stderr)
+            return 2
+        AUTH = f"http://{addresses[0]}:9000"
+        API = AUTH + "/api/v3"
+
+    def emit(result: Audit | None, ran: bool) -> None:
+        if not args.prom:
+            return
+        try:
+            write_prom(args.prom, CHECK, result, ran_ok=ran)
+        except OSError as error:
+            print(f"check-sso-redirects: could not write {args.prom}: {error}", file=sys.stderr)
+
+    try:
+        token = authentik_token()
+        providers = api(token, "/providers/oauth2/?page_size=200")["results"]
+        hosts = npm_hosts()
+    except CouldNotRun as error:
+        print(f"check-sso-redirects: {error}", file=sys.stderr)
+        emit(None, ran=False)
+        return 2
     print(f"providers: {len(providers)}   NPM hostnames: {len(hosts)}")
 
     findings: list[dict] = []
@@ -232,7 +317,7 @@ def main() -> int:
             if not resolves(host):
                 record("FAIL", uri, f"{host} does not resolve")
                 continue
-            verdict, detail = authorize_verdict(client, uri)
+            verdict, detail = authorize_verdict(client, uri, timeout=args.timeout)
             record(verdict, uri, f"{detail}; served by NPM row {hosts[host]['id']}")
 
     if args.no_probe_apps:
@@ -240,8 +325,22 @@ def main() -> int:
     else:
         print("\n== what each hostname actually asks for")
         domains = sorted(hosts)
+        discovered: dict[str, dict | None] = {}
+        unprobed: list[str] = []
         with ThreadPoolExecutor(max_workers=args.threads) as pool:
-            discovered = dict(zip(domains, pool.map(discover_app, domains)))
+            futures = {pool.submit(discover_app, domain, args.timeout): domain for domain in domains}
+            done, pending = wait(futures, timeout=args.deadline or None)
+            for future in done:
+                try:
+                    discovered[futures[future]] = future.result()
+                except Exception:  # noqa: BLE001 — a probe that raised is simply unprobed
+                    unprobed.append(futures[future])
+            unprobed.extend(sorted(futures[future] for future in pending))
+            pool.shutdown(wait=False, cancel_futures=True)
+        if unprobed:
+            record("NOT-PROBED", f"{len(unprobed)} hostname(s)",
+                   f"the sweep hit its {args.deadline}s deadline before these were asked: "
+                   + ", ".join(unprobed[:8]) + (" …" if len(unprobed) > 8 else ""))
         found = 0
         for domain, app in sorted(discovered.items()):
             if not app:
@@ -259,15 +358,28 @@ def main() -> int:
                        f"{app['path']} sends redirect_uri {redirect}, which is NOT registered")
         print(f"  (probed {len(domains)} hostnames, {found} start an OIDC sign-in)")
 
-    failures = [f for f in findings if f["verdict"] == "FAIL"]
-    warnings = [f for f in findings if f["verdict"] == "WARN"]
-    print(f"\n{len(findings) - len(failures) - len(warnings)} pass, "
+    # A verdict becomes a finding level here, once: PASS is not a finding, FAIL is the
+    # only level that fails, and UNREACHABLE/NOT-PROBED are things to ask again about.
+    levels = {"FAIL": "fail", "WARN": "warn", "UNREACHABLE": "warn", "NOT-PROBED": "note"}
+    result = Audit()
+    for finding in findings:
+        level = levels.get(finding["verdict"])
+        if level:
+            result.findings.append(Finding(finding["verdict"].lower().replace("-", "_"),
+                                            level, f"{finding['subject']}: {finding['detail']}"))
+    emit(result, ran=True)
+
+    failures = result.failures
+    warnings = result.warnings
+    print(f"\n{sum(1 for f in findings if f['verdict'] == 'PASS')} pass, "
           f"{len(warnings)} warn, {len(failures)} fail")
+    for finding in result.findings:
+        print(f"{finding.level.upper():4} {finding.message}")
     if args.json:
         with open(args.json, "w") as handle:
             json.dump(findings, handle, indent=2)
         print(f"findings written to {args.json}")
-    return 1 if failures else 0
+    return 0 if result.ok else 1
 
 
 if __name__ == "__main__":
