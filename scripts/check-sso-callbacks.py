@@ -76,7 +76,14 @@ GATES: list[dict] = [
     {"host": "re.genie.innotel.us", "callback": "/oauth2/callback", "gate": "oauth2-proxy"},
     {"host": "uc.genie.innotel.us", "callback": "/oauth2/callback", "gate": "oauth2-proxy"},
     {"host": "nas.innotel.us", "callback": "/oauth2/callback", "gate": "oauth2-proxy"},
-    {"host": "proxy.innotel.us", "callback": "/oauth2/callback", "gate": "oauth2-proxy"},
+    # The NPM admin door is `npm.cerulean.innotel.us` since 2026-11-16. Its two
+    # predecessors (`proxy.innotel.us`, `admin.monarch.innotel.us`) were retired to the
+    # superseded list and soft-deleted in NPM, so their rows have no generated file on
+    # purpose — naming them here is what made this check report a deliberate retirement as
+    # "the gate is down". The door is an Authentik outpost rather than an oauth2-proxy, so
+    # the large-cookie buffer rule does not apply to it; its callback still has to get
+    # through the proxy.
+    {"host": "npm.cerulean.innotel.us", "callback": "/outpost.goauthentik.io/callback", "gate": "app"},
     # The app's own SSO: its session cookie is an id, not an ID token, so rule 2
     # does not apply, but the callback still has to get through the proxy.
     {"host": "tix.ontrak.technology", "callback": "/api/sso/callback", "gate": "app"},

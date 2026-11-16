@@ -171,6 +171,16 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-targets.
 # credential and it must never carry one), and a missing one is exit 2, not a pass.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-npm-config-drift.py --api http://192.168.1.71:81 --data-dir /usr/src/proxy/data --prom ${TEXTFILE_DIR}/estate-check-npm-config-drift.prom
 
+# And that a moved workload stays moved (2026-11-16). `monarch` left `i1` because one
+# spindle could not carry it, and the enforceable half of that move is the *name*: the
+# instance was renamed `monarch-retired`, stopped, and its autostart disabled, so stale
+# `incus start|exec|copy monarch` fails with "Instance not found" instead of reloading the
+# spindle. Nothing would notice that being undone — a recreated instance answers perfectly,
+# and the outage it brings is on a disk no other check reads. `incus-guard` cannot cover
+# it: the lease only binds sessions that ask for it. This reads the hosts and asserts both
+# halves: the retired instance present and stopped, and the live name absent.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-retired-instances.py --prom ${TEXTFILE_DIR}/estate-check-retired-instances.prom
+
 # And that a pin holds in NPM's own record, not only in the file nginx reads
 # (2026-11-09). `check-edge-vhost-targets` compares the declaration to the generated
 # `.conf`; `check-npm-config-drift` compares the row to that same `.conf`; neither ever

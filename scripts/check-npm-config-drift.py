@@ -167,6 +167,13 @@ def fetch_rows(api: str, token: str, kind: str) -> list[Row]:
         raise Unreadable(f"NPM returned no {kind} list")
     rows = []
     for host in hosts:
+        # NPM soft-deletes a host and keeps the row, so the list endpoint returns retired
+        # doors forever. They have no generated file *by design*, and counting them as
+        # MISSING turned 55 correctly-retired hosts into 55 failures on 2026-11-16 — the
+        # check reporting the retirement it was watching happen as the breakage. Only a
+        # live row is a claim that a file should exist.
+        if host.get("is_deleted"):
+            continue
         port = host.get("forward_port")
         rows.append(Row(
             kind=kind,
