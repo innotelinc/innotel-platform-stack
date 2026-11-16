@@ -1310,3 +1310,61 @@ with the source stopped first.
 
 `192.168.1.3` is deliberately still on the box — a second address on the same NIC, and a lifeline
 on a machine with no console. Removing it is one netplan edit, left to the operator.
+
+## 22. 2026-11-16 — `.3` retired, `monarch` revived without a NIC, and the outage I caused on `i1`
+
+Three follow-ups were run: verify `i2` after the move, remove the old `192.168.1.3`, and get
+`monarch` back with its stacks, then start moving instances to `i2`.
+
+**`i2` verified after the move.** `hostname i2`, Ubuntu 26.04.1 LTS, kernel `7.0.0-43-generic`,
+8 cores, 15 150 MB, 468 G root at 3 % used, key login working. A root password was set with
+`chpasswd` and then **verified by an actual password login** (`OK root@i2`) rather than assumed
+from the command's exit code. Incus 6.0.5 with pool `fast` (`dir`), `core.https_address :8443`
+set, zero instances, 14 339 MB available.
+
+**`.3` retired.** The address was removed from `/etc/netplan/00-installer-config.yaml` (a
+timestamped backup sits beside it), `netplan generate` validated the result, and the address was
+deleted from the live interface with `ip addr del`. `netplan apply` was deliberately not run on a
+headless box whose only access is SSH; deleting the address directly is the reversible half of
+the same change and cannot strand the host. Measured after: `.3` no longer answers, `.52`
+unaffected.
+
+**`monarch` was running blind, not just stopped.** It was `STOPPED` with
+`boot.autostart=false`; starting it brought `.56` back but the container had **no `eth0` device at
+all** — only `lo` and docker bridges — so nothing was reachable and most of its stack had exited.
+It was given `eth0` with the `nictype`/`parent` values taken from `mail` on the same host, which
+produced an address on `.56`. With the NIC in place the compose project was re-applied:
+**37 containers running, 0 exited (255)**, `.56:14011`, `:14012` and `:14002` open, `:3301`
+loopback-only by design. The missing NIC is the real defect here: a container restored from
+config without its device section starts, looks healthy in `incus list`, and serves nothing.
+
+**i1's Incus database collapsed, and then I made it worse.** `incusd` was found looping with
+`Failed loading instance from backup file … sql: database is closed` and
+`no available cowsql leader server found`, 14 `incusd` processes, load average 85 on 4 cores. To
+clear it I ran `systemctl stop incus.service` on `i1` — which **shut down all 15 containers on
+that host**. Six addresses went dark within the minute: `.56` (monarch), `.59` (atheniq), `.15`
+(mail), `.90` (atlas), `.76` (blueprint), `.83` (clearpath). Stopping the daemon is an action on
+the instances, not a read of them; it is not a safe way to clear a wedged database.
+
+Recovery, measured: `incus.socket` and `incus.service` stopped, remaining `incusd` killed, then
+`socket` and `service` started once. The database reopened — the fresh log shows instances
+auto-starting instead of `database is closed`. Three containers (`monarch`, `mail`, `clearpath`)
+had booted into a half-started state under the earlier load (`Failed to retrieve PID of executing
+child process`), so they were force-stopped and restarted. `monarch`'s compose project was
+re-applied (37 containers). Final state: **15/15 containers `RUNNING`** on `i1`, `mail` answering
+25/587/993, `monarch` 14011/14012/14002, `atheniq .59`, `atlas .90`, `blueprint .76`,
+`genesis .66` all answering. Load fell 85 → 36.
+
+`clearpath` (`.83`) is the one incomplete address: `RUNNING`, `exec` works, `eth0` up with
+`192.168.1.83/24` and `systemd-networkd` active, but no listeners at all on 22/80/443 — its
+services did not come back after the forced restart.
+
+**No instance was moved to `i2`.** The move path was prepared — `i2` listens on `:8443` and issued
+a trust token, and `incus remote add` on `i1` only stopped at its interactive fingerprint
+confirmation — but pushing host-to-host copies while `i1` was recovering from a daemon failure
+would have risked a second outage. `genesis` and `rizzaura`, stopped during the aborted attempt,
+are `RUNNING` again on `i1`. `proxy` was left untouched on `i4`, as required.
+
+Dedupe mapping, measured across hosts: only `sage` and `vault` exist on two hosts, `RUNNING` on
+`i1` and `STOPPED` on `i4`. The `i4` copies are inert rollback copies, so no duplicate process
+runs anywhere in the estate; nothing was deleted.
