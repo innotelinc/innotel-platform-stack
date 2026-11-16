@@ -1458,6 +1458,35 @@ One trap worth naming: `pkill -f "rsync -a --partial /tank"` run over SSH **kill
 because the pattern appears in the script's argv, and the session dies mid-script looking like a
 network failure. Bracketed patterns (`pkill -f "[r]sync -a --partial"`) are the only safe form.
 
+### monarch's copy to i2 rolled back, and why its stack would not start
+
+The 30 GiB rootfs was copied after the media mirror proved complete (the sync timer's own pass
+sent 17 309 bytes against a 145 306 004 461-byte total with `SYNC_EXIT=0`), the sync timer was
+stopped so it could not compete, and the copy ran as a detached job for over 7 minutes.
+
+It did not land. After the copy's `create`/`migrate` operations finally drained on both remotes,
+`incus start i2:monarch` failed twice with
+`Failed to handle idmapped storage: Failed expanding symlinks of "": lstat /var/lib/incus/containers/monarch: no such file or directory`
+and then with `Failed to fetch instance "monarch" in project "default": Instance not found` — the
+instance had been rolled back, leaving nothing on `i2`. `i2`'s pool is `dir`, which is where this
+differs from the five moves that did work: those were 256 MiB - 2.7 GiB instances, while this one
+carries a 30 GiB rootfs plus a 138 GB host bind.
+
+**While the copy was being retried, monarch's own stack would not come back, and the reason was
+inside the container:** all three docker units were masked.
+
+```
+docker-restore.service    masked   enabled
+docker.service            masked   enabled
+docker.socket             masked   enabled
+```
+
+A masked `docker.service` fails `systemctl start docker` with `Unit docker.service is masked`, so
+compose returns 1 and the host looks broken when nothing is wrong with the stack. Masking
+`docker.socket` and `docker-restore.service` in the same state is what makes this a single act
+rather than a leftover, and it has to be undone for all three together: unmasking only
+`docker.service` is not enough.
+
 ### `rizzaura` and `regcache` moved; `nas` is blocked on a custom volume
 
 `rizzaura` and `regcache` are `RUNNING` on `i2`; `nas` is not, and the reason is the useful
