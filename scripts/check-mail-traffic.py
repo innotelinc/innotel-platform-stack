@@ -15,7 +15,19 @@ Stalwart v0.16 on this server exposes no Prometheus endpoint, and its
 `x:Metrics/get` answers for account storage only, so the log **is** the
 measurement. It is structured and line-oriented —
 
-    … INFO Delivery completed (delivery.completed) queueName = "local", from = …, to = […]
+    … INFO Message delivered (delivery.delivered) queueName = "remote", from = …
+
+and **neither the event name nor the split between local and remote is stable
+across releases.** v0.16 wrote `delivery.completed` for both (`queueName`
+`"local"` or `"remote"`); 1.1.0 reports a *remote* delivery as
+`delivery.delivered` and a *local* one only as `message-ingest.ham`/`-spam`,
+with no delivery event at all. A check that knows one name, or that counts only
+delivery events, does not go quiet on the server — it goes quiet on *itself*.
+That is what happened (measured 2026-11-16: 283 messages queued and 0 counted as
+delivered, while a submission to the admin mailbox arrived within seconds and a
+remote probe was accepted by the relay in one). So `delivered` means a remote
+delivery or a mailbox ingest, every name a delivery has had is accepted, and a
+`delivery.*` event this file does not recognise is reported rather than dropped.
 
 — and every number below is a count of those events over a window. Each run
 recomputes the window from the files, so the values are gauges rather than
@@ -111,6 +123,14 @@ LINE = re.compile(
     r"\((?P<event>[a-z0-9][a-z0-9.-]*)\)\s*(?P<fields>.*)$"
 )
 
+#: Every name a *completed* delivery has had, mapped to the release that used it.
+#: Adding a name here is cheap; missing one silently removes deliveries from the
+#: count, which is the failure this check was created to see.
+DELIVERED = {
+    "delivery.completed": "v0.16",
+    "delivery.delivered": "v1",
+}
+
 #: How each delivery failure is named in the log, and how it is reported. A
 #: permanent failure is a bounce; the rest are retries that may still succeed,
 #: which is why they are separate series and only the first is a warning.
@@ -171,6 +191,7 @@ class Traffic:
     mailbox_missing: int = 0
     relay_refused: int = 0
     rate_limited: int = 0
+    unrecognised: set = field(default_factory=set)        # delivery.* events this file cannot classify
     last_delivery: float | None = None
     last_auth_failure: float | None = None
 
@@ -201,11 +222,16 @@ def measure(lines: list[str]) -> Traffic:
         out.lines += 1
         when = _epoch(match.group("ts"))
 
-        if event == "delivery.completed":
+        if event in DELIVERED:
             out.delivered[_field(fields, "queueName") or "unknown"] += 1
             out.last_delivery = max(out.last_delivery or 0, when)
         elif event in FAILURES:
             out.failed[FAILURES[event]] += 1
+        elif event.startswith("delivery."):
+            # Not a delivery this file knows how to count. Recording it — instead of
+            # letting it fall through — is what turns the next rename into a warning
+            # on the first run rather than a year of confident zeroes.
+            out.unrecognised.add(event)
         elif event in QUEUE_ENTRY:
             out.queued[QUEUE_ENTRY[event]] += 1
             sender = _domain(_field(fields, "from"))
@@ -387,27 +413,42 @@ def audit(now: float | None = None, window_hours: int = WINDOW_HOURS,
     # genuinely quiet estate sees no mail at all, which is a warning rather than a
     # failure — a stuck queue and a quiet Sunday must not read the same.
     accepted = sum(out.queued.values())
-    if not accepted and out.attempts == 0:
+    # A message counts as delivered when it leaves as remote mail **or** lands in a
+    # mailbox here. 1.1.0 has no delivery event for the local case, so counting
+    # `delivered` alone reads a server that delivers everything locally as one that
+    # delivers nothing — which is precisely the red this file produced on 2026-11-16.
+    landed = sum(out.delivered.values()) + sum(out.ingested.values())
+    if not accepted and out.attempts == 0 and not landed:
         result.findings.append(Finding(
             "no-traffic", "warn",
             f"no mail activity in the last {window_hours}h — nothing was queued, sent "
             "or delivered (confirm the server is up before reading this as quiet)"))
-    elif not out.delivered:
+    elif not landed:
         result.findings.append(Finding(
             "nothing-delivered", "fail",
             f"{accepted or out.attempts} message(s) accepted in the last {window_hours}h "
-            "and not one delivery completed — mail is being taken and never sent"))
+            "and not one reached a mailbox or a remote server — mail is being taken "
+            "and never sent"))
     # Rule 2: a bounce is a real message that did not arrive.
     permanent = out.failed.get("permanent", 0)
     if permanent:
         result.findings.append(Finding(
             "bounced", "warn",
             f"{permanent} message(s) bounced permanently in the last {window_hours}h"))
+    # Rule 3: an event this file cannot classify is a hole in the measurement, not a
+    # quiet server. It is a warning because the server is not necessarily wrong — the
+    # *check* is what has to catch up, and this is the line that says so.
+    if out.unrecognised:
+        result.findings.append(Finding(
+            "unrecognised-delivery-event", "warn",
+            "delivery event(s) this check does not classify (a release may have renamed "
+            f"them): {', '.join(sorted(out.unrecognised))}"))
 
     result.findings.append(Finding(
         "window", "note",
-        f"{sum(out.delivered.values())} delivered, {sum(out.queued.values())} queued, "
-        f"{sum(out.ingested.values())} ingested, {out.auth_failures} auth failure(s), "
+        f"{sum(out.delivered.values())} delivered off-estate, "
+        f"{sum(out.ingested.values())} delivered locally, {sum(out.queued.values())} queued, "
+        f"{out.auth_failures} auth failure(s), "
         f"{out.blocked_ips} blocked IP event(s) in the last {window_hours}h"))
     return result, out
 
