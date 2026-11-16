@@ -1,0 +1,42 @@
+# Telephony-disabled staging overlay for the christ stack.
+#
+# An overlay, not a fork: apply it on top of the upstream compose so the service
+# definitions never drift.
+#
+#   docker compose -p christ-staging \
+#     --env-file .env.staging \
+#     -f /path/to/jesus/christ/compose.yml \
+#     -f compose.staging.yml \
+#     --profile core --profile console --profile agents --profile speech --profile capstone \
+#     up -d
+#
+# The three services that can reach a PSTN trunk are re-homed to a profile that
+# nothing ever activates, so `--profile '*'` cannot start them by accident:
+#   gateway     (upstream profile "pstn")      - the SIP border, binds 5060/udp
+#   telno       (upstream profile "platform")  - the instance's front door
+#   fax-engine  (upstream profile "fax")       - binds 5062/udp to a SIP host
+#
+# `switch` stays in "core" and binds 7443/udp + 7444/udp. That is the Cantus voice
+# plane, not a trunk registration: the SIP border lives in `gateway`.
+#
+# Do not add --profile pstn, platform or fax on this stack while a live `telno`
+# holds DID 14132642700 elsewhere in the estate.
+
+services:
+  gateway:
+    profiles: ["never-pstn"]
+
+  telno:
+    profiles: ["never-pstn"]
+
+  fax-engine:
+    profiles: ["never-pstn"]
+
+  # The live edge owns :80 and :443 on the production host. Staging takes
+  # 8080/8443 so the two can share a LAN without a name colliding. All three
+  # upstream entries are restated because `ports` merges by published port.
+  edge:
+    ports:
+      - "${EDGE_HTTP_PORT:-8080}:80"
+      - "${EDGE_HTTPS_PORT:-8443}:443"
+      - "${EDGE_HTTPS_PORT:-8443}:443/udp"
