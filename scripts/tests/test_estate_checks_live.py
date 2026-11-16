@@ -134,14 +134,15 @@ ADDRESS_ROWS = {
          ("genesis", "192.168.1.66"),
          ("genie-preview", "192.168.1.24"), ("monarch", "192.168.1.56"),
          ("nas", "192.168.1.89"), ("ontrak", "192.168.1.21"),
-         ("regcache", "192.168.1.79"), ("rizzaura", "192.168.1.62")],
+         ("regcache", "192.168.1.79"), ("rizzaura", "192.168.1.62"),
+         # sage and vault came over from i4 on 2026-11-15 to make room for the edge.
+         ("sage", "192.168.1.94"), ("vault", "192.168.1.73")],
     # capstone (`.30`) has no row: it is stopped and its address is deliberately
     # unpinned, so the fixture must not invent one back onto the host.
     I2: [
          # copilotkit joined i2 on 2026-11-14 (the dashboard behind the cpk names) and
          # left again with the five others on 2026-11-15, so it is an i3 row now.
-         # proxy was recreated here on 2026-10-26 and keeps the edge address.
-         ("proxy", "192.168.1.71"),
+         # proxy left for i4 the same evening; i2 keeps only a stopped copy.
          ("monitor", "192.168.1.88"),
          # `onyx` stayed when the rest moved on 2026-11-15: it mounts the USB block device.
          ("onyx", "192.168.1.60")],
@@ -155,9 +156,10 @@ ADDRESS_ROWS = {
     # addresses travel with the pinned rootfs, so only the host key changes when a
     # container moves — which is why the rows here are read off the hosts, not
     # remembered.
-    I4: [("sage", "192.168.1.94"), ("telno", "192.168.1.95"),
+    I4: [("proxy", "192.168.1.71"),
+         ("telno", "192.168.1.95"),
          ("telno-turn", "192.168.1.96"), ("terminal", "192.168.1.22"),
-         ("vault", "192.168.1.73"), ("vpn", "192.168.1.43"),
+         ("vpn", "192.168.1.43"),
          # The database answers on `.68:5432`; the container itself has been stopped
          # since 2026-10-24 with the volume kept, and the row is what makes its absence
          # a failure rather than a silence.

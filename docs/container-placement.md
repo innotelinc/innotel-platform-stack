@@ -943,16 +943,16 @@ that table is a bug in one of them.
 | i3 | `distro` | `.61` | distro control plane — **on `i3` since 2026-11-15** | 204 MiB (1 GiB) | 2 |
 | i3 | `magnate` | `.57` | Magnate — **on `i3` since 2026-11-15** | 181 MiB (1 GiB) | 2 |
 | i2 | `monitor` | `.88` | SigNoz — traces, metrics, logs | — | 2 |
-| i2 | `onyx` | `.60` | Onyx (RAG) — **moving to `i3` 2026-11-15** (its `tank/onyx-data` volume went first) | 291 MiB (1 GiB) | 2 |
+| i3 | `onyx` | `.60` | Onyx (RAG) — **moved 2026-11-15 and left STOPPED** on `i3`, which is where `/dev/sdc` is; it returns to `i2` after the reinstall (`estate-rebalance` §17) | 291 MiB (1 GiB) | 2 |
 | i3 | `pi` | `.70` | pi — **on `i3` since 2026-11-15** | 193 MiB (1 GiB) | 2 |
 | i3 | `signara` | `.44` | Signara (and the estate's one Alertmanager) — **on `i3` since 2026-11-15** | 539 MiB (896 MiB) | 2 |
 | i3 | `subscribe` | `.58` | Subscribe — **on `i3` since 2026-11-15** | 123 MiB (384 MiB) | 2 |
-| i2 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics | 3.99 GiB (4 GiB) | 2 |
-| i4 | `sage` | `.94` | sage | — | — |
+| i4 | `proxy` | `.71` | **the Cerulean edge** — NPM, Authentik, Vault, Technitium, metrics. Moved onto `i4`'s NVMe on 2026-11-15 (`estate-rebalance` §15); `i2` keeps the stopped original as the rollback | 3.99 GiB (4 GiB) | 2 |
+| i1 | `sage` | `.94` | sage — moved off `i4` on 2026-11-15 to make room for the edge (`estate-rebalance` §15.2) | — | — |
 | i4 | `telno` | `.95` | telno | — | — |
 | i4 | `telno-turn` | `.96` | telno TURN relay | — | — |
 | i4 | `terminal` | `.22` | web terminal (termix, guacd, zapit) | 464 MiB (1280 MiB) | 1 |
-| i4 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch | 624 MiB (1536 MiB) | 1 |
+| i1 | `vault` | `.73` | Vaultwarden + Linkwarden + Meilisearch — moved off `i4` on 2026-11-15 to make room for the edge (`estate-rebalance` §15.2) | 624 MiB (1536 MiB) | 1 |
 | i4 | `vpn` | `.43` | WireGuard (`10.7.0.2` wg0) | 222 MiB (768 MiB) | 1 |
 
 `cloud`, `voice`, `docs`, `ansible`, `slack`, `dev` and `olympus`/`olympus-gw`, which the
@@ -961,6 +961,19 @@ repositories were retired with the `.46` migration, and `dev` (`.74`) went with 
 `atheniq` is the exception: it stayed, moved `i2` → `i1` → `i4` → `i2`, and is a running
 container above. The retired names are kept here only so the surveys can be read against
 each other.
+
+## Changes applied 2026-11-15 (evening) — the edge to `i4`, and the two containers that made room
+
+`vault` and `sage` moved from `i4` to `i1`, and `proxy` moved from `i2` to `i4`. The order was the
+point: i4 had **3 104 MiB available** against the edge's **4 977 MiB** working set, so the two were
+stopped there first and the host reached **4 701 MiB** — 1 597 MiB measured back — before anything
+was copied (`estate-rebalance` §15.2). `onyx` was stopped on `i2` and stays stopped on `i3`, which
+is the host that actually has `/dev/sdc` (`estate-rebalance` §17).
+
+The address table in `scripts/check-container-addresses.py` moved with them: every one of these
+pins its address inside its own netplan, so only the host key changed. `i2` and `i4` each keep the
+stopped originals as the rollback — `boot.autostart=false` on all of them, or a reboot gives two
+hosts the same address.
 
 ## Changes applied 2026-11-15 — `i2` is being reinstalled, so its containers move to `i3`
 

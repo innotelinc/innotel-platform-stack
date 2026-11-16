@@ -147,7 +147,7 @@ class AddressCase(unittest.TestCase):
         # Right address, still useless: NPM reads proxy_host, custom_ssl and
         # database.sqlite from /data, so an unmounted /data serves nothing.
         result = chk.audit(
-            estate({("i2", "proxy"): dict(state="RUNNING", address="192.168.1.71", data_mounted=False)})
+            estate({("i4", "proxy"): dict(state="RUNNING", address="192.168.1.71", data_mounted=False)})
         )
         self.assertFalse(result.ok)
         self.assertEqual([f.code for f in result.failures], ["data_mount_missing"])
@@ -155,7 +155,7 @@ class AddressCase(unittest.TestCase):
 
     def test_a_proxy_with_its_data_mount_is_not_a_finding(self):
         result = chk.audit(
-            estate({("i2", "proxy"): dict(state="RUNNING", address="192.168.1.71", data_mounted=True)})
+            estate({("i4", "proxy"): dict(state="RUNNING", address="192.168.1.71", data_mounted=True)})
         )
         self.assertTrue(result.ok, [f.message for f in result.failures])
         self.assertEqual([f for f in result.findings if "data" in f.code], [])
