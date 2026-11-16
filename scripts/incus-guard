@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# incus-guard - one lease per incus instance, so two agent sessions cannot both act on it.
+#
+# Why this exists (2026-11-16, i1 monarch): three sessions drove the same instance at once.
+# One started it, another masked its systemd units inside the rootfs, a third restarted
+# incusd on the destination host mid-migration and killed a 25 GB copy at 13.6 GB with
+# "websocket: close 1006 (unexpected EOF)". Incus itself has no notion of a second actor:
+# `incus start`, `incus exec`, `incus rename` and `incus copy` all succeed regardless.
+#
+# The lease is a file in a per-host runtime dir, mutated only under flock. Any session that
+# claims first wins; a later claim fails with exit 75 instead of racing. Leases expire so a
+# crashed session cannot wedge an instance forever, and `status` shows who is holding it.
+#
+#   incus-guard claim   <instance> [purpose] [--ttl SECONDS] [--force]
+#   incus-guard release <instance> [--force]
+#   incus-guard status  [instance]
+#   incus-guard run     <instance> [purpose] -- <command...>
+#
+# exit: 0 ok, 64 usage, 75 instance already claimed by a live session
+set -uo pipefail
+
+GUARD_DIR=${INCUS_GUARD_DIR:-/run/incus-guard}
+DEF_TTL=${INCUS_GUARD_TTL:-7200}
+ME_HOST=$(hostname -s 2>/dev/null || hostname)
+ME_USER=${SUDO_USER:-${USER:-root}}
+ME_TTY=$(tty 2>/dev/null || echo none)
+[ -n "${ME_TTY}" ] || ME_TTY=none
+
+usage() {
+	cat >&2 <<'EOF'
+usage: incus-guard claim   <instance> [purpose] [--ttl SECONDS] [--force]
+       incus-guard release <instance> [--force]
+       incus-guard status  [instance]
+       incus-guard run     <instance> [purpose] -- <command...>
+
+The lease lives on the host that runs the incus commands, which is the host where
+concurrent sessions actually collide. Exit 75 means another live session holds it.
+EOF
+	exit 64
+}
+
+lease_path() { printf '%s/%s.lease' "$GUARD_DIR" "$1"; }
+field() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -1; }
+stamp() { date -d "@$1" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo "$1"; }
+
+show_lease() {
+	local lp exp
+	lp=$(lease_path "$1")
+	[ -f "$lp" ] || { echo "free"; return 0; }
+	exp=$(field expires_at "$lp")
+	echo "claimed by $(field owner_user "$lp")@$(field owner_host "$lp") pid $(field owner_pid "$lp") tty $(field owner_tty "$lp")"
+	echo "  purpose: $(field purpose "$lp")"
+	echo "  since:   $(stamp "$(field acquired_at "$lp")")"
+	echo "  until:   $(stamp "$exp")$([ "${exp:-0}" -le "$(date +%s)" ] && echo '  [EXPIRED]')"
+}
+
+claim() {
+	local inst=$1 purpose=$2 ttl=$3 force=$4 lp exp
+	mkdir -p "$GUARD_DIR" || exit 1
+	lp=$(lease_path "$inst")
+	exec 9>"$GUARD_DIR/$inst.mutex" || exit 1
+	if ! flock -w 10 9; then
+		echo "incus-guard: the $inst lease is being written by another process" >&2
+		return 75
+	fi
+	if [ -f "$lp" ] && [ "$force" != 1 ]; then
+		exp=$(field expires_at "$lp")
+		if [ -n "${exp:-}" ] && [ "$exp" -gt "$(date +%s)" ]; then
+			echo "incus-guard: $inst is ALREADY CLAIMED" >&2
+			show_lease "$inst" | sed 's/^/  /' >&2
+			echo "  use 'incus-guard status $inst' to inspect, --force to steal" >&2
+			return 75
+		fi
+	fi
+	local tmp
+	tmp=$(mktemp "$GUARD_DIR/.lease.XXXXXX") || return 1
+	{
+		echo "instance=$inst"
+		echo "owner_host=$ME_HOST"
+		echo "owner_pid=$$"
+		echo "owner_user=$ME_USER"
+		echo "owner_tty=$ME_TTY"
+		echo "purpose=${purpose:-unspecified}"
+		echo "acquired_at=$(date +%s)"
+		echo "expires_at=$(( $(date +%s) + ttl ))"
+	} >"$tmp"
+	mv -f "$tmp" "$lp"
+	echo "incus-guard: claimed $inst on $ME_HOST pid $$ for ${ttl}s: ${purpose:-unspecified}"
+}
+
+release() {
+	local inst=$1 force=$2 lp held_host held_pid
+	lp=$(lease_path "$inst")
+	if [ ! -f "$lp" ]; then
+		echo "incus-guard: $inst is not claimed"
+		return 0
+	fi
+	held_host=$(field owner_host "$lp"); held_pid=$(field owner_pid "$lp")
+	# Release is normally a separate invocation from the claim, so a pid comparison alone
+	# would strand every lease. Same host is enough when the recorded owner is gone
+	# (crashed or finished session); a still-live owner keeps its lease until --force.
+	if [ "$force" != 1 ]; then
+		if [ "$held_host" != "$ME_HOST" ]; then
+			echo "incus-guard: $inst is held from $held_host pid $held_pid, refusing to release (--force)" >&2
+			return 75
+		fi
+		if [ "$held_pid" != "$$" ] && kill -0 "$held_pid" 2>/dev/null; then
+			echo "incus-guard: $inst is held by live pid $held_pid, refusing to release (--force)" >&2
+			return 75
+		fi
+	fi
+	rm -f "$lp"
+	echo "incus-guard: released $inst"
+}
+
+status() {
+	local inst=${1:-} lp exp stale
+	if [ -n "$inst" ]; then
+		echo "instance: $inst"
+		echo "lease:    $(show_lease "$inst" | head -1)"
+		show_lease "$inst" | tail -n +2
+		if command -v incus >/dev/null 2>&1; then
+			echo "state:    $(incus list "$inst" -c s --format csv 2>/dev/null | head -1 | tr -d '\r' || echo absent)"
+			echo "ops:      $(incus operation list --format csv 2>/dev/null | awk -F, '$4=="RUNNING"' | wc -l) running on this host"
+		fi
+		return 0
+	fi
+	echo "guard dir: $GUARD_DIR"
+	local found=0
+	for lp in "$GUARD_DIR"/*.lease; do
+		[ -e "$lp" ] || continue
+		found=1
+		inst=$(basename "$lp" .lease)
+		exp=$(field expires_at "$lp")
+		stale=""; [ "${exp:-0}" -le "$(date +%s)" ] && stale=" [EXPIRED]"
+		echo "  $inst: $(field owner_user "$lp")@$(field owner_host "$lp") pid $(field owner_pid "$lp") -> $(field purpose "$lp")$stale"
+	done
+	[ "$found" = 1 ] || echo "  no active leases"
+	# a second session is usually visible as a broker process on the same host
+	if command -v ps >/dev/null 2>&1; then
+		echo "agent sessions on this host:"
+		ps -eo pid,tty,etime,cmd 2>/dev/null | grep -E 'manicode/freebuff|freebuff --terminal-command-broker' | grep -v grep | sed 's/^/  /' | head -10
+	fi
+}
+
+cmd_claim() {
+	local inst="" purpose="unspecified" ttl=$DEF_TTL force=0
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--ttl) ttl=$2; shift 2 ;;
+			--force) force=1; shift ;;
+			-*) usage ;;
+			*) if [ -z "$inst" ]; then inst=$1; elif [ "$purpose" = unspecified ]; then purpose=$1; fi; shift ;;
+		esac
+	done
+	[ -n "$inst" ] || usage
+	claim "$inst" "$purpose" "$ttl" "$force"
+}
+
+sub=${1:-}; shift || usage
+case "$sub" in
+	claim) cmd_claim "$@" ;;
+	release)
+		inst=${1:-}; force=0; shift || true
+		[ "${1:-}" = "--force" ] && force=1
+		[ -n "$inst" ] || usage
+		release "$inst" "$force" ;;
+	status) status "${1:-}" ;;
+	run)
+		inst=${1:-}; shift || usage
+		purpose=${1:-unspecified}; shift || true
+		[ "${1:-}" = "--" ] && shift
+		[ -n "$inst" ] && [ $# -gt 0 ] || usage
+		claim "$inst" "$purpose" "$DEF_TTL" 0 || exit 75
+		"$@"; rc=$?
+		[ "${INCUS_GUARD_KEEP:-0}" = 1 ] || release "$inst" 0
+		exit $rc ;;
+	*) usage ;;
+esac

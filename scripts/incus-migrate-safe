@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# incus-migrate-safe - paced, resumable, retry-tolerant move of a STOPPED container
+# between estate hosts, with the preflight a naive `incus copy` never does.
+#
+# Why (2026-11-16, monarch i1 -> i2):
+#   `incus copy monarch i2:monarch --instance-only` died at 13.6 of 25 GB with
+#     "Failed migration on source ... websocket: close 1006 (unexpected EOF)"
+#   i2's incusd had (re)started at 10:42:34, one second before the abort - the
+#   destination control socket simply disappeared. Two aggravating factors:
+#     * the client lived inside `timeout 560 ssh ... bash -s`, so client death aborts it too;
+#     * incus does not retry, and leaves the half-written destination behind.
+#   Incus migration is a single websocket stream with no resume and no pacing knob.
+#   rsync has both, so this moves the rootfs directly and only the instance skeleton
+#   comes from `incus init --empty`.
+#
+# usage:
+#   incus-migrate-safe --instance NAME --dataset ZFS_DATASET \
+#       --dest-host IP --dest-root /var/lib/incus/storage-pools/<pool>/containers/NAME/rootfs \
+#       [--bwlimit 20M] [--retries 6] [--detach] [--ttl 21600] [--skip-verify]
+#
+# The source dataset is mounted READ-ONLY. The destination instance must already exist
+# with its config and devices applied (incus init --empty + incus config ...), so no data
+# lands before the config is right. Holds an incus-guard lease for the whole run.
+#
+# exit: 0 verified copy, 1 transfer/verify failure, 64 usage, 75 lease held elsewhere
+set -uo pipefail
+
+INSTANCE="" DATASET="" DEST_HOST="" DEST_ROOT=""
+BWLIMIT=${BWLIMIT:-20M} RETRIES=${RETRIES:-6} DETACH=0 TTL=${TTL:-21600} SKIP_VERIFY=0
+MNT=${MNT:-/var/tmp/incus-migrate-safe}
+LOG_DIR=${LOG_DIR:-/var/log/incus-migrate}
+
+usage() { sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--instance) INSTANCE=${2:-}; shift 2 ;;
+		--dataset) DATASET=${2:-}; shift 2 ;;
+		--dest-host) DEST_HOST=${2:-}; shift 2 ;;
+		--dest-root) DEST_ROOT=${2:-}; shift 2 ;;
+		--bwlimit) BWLIMIT=${2:-}; shift 2 ;;
+		--retries) RETRIES=${2:-}; shift 2 ;;
+		--ttl) TTL=${2:-}; shift 2 ;;
+		--detach) DETACH=1; shift ;;
+		--skip-verify) SKIP_VERIFY=1; shift ;;
+		-h|--help) usage ;;
+		*) echo "unknown argument: $1" >&2; usage ;;
+	esac
+done
+[ -n "$INSTANCE" ] && [ -n "$DATASET" ] && [ -n "$DEST_HOST" ] && [ -n "$DEST_ROOT" ] || usage
+
+log() { printf '%s %s\n' "$(date -Is)" "$*"; }
+
+# ---- preflight -----------------------------------------------------------------
+log "preflight: $INSTANCE must be stopped, source dataset present, destination healthy"
+
+state=$(incus list "$INSTANCE" -c s --format csv 2>/dev/null | head -1 | tr -d '\r')
+[ "$state" = "STOPPED" ] || { log "FAIL: instance state is '${state:-absent}', need STOPPED"; exit 1; }
+
+zfs list -H -o name "$DATASET" >/dev/null 2>&1 || { log "FAIL: dataset $DATASET not found"; exit 1; }
+
+# The destination daemon must have been up for a while: a restart mid-copy is exactly what
+# produced the 1006 abort this script exists to avoid.
+# One transport for both the preflight and rsync, or the preflight fails on hosts that
+# only have password auth.
+if [ -n "${ESTATE_SSH_PASS:-}" ]; then
+	PRE_SSH=(sshpass -p "$ESTATE_SSH_PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15)
+else
+	PRE_SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15)
+fi
+RSH=("${PRE_SSH[@]}")
+
+dest_epoch=$("${PRE_SSH[@]}" "root@$DEST_HOST" \
+	"date -d \"\$(systemctl show incus -p ExecMainStartTimestamp --value)\" +%s 2>/dev/null || echo 0" 2>/dev/null | tail -1)
+dest_epoch=${dest_epoch:-0}
+age=$(( $(date +%s) - dest_epoch ))
+[ "$dest_epoch" -gt 0 ] || { log "FAIL: cannot read incusd start time on $DEST_HOST (ssh/daemon?)"; exit 1; }
+[ "$age" -ge 600 ] || { log "FAIL: incusd on $DEST_HOST started ${age}s ago; refusing to migrate onto a fresh daemon"; exit 1; }
+log "dest incusd up ${age}s"
+
+"${PRE_SSH[@]}" "root@$DEST_HOST" "test -d '$DEST_ROOT'" 2>/dev/null \
+	|| { log "FAIL: destination rootfs $DEST_ROOT missing on $DEST_HOST"; exit 1; }
+
+# ---- detach --------------------------------------------------------------------
+# Detach before claiming, so the lease belongs to the process that actually does the work
+# and can therefore release it.
+if [ "$DETACH" = 1 ] && [ -z "${MIGRATE_DETACHED:-}" ]; then
+	mkdir -p "$LOG_DIR"
+	logfile="$LOG_DIR/$INSTANCE-$(date +%Y%m%d-%H%M%S).log"
+	MIGRATE_DETACHED=1 setsid nohup "$0" \
+		--instance "$INSTANCE" --dataset "$DATASET" --dest-host "$DEST_HOST" --dest-root "$DEST_ROOT" \
+		--bwlimit "$BWLIMIT" --retries "$RETRIES" --ttl "$TTL" $([ "$SKIP_VERIFY" = 1 ] && echo --skip-verify) \
+		>	"$logfile" 2>&1 &
+	echo "detached pid $! - log $logfile"
+	exit 0
+fi
+
+# ---- lease ---------------------------------------------------------------------
+if command -v incus-guard >/dev/null 2>&1; then
+	incus-guard claim "$INSTANCE" "migrate to $DEST_HOST" --ttl "$TTL" || exit 75
+fi
+
+# ---- transfer ------------------------------------------------------------------
+mkdir -p "$MNT"
+mountpoint -q "$MNT" || mount -t zfs -o ro "$DATASET" "$MNT" || { log "FAIL: cannot mount $DATASET read-only"; exit 1; }
+trap 'umount "$MNT" 2>/dev/null' EXIT
+
+src="$MNT/rootfs/"
+[ -d "$src" ] || { log "FAIL: $src missing after mount"; exit 1; }
+
+attempt=0
+status=1
+while [ "$attempt" -lt "$RETRIES" ]; do
+	attempt=$((attempt + 1))
+	log "rsync attempt $attempt/$RETRIES at --bwlimit=$BWLIMIT"
+	rsync -aHAX --numeric-ids --partial --bwlimit="$BWLIMIT" --info=stats2,progress2 \
+		-e "${RSH[*]}" "$src" "root@$DEST_HOST:$DEST_ROOT/" 2>&1 | tail -25
+	status=${PIPESTATUS[0]}
+	[ "$status" = 0 ] && break
+	log "attempt $attempt failed (rsync exit $status); a re-run only sends the difference"
+	sleep $((attempt * 15))
+done
+[ "$status" = 0 ] || { log "FAIL: transfer did not converge after $RETRIES attempts"; exit 1; }
+
+# ---- verify --------------------------------------------------------------------
+if [ "$SKIP_VERIFY" = 1 ]; then
+	log "DONE (unverified): $INSTANCE copied to $DEST_HOST:$DEST_ROOT"
+	exit 0
+fi
+log "verifying file counts"
+src_n=$(find "$src" -xdev 2>/dev/null | wc -l)
+dst_n=$("${PRE_SSH[@]}" "root@$DEST_HOST" "find '$DEST_ROOT' -xdev 2>/dev/null | wc -l" 2>/dev/null | tail -1)
+log "source entries: $src_n   destination entries: $dst_n"
+if [ "$src_n" != "$dst_n" ]; then
+	log "FAIL: entry counts differ ($src_n vs $dst_n) - re-run to converge"
+	exit 1
+fi
+log "DONE: $INSTANCE verified ($src_n entries) on $DEST_HOST"
+[ "${INCUS_GUARD_KEEP:-0}" = 1 ] || command -v incus-guard >/dev/null 2>&1 && incus-guard release "$INSTANCE" 2>/dev/null
+exit 0
