@@ -1753,3 +1753,51 @@ starting it on `i1`, where `.59` answers again, and the partial `i2` copy was de
 The rule this leaves: measure the first two minutes of a copy before committing to moving a
 production instance. atlas at 25–30 MB/s is a ten-minute outage, atheniq at 7 MB/s is an hour-long
 one, and that difference decides whether it is a move or an incident.
+
+
+## Estate review 2026-11-16: memory, disk, caches, and the duplicates that remain
+
+Every host was surveyed before anything was touched. The estate was not short of disk anywhere
+except at the margin — `i2` had 193 G free, `i3` 69 G, `i1` 50 G, `i4` 58 G — and the one host
+under real memory pressure was `i4`, the smallest at 7.3 GiB.
+
+**What was reclaimed.** Journals were capped at 200 M and apt caches emptied on all five hosts;
+dangling images and build cache were pruned on every host *and inside every running instance*.
+The measurable yields: `i1` freed 1.1 G of journal plus 477 MB of images across `atheniq`, `genesis`
+and `mail`; `i4` freed 427 MB of journal and **2.5 GB of builder cache inside `telno`** (the single
+largest find); `i3` freed 159 MB across `distro`, `magnate` and `subscribe`; `i2` freed 309 MB.
+`proxy` had nothing dangling, which is why its 5.49 GB of *unreferenced* images stayed: pruning
+those needs `image prune -a`, which would also drop images behind stopped containers, so it was
+left alone deliberately.
+
+**i4 was not Docker's problem.** The host-side Docker totals were trivial — `clearpath` idle at
+3.5 MiB, node-exporter 12 MiB, Prometheus 31 MiB, Grafana 134 MiB — and `incus list` attributed
+4.16 GiB to `proxy`, 287 MiB to `telno`, 124 MiB to `telno-turn` and 98 MiB to `vpn`, i.e. the
+`proxy` instance on i4 is the whole story.
+
+**The memory was a leak in the edge, not load.** `cerulean-npm` reported 637–928 MiB with four
+`nginx` workers at ~413 MiB RSS each, which is not what twenty-something vhosts should cost. A
+controlled `docker restart cerulean-npm` brought it to 386 MiB, cut the worst worker to 214 MiB,
+returned `sage.innotel.tech` and `innotel.tech` to 200, and dropped proxy's own usage from 3376 M
+to 2780 M — about 600 MB back on a host that only has 7.3 GiB. `omniroute` was recycled the same
+way afterwards. Nothing was moved off `i4`: `proxy` stays there by decision, and the remaining
+guests are 400 MiB in total, so the honest fix for that host is less resident memory, not fewer
+services.
+
+**Duplicates: one removed, several confirmed and left.** The `clearpath` container on `i4`'s host
+Docker was a stray: no compose project, a broken `3001` binding whose address `docker` itself
+reports as `invalid IP`, restart policy `unless-stopped`, and a live duplicate running as an Incus
+instance on `i2` (`.83`). It was removed. The scan across every running instance's Docker found the
+real repetition in the estate: **32 `oauth2-proxy`** sidecars, 8 redis, 6 postgres, 6 nginx, and
+then **5 Prometheus, 4 Grafana and 4 node-exporter** stacks, 3 Meilisearch, 2 `npm-edge`, 2
+Technitium and 2 Vault. The monitoring stacks come from the per-host compose file by design and
+were left as they are; the three Meilisearch instances and the two `npm-edge` containers are worth
+a separate decision, which is recorded here rather than acted on blindly.
+
+**A reboot hazard was closed.** `i4` carried four stopped instances, two of them (`terminal`, 9.7 G
+and `ontrak-tix-db`, 6.4 G) with `boot.autostart=true` — on a host already swapping, a reboot would
+have started both and put ~10 GiB of resident demand on 7.3 GiB. Both are now
+`boot.autostart=false`, as are `sage` (3.7 G) and `vault` (9.3 G), whose live copies run on `i2` and
+`i1`. They were **not** deleted: they hold 29 G of the 86 G `/var/lib/incus` occupies on `i4`, and
+`sage`/`vault` are the only second copies of their data, so reclaiming that space is a decision for
+the owner, not a cleanup step.
