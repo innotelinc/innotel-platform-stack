@@ -107,3 +107,17 @@ Two checks the first attempt got wrong, both worth repeating:
 
 i1 afterwards: PSI `some avg10` 1.99 %, load 0.64, `media-sync.timer` enabled and cycling, no
 instance named `monarch` — the renamed `monarch-retired` remains stopped with its dataset intact.
+
+### Source layout traps on i1
+
+- `zfs get -H -o value mountpoint` returns the literal string `legacy` for these datasets, so a
+  script that does `M=$(zfs get mountpoint ...)` and mounts at `"$M"` silently mounts into a
+  relative directory such as `legacy/` under the caller's working directory. `mountpoint -q`
+  then passes on an empty tree. Always mount at an explicit absolute path.
+- The dataset root is the *instance* directory (`backup.yaml`, `credentials`, `metadata.yaml`,
+  `rootfs`, `templates`); the container filesystem is `$M/rootfs`. Counting docker container
+  directories under `$M` instead of `$M/rootfs` reports zero on a perfectly healthy instance.
+- Read-only is sufficient for verification and avoids pinning anything:
+  `mount -t zfs -o ro <dataset> /var/tmp/<dir>`, count, then `umount` immediately.
+- A `find` or `du` left running by a timed-out client keeps the dataset pinned, so the following
+  `umount` fails busy and the next mount fails too. Bound the walk and kill it by pid.
