@@ -17,10 +17,12 @@ estate as it is, not as it was.
 
 ## Changes applied 2026-11-16 — `i2` is decommissioned
 
-`i2` (`192.168.1.52`) is **out of the estate**. Its work is already elsewhere: six containers on
-`i3` (`signara`, `magnate`, `distro`, `pi`, `subscribe`, `copilotkit`), `proxy` on `i4`. The stopped
-copies that were kept on `i2` as rollback — `proxy`, `onyx`, `vault`, `sage` — went with the host,
-so nothing on this page can be rolled back to `i2` any more. `estate-rebalance` §19 records what
+`i2` (`192.168.1.52`) is **parked, not decommissioned**. Its work is being served elsewhere: six
+containers on `i3` (`signara`, `magnate`, `distro`, `pi`, `subscribe`, `copilotkit`), `proxy` on
+`i4`. All eight of its instances and its `proxy`/`onyx` copies are still there and intact, stopped,
+with `boot.autostart=false`, because they duplicate addresses that `i3` and `i4` now answer on
+(`estate-rebalance` §19). Rolling back to `i2` means stopping the `i3`/`i4` copy first, never
+together. `estate-rebalance` §19 records what
 else went with it, what was cleaned up on the surviving hosts, and what a replacement host has to be
 able to hold. The tables below describe `i1`, `i3` and `i4`; `i2` columns in the dated sections are
 the record of where things were, not where they are.

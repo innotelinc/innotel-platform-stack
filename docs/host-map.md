@@ -2,9 +2,10 @@
 
 Verified live on **2026-11-07** over SSH to each address, with the `proxy` row corrected on
 **2026-11-14** (it was listed on `i1`; `incus list` there has no such instance, and the edge, its
-vault and `ntfy` all run in that container). **`i2` was decommissioned on 2026-11-16** and has no
-row here any more: the estate is `i1`, `i3` and `i4` until a replacement host is added
-(`docs/estate-rebalance-2026-11-15.md` §19). This page records where
+vault and `ntfy` all run in that container). **`i2` was recovered on 2026-11-15 and is parked**: it booted with its eight instances, three
+pools and six Docker stacks intact, so nothing on it was lost, but every instance is stopped with
+`boot.autostart=false` while its addresses are served from `i3` and `i4`
+(`docs/estate-rebalance-2026-11-15.md` §19). The estate reads three hosts until it rejoins. This page records where
 each product actually runs, because a placement written in a roadmap is only worth
 what a login to that host confirms.
 

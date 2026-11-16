@@ -58,8 +58,9 @@ so a lost pool is not a lost edge. i2 holds a root key for i1 for this, added
 Sunday 03:30 with up to 45 minutes of jitter, `Persistent=true` so a missed
 weekend is caught up at the next boot rather than skipped in silence.
 
-> **That timer is not running anywhere.** `i2` was decommissioned on 2026-11-16 and the unit went
-> with it, so **there is no scheduled restore point right now** — `proxy` itself runs on `i4`. The
+> **That timer is not running anywhere.** `i2` is parked (it was recovered and then stopped on
+> 2026-11-15, `estate-rebalance` §19), so the unit sits on a host that is not running and **there is
+> no scheduled restore point right now** — `proxy` itself runs on `i4`. The
 > commands below are unchanged; the host they run on has to be chosen (and it must not be the host
 > carrying the edge). `docs/estate-rebalance-2026-11-15.md` §19 records this as the decommission's
 > largest open consequence.
