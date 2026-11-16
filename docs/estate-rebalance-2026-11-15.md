@@ -1635,3 +1635,24 @@ as jobs that need watching for tens of minutes rather than a single command.
 Cleanup on `i2` also removed the stale `genesis` copy, so the only volumes left there are the six
 instance rootfs volumes; the failed `nas-data` volume record had already disappeared with its
 transfer.
+
+## nas moved, with its data volume
+
+`nas-data` (23.1 GiB, `tank/incus/custom/default_nas-data`) copied cleanly once it was launched as
+its own transient unit: `incus storage volume copy incus/nas-data i2:fast/nas-data` ended with
+`Storage volume copied successfully!` and 25.4 GB of volume landed in i2's dir pool. The transfer
+takes minutes and writes nothing until it finishes, so an empty log is not evidence of a stall for
+a volume copy — the on-disk growth of `/var/lib/incus/storage-pools/fast/custom/default_nas-data`
+is what distinguishes slow from stuck.
+
+The instance then moved with both devices repointed:
+
+    incus copy nas i2:nas --instance-only --device root,pool=fast --device data,pool=fast
+
+The first attempt added `source=nas-data` to the data override and failed at once with
+`Failed add validation for device "data": Failed to get storage pool "fast,source=nas-data"`. A
+`--device` override is a comma list of `key=value` pairs for that device, and `pool` took the rest
+of the string; `source` cannot be appended there. Overriding only `pool` is both correct and
+sufficient, because `source: nas-data` is already in the device config and a volume of that name
+now exists in the target pool. `i2:nas` started and answers on `.89`; `i1` keeps the stopped copy
+as `nas-retired`.
