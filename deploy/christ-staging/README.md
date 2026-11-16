@@ -21,16 +21,23 @@ The upstream compose is **not** vendored here. Take it from the `jesus` reposito
 
 - Docker on the target host. **Not `i2`**: it has no Docker, and this is not a reason to
   install one there.
-- Three secrets (the upstream fails closed on them):
+- Four secrets (the upstream fails closed on them):
   ```bash
   openssl rand -hex 32   # CANTUS_SECRET
   openssl rand -hex 32   # CANTUS_CONTROL_TOKEN
   openssl rand -hex 32   # DOGRAH_JWT_SECRET
+  openssl rand -hex 32   # FAX_SECRET (interpolation only — never used, see below)
   ```
   Note that `CANTUS_CONTROL_TOKEN` and `CANTUS_SECRET` were the blockers for restoring
   the *original* instance, because that instance has an identity to preserve. A staging
   instance does not: it can issue its own, which is why staging is unblocked while the
   production restore is not.
+- **`FAX_SECRET` is required even though `fax-engine` can never start here.** Compose
+  interpolates every service in the file *before* it applies profiles, so a missing
+  fail-closed variable aborts `config` and `up` with
+  `required variable FAX_SECRET is missing a value` — naming a service that the
+  profiles exclude. Mint it and never use it. This was found by validating, not by
+  reading the compose.
 - ~40 GB free. The `agents` profile pulls `dograh-db`, `dograh-redis` and `dograh-minio`,
   and `speech` pulls the TTS voice models.
 
@@ -43,25 +50,25 @@ cd /opt/christ
 cp .env.staging.example .env.staging && chmod 600 .env.staging
 $EDITOR .env.staging
 
-COMPOSE="-p christ-staging --env-file .env.staging \
-  -f /opt/jesus/christ/compose.yml -f compose.staging.yml"
-
-# 0. Prove the trunk guard before starting anything.
-docker compose $COMPOSE --profile core --profile console config --services | sort
-#    must NOT contain: gateway, telno, fax-engine
+export BASE_COMPOSE=/opt/jesus/christ/compose.yml   # the jesus tree on this host
 
 # 1. Front door and voice plane (no trunk involved)
-docker compose $COMPOSE --profile core up -d
+./up.sh core
 
 # 2. Console
-docker compose $COMPOSE --profile console up -d
+./up.sh console
 
 # 3. Agents (db, redis, minio, api, ui)
-docker compose $COMPOSE --profile agents up -d
+./up.sh agents
 
 # 4. Speech, then capstone
-docker compose $COMPOSE --profile speech up -d
-docker compose $COMPOSE --profile capstone up -d
+./up.sh speech
+./up.sh capstone
+````
+`up.sh` is the guard, not a convenience. It refuses any argument containing `*` (a wildcard
+activates `never-pstn` and resolves `gateway`, `telno` and `fax-engine` — measured), then
+asserts from `compose config --services` that none of the three is in the tree, and only
+then runs `up -d`. Starting this stack with raw `docker compose … up` skips that check.
 ```
 
 ## Verification — not "the container is Up"

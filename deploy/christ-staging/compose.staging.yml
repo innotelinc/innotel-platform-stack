@@ -11,7 +11,11 @@
 #     up -d
 #
 # The three services that can reach a PSTN trunk are re-homed to a profile that
-# nothing ever activates, so `--profile '*'` cannot start them by accident:
+# no *named* profile selection activates. It does NOT survive a wildcard:
+# `--profile '*'` turns on every profile in the merged config, "never-pstn"
+# included, which was measured on 2026-11-16 as all three services resolving.
+# That is why the stack is started through ./up.sh, which refuses '*' and then
+# proves the exclusion from `compose config --services` before running up:
 #   gateway     (upstream profile "pstn")      - the SIP border, binds 5060/udp
 #   telno       (upstream profile "platform")  - the instance's front door
 #   fax-engine  (upstream profile "fax")       - binds 5062/udp to a SIP host
