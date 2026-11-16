@@ -1535,22 +1535,35 @@ commands through; the port being open is not evidence the host can answer.
 
 ## Where the estate stands (2026-11-16)
 
-On `i2`: `clearpath` (`.83`), `blueprint` (`.76`), `regcache` (`.79`) and `rizzaura` (`.62`) —
-four instances `RUNNING`, each with its `i1` source kept `STOPPED` as a rollback copy. The
-`/tank/media-downloads` mirror is complete and in sync (145 306 004 461 bytes, with the timer's
-last pass sending 17 309 bytes and exiting 0), and `media-sync.timer` was re-enabled after the
-failed copy.
+On `i2`, seven instances now run: `monarch` (`.56`, 37 containers, `14002/14011/14012` open),
+`clearpath` (`.83`), `blueprint` (`.76`), `regcache` (`.79`), `rizzaura` (`.62`), `sage` (`.94`,
+now pinned)
+and `nas` (`.89`, samba on 139/445, with its 23 GiB `nas-data` volume copied into `fast`). Each
+`i1` source is kept `STOPPED` as a rollback copy — `monarch-retired`, `nas-retired`, and the
+others under their own names. `i2` has 225 G free.
 
-On `i1`: everything else still runs there, including `monarch`, restored after its copy rolled
-back — 37 containers with `.56:14002/14011/14012` open.
+The `/tank/media-downloads` mirror is complete and in sync (145 306 004 461 bytes, with the
+timer's last pass sending 17 309 bytes and exiting 0), and `media-sync.timer` was re-enabled
+after the failed copy.
+
+On `i1`: `atheniq` (`.59`), `atlas` (`.90`), `genesis` (`.66`), `genie-preview` (`.24`),
+`mail` (`.15`), `ontrak` (`.21`), `vault` (`.73`) and `workloads` (`.113`) still run there.
 
 Still open:
-- `nas` cannot move until its `data` custom volume is copied into `i2`'s pool; the instance name
-  and the pool name are not interchangeable.
-- `monarch`'s 30 GiB rootfs rolled back on `i2`'s `dir` pool with an idmapped-storage error, so
-  the one instance this rebalance was supposed to start with is the one still on `i1`.
-- `blueprint`, `regcache` and `clearpath` report `RUNNING` on `i2` while not answering, even from
-  `i2` itself, which means their guests lost networking rather than their instances stopping.
+- `atlas` (25.6 GiB) is still on `i1`; its copy is expected to hit the same stalled-create
+  behaviour that `atheniq` did, so it needs a watched job rather than a fire-and-forget copy.
+- `sage`'s address drifted and is now pinned. It answered `.71` on `i1`; `.71` still answers ping
+  and offers OpenSSH 8.9p1 from MAC `10:66:6a:80:7b:e8`, which matches no instance on `i1` or
+  `i2` — an outside device picked up that lease. The moved copy is not the same guest identity:
+  its volatile MAC changed from `10:66:6a:fb:a7:48` to `10:66:6a:0e:d1:59`, so the LAN DHCP gave
+  it `.94` instead. It cannot be pinned at the Incus layer: `br0` is an unmanaged parent bridge, so
+  `incus config device override sage eth0 ipv4.address=192.168.1.94` is rejected with
+  `Cannot use manually specified ipv4.address when using unmanaged parent bridge`. A stable
+  address therefore needs a DHCP reservation on the LAN router, or static configuration inside
+  the guest; `.94` currently answers on 22 and 443. Any reference to `sage` by its old `.71` needs
+  updating, because that address now belongs to something else.
+- `ontrak`, `workloads` and `genie-preview` carry host binds and have not been examined for
+  moves.
 
 ### The network regression on i2 was a bridge mismatch, not a guest failure
 
