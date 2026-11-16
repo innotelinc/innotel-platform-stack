@@ -1535,22 +1535,20 @@ commands through; the port being open is not evidence the host can answer.
 
 ## Where the estate stands (2026-11-16)
 
-On `i2`, seven instances now run: `monarch` (`.56`, 37 containers, `14002/14011/14012` open),
-`clearpath` (`.83`), `blueprint` (`.76`), `regcache` (`.79`), `rizzaura` (`.62`), `sage` (`.94`)
-and `nas` (`.89`, samba on 139/445, with its 23 GiB `nas-data` volume copied into `fast`). Each
-`i1` source is kept `STOPPED` as a rollback copy — `monarch-retired`, `nas-retired`, and the
-others under their own names. `i2` has 225 G free.
+On `i2`, eight instances now run: `monarch` (`.56`, 37 containers, `14002/14011/14012` open),
+`clearpath` (`.83`), `blueprint` (`.76`), `regcache` (`.79`), `rizzaura` (`.62`), `sage` (`.94`),
+`nas` (`.89`, samba on 139/445, with its 23 GiB `nas-data` volume copied into `fast`) and `atlas`
+(`.90`, gitea + convex). Each `i1` source is kept `STOPPED` as a rollback copy —
+`monarch-retired`, `nas-retired`, `atlas-retired`, and the others under their own names.
 
 The `/tank/media-downloads` mirror is complete and in sync (145 306 004 461 bytes, with the
 timer's last pass sending 17 309 bytes and exiting 0), and `media-sync.timer` was re-enabled
 after the failed copy.
 
-On `i1`: `atheniq` (`.59`), `atlas` (`.90`), `genesis` (`.66`), `genie-preview` (`.24`),
-`mail` (`.15`), `ontrak` (`.21`), `vault` (`.73`) and `workloads` (`.113`) still run there.
+On `i1`: `atheniq` (`.59`), `genesis` (`.66`), `genie-preview` (`.24`), `mail` (`.15`),
+`ontrak` (`.21`), `vault` (`.73`) and `workloads` (`.113`) still run there.
 
 Still open:
-- `atlas` (25.6 GiB) is still on `i1`; its copy is expected to hit the same stalled-create
-  behaviour that `atheniq` did, so it needs a watched job rather than a fire-and-forget copy.
 - `sage` is on `.94`, and the estate already declares that. `.71` is the `proxy` host (its
   hostname is `proxy`, OpenSSH 8.9p1, MAC `10:66:6a:80:7b:e8`), not a stale sage copy, and
   `scripts/edge-vhost-targets.tsv` pins `sage.innotel.tech` to `192.168.1.94:443`. The moved copy
@@ -1700,3 +1698,31 @@ The plan, in order:
    exercised, not just created).
 4. `workloads` last, because its three `shift` mounts are the ones with a known failure mode on
    `i2` and Coolify's database is the least forgiving thing to have down.
+
+
+## atlas moved, and the keyring quota that stopped its stack
+
+`atlas` (25.6 GiB) copied at a steady 25–30 MB/s — measured at 4.8 GB, then 11.2 GB, then 24.4 GB
+across three polls — and finished without the stalled-create failure `atheniq` hit, which is
+evidence that the stall was `atheniq`'s own create operation rather than a size threshold. It came
+up on `.90`, the address `scripts/check-container-addresses.py` already expects, and `i1` keeps
+`atlas-retired` stopped as the rollback copy.
+
+The instance then answered on 22 and nothing else: docker was `active` and
+`/opt/atlas/docker-compose.yml` was present, but `docker compose up -d` failed with
+
+    unable to join session keyring: unable to create session key: disk quota exceeded
+
+That message is about keys, not storage. `atlas`'s rootfs is ID-mapped (`uid_map` reads
+`0 1000000 1000000000`), so its containers run as host UID 1000000 — an *unprivileged* user, and
+`/proc/key-users` showed that UID sitting at exactly `200/200` keys against the
+`kernel.keys.maxkeys` default of 200. The root quota was never the problem: `root_maxkeys` was
+1,000,000 with 540 keys live, so raising it changed nothing. Raising the unprivileged quota to
+10 000 keys / 4 MB in `/etc/sysctl.d/99-incus-keyring.conf` let the stack start: `atlas-gitea-db`
+healthy, `atlas-gitea` started, and convex listening on 3210.
+
+Two operational notes: `incus exec atlas -- systemctl restart docker` blocks and killed two of my
+command sessions before its output arrived, so it is not a safe way to bounce docker in that
+instance; and `sysctl -w` alone did not survive, which is why the setting lives in a `sysctl.d`
+file rather than in a one-off command. Any other ID-mapped instance on `i2` will hit the same
+quota, so the file is a host requirement, not an `atlas` fix.
