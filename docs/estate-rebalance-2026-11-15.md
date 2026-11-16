@@ -1536,8 +1536,7 @@ commands through; the port being open is not evidence the host can answer.
 ## Where the estate stands (2026-11-16)
 
 On `i2`, seven instances now run: `monarch` (`.56`, 37 containers, `14002/14011/14012` open),
-`clearpath` (`.83`), `blueprint` (`.76`), `regcache` (`.79`), `rizzaura` (`.62`), `sage` (`.94`,
-now pinned)
+`clearpath` (`.83`), `blueprint` (`.76`), `regcache` (`.79`), `rizzaura` (`.62`), `sage` (`.94`)
 and `nas` (`.89`, samba on 139/445, with its 23 GiB `nas-data` volume copied into `fast`). Each
 `i1` source is kept `STOPPED` as a rollback copy — `monarch-retired`, `nas-retired`, and the
 others under their own names. `i2` has 225 G free.
@@ -1552,7 +1551,7 @@ On `i1`: `atheniq` (`.59`), `atlas` (`.90`), `genesis` (`.66`), `genie-preview` 
 Still open:
 - `atlas` (25.6 GiB) is still on `i1`; its copy is expected to hit the same stalled-create
   behaviour that `atheniq` did, so it needs a watched job rather than a fire-and-forget copy.
-- `sage`'s address drifted and is now pinned. It answered `.71` on `i1`; `.71` still answers ping
+- `sage`'s address drifted and cannot be pinned from the host. It answered `.71` on `i1`; `.71` still answers ping
   and offers OpenSSH 8.9p1 from MAC `10:66:6a:80:7b:e8`, which matches no instance on `i1` or
   `i2` — an outside device picked up that lease. The moved copy is not the same guest identity:
   its volatile MAC changed from `10:66:6a:fb:a7:48` to `10:66:6a:0e:d1:59`, so the LAN DHCP gave
