@@ -1553,8 +1553,15 @@ placement (finding 7).
   already there and did not help, because every headless Chromium needs shared memory: at
   64 MB each solve ballooned, the cgroup killed Chromium, and the next request started
   another (84 Chromium processes at one reading, `oom_kill 1234`, `memory.current` pinned
-  at `memory.max`). `shm_size: 1g` is the fix — after the restart it runs **8** Chromium
-  processes with `oom_kill 0`.
+  at `memory.max`). `shm_size: 1g` cut that down but was not the whole fix, which only showed
+  up under real load (`prowlarr` pings its own update endpoint through the solver, and a
+  solve takes ~120 s): the service re-pinned at its 2 GiB cap with **12 live Chromium
+  browsers**, 196 `oom_kill`s, `session not created: cannot connect to chrome` in its log
+  and `500`s back to `prowlarr`. Same rule as the monarch row above — measured use plus
+  headroom, not the number that happened to be there — so the cap is **3 GiB**. After that
+  restart: `oom_kill 0`, peak **0.85 GiB**, two Chromium processes, and a live
+  `request.get` answers `"status": "ok"` / HTTP 200. Read the counter, not the restart: the
+  `oom_kill` in the service's own cgroup is what says whether it is still killing itself.
 - **`onyx` is back on `i1` at `.60`**, with the `main-pool` USB disk (`/dev/sdc`, btrfs
   label `main-pool`) that is attached there now. The `tank` pool its `onyx-data` device
   names exists again on `i1` (`source=tank/onyx`), so the instance definition needed no
