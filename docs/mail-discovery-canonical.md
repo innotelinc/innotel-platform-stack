@@ -20,7 +20,7 @@ pieces it installs. All paths are inside the `mail` container.
 | `/etc/stalwart-oidc/tls/ca.pem`, `ca.key` | the private anchor (`CN=Stalwart OIDC local discovery CA`, 10 years) that signs that leaf — **name-independent**, so it survives a rename | setup script |
 | `/etc/stalwart-oidc/ca-bundle.pem` | the system bundle plus that anchor | setup script |
 | `SSL_CERT_FILE` in `/etc/stalwart/stalwart.env` | points the server's fetch at the bundle above | setup script |
-| `/etc/stalwart-oidc/hosts` | `/etc/hosts` plus `127.0.0.1 auth.cerulean.innotel.us` | setup script |
+| `/etc/stalwart-oidc/hosts` | `/etc/hosts` plus `127.0.0.1 auth.cerulean.innotel.us`, **rebuilt on every run** from a `/etc/hosts` whose estate names the script pins to the LAN edge (`PINNED`, `pins`) | setup script |
 | `stalwart.service.d/hosts.conf` | `BindReadOnlyPaths=…/hosts:/etc/hosts` — **Stalwart alone** gets that file | setup script |
 | iptables NAT `OUTPUT` | `127.0.0.1:443` and one rule per resolved upstream IPv4 → `127.0.0.1:8443`; the proxy's own uid is exempt so its refresh still reaches the provider | `scripts/stalwart-oidc-redirect.sh` |
 | `UPSTREAM` / `DOC_PATH` | the name the cache refreshes from, and `/application/o/stalwart-webui/.well-known/openid-configuration` | `scripts/stalwart-oidc-discovery-proxy.py`, `scripts/stalwart-oidc-redirect.sh` |

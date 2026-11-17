@@ -6,6 +6,7 @@
 # this file's directory, or the repo's scripts/ + systemd/):
 #   bash stalwart-oidc-discovery-setup.sh install
 #   bash stalwart-oidc-discovery-setup.sh preflight   # read-only, changes nothing
+#   bash stalwart-oidc-discovery-setup.sh pins        # only the LAN-edge /etc/hosts pins
 #   bash stalwart-oidc-discovery-setup.sh rollback
 #
 # It installs from its own directory, not from /root: the 2026-10-25 /root cleanup
@@ -36,6 +37,51 @@ src() {
 probe() {
   curl -s -o /dev/null -w '%{http_code}' -m 5 \
     -H 'Authorization: Bearer local-discovery-probe' http://127.0.0.1:8080/jmap/session 2>/dev/null
+}
+
+# The estate names this container has to reach over HTTPS, pinned to the LAN edge.
+#
+# WHY (2026-11-16): `stalwart-oidc-redirect.sh` DNATs the estate's *single* WAN address
+# (73.68.203.71, which every public name resolves to) at the local discovery cache on
+# :8443. The rule matches by ADDRESS, so a name this container resolves publicly is
+# answered by the cache instead of the edge, and the cache's leaf says
+# `CN=auth.cerulean.innotel.us` — every check that then verifies `mail.innotel.us` fails on
+# a name mismatch no certificate can fix. The LAN edge serves each name below with its own
+# SAN, so pinning here sends the lookup somewhere that can answer correctly.
+#
+# These lived in a shell history until now: applied by hand with `hosts.bak-*` backups,
+# which a rebuild of this container silently loses, taking mail and every mail check with
+# it. They are provisioning, so they live here: `install` applies them before the private
+# hosts copy is written, and `pins` applies just them, idempotently, to a container that
+# already exists.
+EDGE=192.168.1.71
+PINNED="mail.innotel.us mailjet.innotel.us admin.mail.innotel.us admin.oasis.innotel.us resend.innotel.us auth.cerulean.innotel.us alerts.innotel.us"
+
+ensure_edge_pins() {
+  local name added=0 present=0
+  for name in $PINNED; do
+    if grep -qE "^[0-9.]+[[:space:]]+${name//./\\.}([[:space:]]|$)" /etc/hosts; then
+      present=$((present + 1))
+    else
+      printf '%s %s # pinned to the LAN edge: the public name hairpins to the OIDC discovery cache and answers another certificate\n' \
+        "$EDGE" "$name" >> /etc/hosts
+      echo "  pin   $name -> $EDGE"
+      added=$((added + 1))
+    fi
+  done
+  echo "  edge pins: $added added, $present already present ($EDGE)"
+}
+
+# Stalwart alone reads this file (BindReadOnlyPaths), so it is rebuilt from /etc/hosts on
+# every run. The first version wrote it once behind a `grep -q auth.cerulean` guard and
+# never again: a pin added to /etc/hosts afterwards reached nothing, and the server kept
+# resolving names the way the container no longer did.
+write_private_hosts() {
+  [ -d "$ETC" ] || return 0
+  cp /etc/hosts "$ETC/hosts"
+  grep -q '^127\.0\.0\.1 auth\.cerulean\.innotel\.us$' "$ETC/hosts" \
+    || echo '127.0.0.1 auth.cerulean.innotel.us' >> "$ETC/hosts"
+  chmod 0644 "$ETC/hosts"
 }
 
 # Read-only go/no-go for the ordered change in docs/mail-discovery-canonical.md.
@@ -144,6 +190,17 @@ rollback() {
 
 if [ "$ACTION" = "preflight" ]; then preflight; exit $?; fi
 if [ "$ACTION" = "rollback" ]; then rollback; exit 0; fi
+if [ "$ACTION" = "pins" ]; then
+  # The same refusal as preflight: every path here is the mail container's, and pinning
+  # estate names in another host's /etc/hosts would redirect that host's own lookups.
+  if [ ! -d "$ETC" ] || [ ! -f /etc/stalwart/stalwart.env ]; then
+    echo "CANNOT RUN: $ETC and /etc/stalwart/stalwart.env are not both here - this is not the mail container"
+    exit 2
+  fi
+  ensure_edge_pins
+  write_private_hosts
+  exit 0
+fi
 
 set -e
 
@@ -197,11 +254,8 @@ python3 -c 'import json,sys;d=json.load(open("/etc/stalwart-oidc/cache/discovery
 chown oidcproxy:oidcproxy "$ETC/cache/discovery.json"
   chmod 0644 "$ETC/cache/discovery.json"
 
-grep -q 'auth.cerulean.innotel.us' "$ETC/hosts" 2>/dev/null || {
-  cp /etc/hosts "$ETC/hosts"
-  echo '127.0.0.1 auth.cerulean.innotel.us' >> "$ETC/hosts"
-}
-chmod 0644 "$ETC/hosts"
+ensure_edge_pins
+write_private_hosts
 
 install -m 0755 "$(src stalwart-oidc-redirect.sh)" /usr/local/bin/stalwart-oidc-redirect.sh
 install -m 0755 "$(src stalwart-oidc-discovery-proxy.py)" /usr/local/bin/stalwart-oidc-discovery-proxy.py

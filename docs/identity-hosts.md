@@ -141,6 +141,13 @@ The remedy is the one already used for `auth.innotel.us`: pin the names to the L
 the container's `/etc/hosts` (`/etc/hosts.bak-<epoch>` kept), so the lookup never reaches
 the public address the DNAT matches.
 
+These pins are **provisioning**, not a hand edit. `scripts/stalwart-oidc-discovery-setup.sh`
+carries the list (`PINNED`) and applies it in `install`; `… pins` applies just them,
+idempotently, to a container that already exists. That is what makes them survive a
+rebuild — the container has no cloud-init at all, so the setup script is the only build
+path, and the hand-applied version was one `incus delete` away from taking mail, the
+inbound checks and the notifier with it.
+
 | Name | Edge host → upstream | SAN it is served with |
 | --- | --- | --- |
 | `mail.innotel.us` | 95 → `192.168.1.15:3000` | `mail.innotel.us` |
@@ -153,7 +160,9 @@ The last row is the notifier's own name: the same pin was why the mail server's 
 could deliver mail but not push a notification (`ntfy: failed: … certificate is not valid
 for 'alerts.innotel.us'`). Any name a container has to reach by HTTPS belongs in this list
 — the DNAT matches the **address**, not the name, so every unlisted name is redirected to
-the discovery cache.
+the discovery cache. The table records the names whose edge row was checked by hand; the
+authoritative list is `PINNED` in the setup script, which also pins `resend.innotel.us`
+and `auth.cerulean.innotel.us`.
 
 Stalwart is deliberately untouched: it reads its own `/etc/stalwart-oidc/hosts` through
 `BindReadOnlyPaths`, and the loopback pin in that file is what the discovery cache needs.
