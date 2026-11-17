@@ -1335,6 +1335,20 @@ placement (finding 7).
   carries an `oasis` checkout), the list now has a home a rebuild reads:
   `scripts/restore-mailjet-retired-domains.py` sets it, runs the unit, and **fails when
   the run says `skipped`** — a check that skips is not a check that passes.
+  **The inbound path was losing attachments, found the same day.** Mailjet's Parse API
+  returns header values as **arrays** (`Content-Disposition: ['attachment; filename="…"']`)
+  and `mailjet-inbound.py` read them with `str()`, so the value never began with
+  `attachment`, every part was dropped, and a report whose whole content is one `.zip`
+  arrived as an empty `text/plain` body — Google's 2026-11-04 report is stored as 2116
+  bytes with **0 bytes of body**, and that is why `dmarc_alignment` has never counted a
+  report. Measured before the fix by posting a Mailjet-shaped payload with a 144-byte zip
+  straight at the endpoint: `injected … bytes=496`, mailbox body 0 bytes. The canonical
+  copy now lives at `hosts/i1/mail/mailjet-inbound.py` (the `oasis` checkout is not
+  reachable from the estate, so `platform-stack` carries it), reads part headers through a
+  list-aware helper, falls back to `Attachment<n>` when a part has no `ContentRef`, and no
+  longer copies a part's `Content-Disposition` onto the rebuilt message.
+  `scripts/tests/test_mailjet_inbound.py` pins all of it — three of its four tests fail
+  against the old code with `b'' != b'PK\x03\x04…'`.
   Three operational facts, all learned the hard way:
   - **Stalwart publishes its DKIM records to Technitium itself now — 2026-10-03.** It
     used to do a TSIG dynamic update at `192.168.1.80` (the older BIND copy of the
