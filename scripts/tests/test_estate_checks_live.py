@@ -124,55 +124,18 @@ class LiveCase(unittest.TestCase):
 # check-container-addresses: a container that moved must fail the run, not a log line
 ####################################################################################
 
-ADDRESS_ROWS = {
-    I1: [("atheniq", "192.168.1.59"), ("atlas", "192.168.1.90"),
-         # atheniq and mail came here from i2 on 2026-11-12 and kept their addresses.
-         ("mail", "192.168.1.15"),
-         # blueprint and clearpath moved here from i2 on 2026-10-30; their
-         # addresses are pinned in their own netplan, so they travelled with them.
-         ("blueprint", "192.168.1.76"), ("clearpath", "192.168.1.83"),
-         ("genesis", "192.168.1.66"),
-         ("genie-preview", "192.168.1.24"), ("monarch", "192.168.1.56"),
-         ("nas", "192.168.1.89"), ("ontrak", "192.168.1.21"),
-         ("regcache", "192.168.1.79"), ("rizzaura", "192.168.1.62"),
-         # sage and vault came over from i4 on 2026-11-15 to make room for the edge.
-         ("sage", "192.168.1.94"), ("vault", "192.168.1.73")],
-    # capstone (`.30`) has no row: it is stopped and its address is deliberately
-    # unpinned, so the fixture must not invent one back onto the host.
-    # `i2` was decommissioned on 2026-11-16, so it has no rows: the fixture mirrors the
-    # address table, and a host left in one and not the other is how this pair drifts.
-    # i3 returned on 2026-11-15 and took six of i2's containers; `onyx` — the one that had
-    # stayed on i2 — is an i3 row now, because the i3 copy is the only one left.
-    # Every address is pinned inside its container, so only the host key changed.
-    I3: [("copilotkit", "192.168.1.114"), ("distro", "192.168.1.61"),
-         ("magnate", "192.168.1.57"), ("onyx", "192.168.1.60"),
-         ("pi", "192.168.1.70"),
-         ("signara", "192.168.1.44"), ("subscribe", "192.168.1.58")],
-    # i4 holds six satellites (sage, telno, telno-turn, terminal, vault, vpn); the edge
-    # container itself moved to i2 and the media/business containers stay on i1. The
-    # addresses travel with the pinned rootfs, so only the host key changes when a
-    # container moves — which is why the rows here are read off the hosts, not
-    # remembered.
-    I4: [("proxy", "192.168.1.71"),
-         ("telno", "192.168.1.95"),
-         ("telno-turn", "192.168.1.96"), ("terminal", "192.168.1.22"),
-         ("vpn", "192.168.1.43"),
-         # The database answers on `.68:5432`; the container itself has been stopped
-         # since 2026-10-24 with the volume kept, and the row is what makes its absence
-         # a failure rather than a silence.
-         ("ontrak-tix-db", "192.168.1.68")],
-}
-
-
-def _address_rules(moved: tuple[str, str] | None = None, mount: str = "mounted\n") -> dict:
+def _address_rules(expected, targets, moved: tuple[str, str] | None = None, mount: str = "mounted\n") -> dict:
+    # Built from the check's own table: the hand-kept copy this replaced fell behind
+    # it (i2 had nine rows there), and a host the stub is not told about reads as
+    # unreachable, which is exit 2 rather than fixture drift.
     rules = {}
-    for host, rows in ADDRESS_ROWS.items():
+    for host, rows in expected.items():
         listing = []
-        for name, address in rows:
+        for name, address in rows.items():
             if moved and moved == (host, name):
                 address = "192.168.1.20"  # the 2026-10-01 renumber
             listing.append(f'{name},CONTAINER,RUNNING,"{address} (eth0)"')
-        rules[host] = {
+        rules[targets[host].split("@")[-1]] = {
             "answers": [
                 ["nts4", _csv(listing)],
                 # Rule 4's probe; the stub answers the first keyword it finds, so this
@@ -187,7 +150,7 @@ def _address_rules(moved: tuple[str, str] | None = None, mount: str = "mounted\n
 class AddressLiveCase(LiveCase):
     def test_a_clean_estate_exits_zero_and_publishes_status_one(self):
         chk = _load("check-container-addresses")
-        code, prom = self.run_check(chk, chk.HOSTS, _address_rules())
+        code, prom = self.run_check(chk, chk.HOSTS, _address_rules(chk.EXPECTED, chk.HOSTS))
         self.assertEqual(code, 0)
         self.assertIn('innotel_estate_check_last_status{check="container_address"} 1', self.text(prom))
 
@@ -195,13 +158,13 @@ class AddressLiveCase(LiveCase):
         # Right address, unreadable state: NPM serves nothing and every address rule
         # passes. This is the 2026-10-26 defect, made recoverable by one finding.
         chk = _load("check-container-addresses")
-        code, prom = self.run_check(chk, chk.HOSTS, _address_rules(mount="absent\n"))
+        code, prom = self.run_check(chk, chk.HOSTS, _address_rules(chk.EXPECTED, chk.HOSTS, mount="absent\n"))
         self.assertEqual(code, 1, "an unmounted /data must fail the check, not pass it")
         self.assertIn('innotel_estate_check_last_status{check="container_address"} 0', self.text(prom))
 
     def test_a_renumbered_container_fails_the_run_and_reaches_the_textfile(self):
         chk = _load("check-container-addresses")
-        code, prom = self.run_check(chk, chk.HOSTS, _address_rules(moved=(I1, "ontrak")))
+        code, prom = self.run_check(chk, chk.HOSTS, _address_rules(chk.EXPECTED, chk.HOSTS, moved=("i1", "ontrak")))
         self.assertEqual(code, 1, "a moved address must fail the check, not print a log line")
         body = self.text(prom)
         self.assertIn('innotel_estate_check_last_status{check="container_address"} 0', body)
@@ -210,7 +173,7 @@ class AddressLiveCase(LiveCase):
 
     def test_an_unreachable_host_is_exit_two_not_a_pass(self):
         chk = _load("check-container-addresses")
-        rules = _address_rules()
+        rules = _address_rules(chk.EXPECTED, chk.HOSTS)
         rules[I1] = {"fail": True}
         code, prom = self.run_check(chk, chk.HOSTS, rules)
         self.assertEqual(code, 2)
@@ -361,10 +324,10 @@ class InventoryLiveCase(LiveCase):
 DISK_HOSTS = {"i1": f"root@{I1}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
 
 
-def _disk_rules(percents: dict | None = None) -> dict:
+def _disk_rules(hosts, percents: dict | None = None) -> dict:
     percents = percents or {}
     rules = {}
-    for name, target in DISK_HOSTS.items():
+    for name, target in hosts.items():
         percent = percents.get(name, 42)
         line = f"/dev/sda2 102400000 51200000 51200000 {percent}% /\n"
         rules[target.split("@")[-1]] = {"answers": [["df -P", line]]}
@@ -374,7 +337,7 @@ def _disk_rules(percents: dict | None = None) -> dict:
 class HostDiskLiveCase(LiveCase):
     def test_a_clean_estate_exits_zero_and_publishes_the_reading(self):
         chk = _load("check-host-disk")
-        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules())
+        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules(chk.HOSTS))
         self.assertEqual(code, 0)
         body = self.text(prom)
         self.assertIn('innotel_estate_check_last_status{check="host_disk"} 1', body)
@@ -382,19 +345,19 @@ class HostDiskLiveCase(LiveCase):
 
     def test_a_full_root_filesystem_fails_the_run(self):
         chk = _load("check-host-disk")
-        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules({"i3": 93}))
+        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules(chk.HOSTS, {"i3": 93}))
         self.assertEqual(code, 1)
         self.assertIn('innotel_estate_check_failures{check="host_disk"} 1', self.text(prom))
 
     def test_a_tight_root_filesystem_warns(self):
         chk = _load("check-host-disk")
-        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules({"i3": 85}))
+        code, prom = self.run_check(chk, chk.HOSTS, _disk_rules(chk.HOSTS, {"i3": 85}))
         self.assertEqual(code, 0, "85 % is a warning, not a failure")
         self.assertIn('innotel_estate_check_warnings{check="host_disk"} 1', self.text(prom))
 
     def test_an_unreachable_host_is_exit_two_not_a_pass(self):
         chk = _load("check-host-disk")
-        rules = _disk_rules()
+        rules = _disk_rules(chk.HOSTS)
         rules[I1] = {"fail": True}
         code, prom = self.run_check(chk, chk.HOSTS, rules)
         self.assertEqual(code, 2)
