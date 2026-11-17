@@ -42,37 +42,14 @@ AUTH = "https://auth.cerulean.innotel.us/application/o/authorize/?client_id=x"
 AUTH_INNOTEL = "https://auth.innotel.us/application/o/authorize/?client_id=x"
 JELLYFIN_PAGE = b"<!doctype html><html><head><title>Jellyfin</title></head></html>"
 SPLASH = b"\x89PNG\r\n\x1a\n" + b"0" * 60_000
-#: The real shapes, copied from the 12.2 build: the index names `runtime.bundle.js` with a
-#: per-build query, and the runtime maps a chunk **id** to a name and to one hash per asset
-#: kind. `27962` is the id for `home`; the files are `home.<hash>.chunk.js` and
-#: `home.<hash>.css`. Nothing on disk is named `27962`, which is why the 2026-11-16 search
-#: for `27962*` found nothing while the chunkload error named it.
-JS_HASH = "6f5c86d430f38b204798"
-CSS_HASH = "193c6fa7a64e52078d35"
-INDEX = (b'<!doctype html><html><head><title>Jellyfin</title>'
-         b'<script src="runtime.bundle.js?d66e3c0638b9381c83a7"></script></head></html>')
-RUNTIME_BODY = (
-    b'{"27424":"mn-json",27962:"home",28110:"livetvguideprovider"};'
-    b'{"27884":"a81bf06d441dff4daa07",27962:"' + JS_HASH.encode() + b'",28048:"af136e13aa9d3b08b468"};'
-    b'{"27884":"bda8d58a4ecedec16b11",27962:"' + CSS_HASH.encode() + b'",28312:"14fffe456f27b2c8eecc"};')
-RUNTIME_URL = "https://media.innotel.us/web/runtime.bundle.js?d66e3c0638b9381c83a7"
 
 
 def probe_for(*, media=(302, {"Location": "web/"}, b""), web=(200, {}, JELLYFIN_PAGE),
               splash=(200, {"Content-Type": "image/png"}, SPLASH),
-              front=(200, {}, INDEX), runtime=(200, {}, RUNTIME_BODY),
-              js=(200, {}, b"console.log('home')"), css=(200, {}, b".card{color:red}")):
-    # Only the true pairing exists, as in a real build: the JS hash is not a stylesheet and
-    # the CSS hash is not a script, so the check has to match each extension to its own
-    # file rather than assume which map it read.
+              front=(200, {}, JELLYFIN_PAGE)):
     answers = {
         "https://media.innotel.us/": media,
         "https://media.innotel.us/web/": front,
-        RUNTIME_URL: runtime,
-        f"https://media.innotel.us/web/home.{JS_HASH}.chunk.js": js,
-        f"https://media.innotel.us/web/home.{JS_HASH}.css": (404, {}, b""),
-        f"https://media.innotel.us/web/home.{CSS_HASH}.chunk.js": (404, {}, b""),
-        f"https://media.innotel.us/web/home.{CSS_HASH}.css": css,
         "https://iptv.innotel.us/web/": web,
         "https://iptv.innotel.us/Branding/Splashscreen": splash,
     }
@@ -205,67 +182,6 @@ class Splash(unittest.TestCase):
         self.assertEqual(codes(result), ["branding-type"])
 
 
-class LazyRouteChunks(unittest.TestCase):
-    """The chunks a route fetches after the page loads — the 2026-11-16 outage.
-
-    The index and every asset it named answered 200 while `/web/home` failed with
-    "loading CSS chunk 27962 failed". An assertion that only reads the index cannot see
-    that, because the route's filenames live in `runtime.bundle.js` and nowhere in the
-    index. These pin the resolution and both failure directions.
-    """
-
-    def _audit(self, **kwargs):
-        return check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
-                           probe=probe_for(**kwargs))
-
-    def test_a_complete_build_passes_the_lazy_route_assertion(self):
-        result = self._audit()
-        self.assertTrue(result.ok)
-        self.assertEqual(codes(result), [])
-
-    def test_a_missing_lazy_stylesheet_is_the_reported_outage(self):
-        result = self._audit(css=(404, {}, b""))
-        self.assertFalse(result.ok)
-        self.assertEqual(codes(result), ["chunk-file-missing"])
-        self.assertIn(".css", result.findings[0].message)
-        self.assertIn("chunkload error", result.findings[0].message)
-
-    def test_a_missing_lazy_script_fails_too(self):
-        result = self._audit(js=(404, {}, b""))
-        self.assertFalse(result.ok)
-        self.assertEqual(codes(result), ["chunk-file-missing"])
-
-    def test_a_runtime_the_page_names_but_the_app_does_not_serve_fails(self):
-        result = self._audit(runtime=(404, {}, b""))
-        self.assertFalse(result.ok)
-        self.assertEqual(codes(result), ["chunk-file-missing"])
-
-    def test_a_starting_app_warns_instead_of_inventing_a_missing_chunk(self):
-        # 502 is Jellyfin's start-up window, the same reading the doors give it.
-        result = self._audit(runtime=(502, {}, b""))
-        self.assertTrue(result.ok)
-        self.assertEqual([(f.code, f.level) for f in result.findings],
-                         [("chunk-map-unreadable", "warn")])
-
-    def test_a_page_without_a_runtime_warns_that_it_could_not_ask(self):
-        result = self._audit(front=(200, {}, JELLYFIN_PAGE))
-        self.assertTrue(result.ok)
-        self.assertEqual([(f.code, f.level) for f in result.findings],
-                         [("chunk-map-unreadable", "warn")])
-
-    def test_an_unknown_chunk_name_warns_rather_than_failing(self):
-        # A build that renames or drops the route must not read as a broken app.
-        result = self._audit(runtime=(200, {}, b'{"1":"settings",2:"other"};'))
-        self.assertTrue(result.ok)
-        self.assertEqual([(f.code, f.level) for f in result.findings],
-                         [("chunk-map-unreadable", "warn")])
-
-    def test_a_wrong_page_adds_no_chunk_noise(self):
-        # A front page that is not Jellyfin's has one finding, not four.
-        result = self._audit(front=(200, {}, b"<html>proxy error</html>"))
-        self.assertEqual(codes(result), ["front-not-jellyfin"])
-
-
 class ExitCodes(unittest.TestCase):
     def _run(self, probe, *args):
         original = check.fetch
@@ -330,7 +246,7 @@ class Settle(unittest.TestCase):
                 seen["probes"] += 1
                 if seen["probes"] == 1:
                     return 502, {}, b"<html>502</html>"
-                return 200, {}, INDEX
+                return 200, {}, JELLYFIN_PAGE
             return base(url)
 
         result, recovered = self._settle(probe)

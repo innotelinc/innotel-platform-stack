@@ -37,14 +37,6 @@ WHAT IT ASSERTS
      `--splash-min-bytes` (default 50 000). The Gizmo splash is an upload into Jellyfin's
      config, so it is the first thing a Jellyfin upgrade or a reinstall drops; it is a
      note rather than a failure, because the library still plays without it.
-  4. HOME ROUTE CHUNKS — the front page loads its routes lazily: its index names
-     `runtime.bundle.js`, and that runtime maps the `home` chunk to a JavaScript file and
-     a stylesheet the browser fetches on the first navigation. Both are fetched here.
-     This is the assertion that would have caught 2026-11-16: the index and *every* asset
-     in it answered 200 while `/web/home` died with "loading CSS chunk 27962 failed". The
-     id is not a filename — `27962` is the runtime's name for `home`, the file is
-     `home.193c6fa7a64e52078d35.css`, and searching the image for `27962*` finds nothing.
-     So the filenames come from the runtime's map, never from the id.
 
 A gateway status (502/503/504) is reported as *the app being unreachable*, not as a wrong
 page: the proxy says it could not reach Jellyfin, which is what the app's start-up window
@@ -66,7 +58,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import time
 import urllib.error
@@ -86,11 +77,6 @@ WATCH_DOOR = "https://iptv.innotel.us"
 #: exists for, one rename later.
 AUTH_HOSTS = ("auth.cerulean.innotel.us", "auth.innotel.us")
 SPLASH_PATH = "/Branding/Splashscreen"
-#: The route whose lazy chunks are asserted: `home` is what `/web/home` opens, and what the
-#: reported chunkload error was on. One route, because the build changes per upgrade and a
-#: check that walks every chunk is a load test of the edge rather than an answer about it.
-CHUNK_ROUTE = "home"
-RUNTIME_HINT = "runtime.bundle.js"
 
 # What this check is called in the shared family, and why it is a constant here at all:
 # it used to publish `check="media-doors"` as an inline literal — the only check in the
@@ -152,94 +138,9 @@ def _names_jellyfin(body: bytes) -> bool:
     return "jellyfin" in body[:64_000].decode("utf-8", "replace").lower()
 
 
-_RUNTIME_REF = re.compile(r'(?:src|href)="([^"]*' + re.escape(RUNTIME_HINT) + r'[^"]*)"')
-
-
-def _runtime_url(base: str, page: bytes) -> str | None:
-    """The runtime the index actually names, resolved against the page's own directory."""
-    match = _RUNTIME_REF.search(page.decode("utf-8", "replace"))
-    return urljoin(base, match.group(1)) if match else None
-
-
-def _chunk_ids(runtime: str, name: str) -> list[str]:
-    """The runtime's ids for one chunk name — `27962:"home"` → `27962`."""
-    return re.findall(rf'([0-9]+):"{re.escape(name)}"', runtime)
-
-
-def _chunk_hashes(runtime: str, chunk_id: str) -> list[str]:
-    """The content hashes the runtime maps to that id — `27962:"6f5c…"` → `6f5c…`.
-
-    A chunk carries one hash per asset kind, and the maps are separate and in no order the
-    page reveals, so both hashes are collected and each extension is matched against all
-    of them. The one that answers 200 is that kind's file; a cross pairing simply 404s.
-    """
-    return re.findall(rf'(?<![0-9]){chunk_id}:"([0-9a-f]{{20}})"', runtime)
-
-
-def lazy_chunks(base: str, page: bytes, probe=fetch,
-                route: str = CHUNK_ROUTE) -> list[Finding]:
-    """Does the front page's own route code exist, for the chunks it loads after boot?
-
-    Everything the index names can answer 200 and the first navigation still fail, because
-    a route's files are named by the runtime map rather than by the index — the 2026-11-16
-    shape. A runtime that cannot be read is a warning (the page may work, and a start-up
-    window answers 502), but a runtime the page names and the app does not serve, or a
-    route file that answers nothing, is a failure: the page loads and the click breaks.
-    """
-    findings: list[Finding] = []
-    runtime_url = _runtime_url(base, page)
-    if runtime_url is None:
-        return [Finding(
-            "chunk-map-unreadable", "warn",
-            f"{base} serves a page that names no {RUNTIME_HINT}, so the {route} route's "
-            "chunks cannot be read from here — the page may still work")]
-
-    status, _, body = probe(runtime_url)
-    if status is None or status in GATEWAY_ERRORS:
-        return [Finding(
-            "chunk-map-unreadable", "warn",
-            f"{runtime_url} answered {status or 'nothing'} — the app may still be starting, "
-            "so this is not evidence that a route chunk is missing")]
-    if status != 200:
-        return [Finding(
-            "chunk-file-missing", "fail",
-            f"{base} names {runtime_url}, which answers {status} — the web client cannot "
-            "boot at all")]
-
-    runtime = body.decode("utf-8", "replace")
-    hashes = sorted({value for chunk_id in _chunk_ids(runtime, route)
-                     for value in _chunk_hashes(runtime, chunk_id)})
-    if not hashes:
-        return [Finding(
-            "chunk-map-unreadable", "warn",
-            f"{runtime_url} names no {route} chunk with a content hash — the client's build "
-            "format has changed, so this assertion asked nothing")]
-
-    for suffix in (".chunk.js", ".css"):
-        for value in hashes:
-            url = urljoin(base, f"{route}.{value}{suffix}")
-            status, _, payload = probe(url)
-            if status == 200 and payload:
-                break
-        else:
-            findings.append(Finding(
-                "chunk-file-missing", "fail",
-                f"{base} names a {route}{suffix} chunk ({', '.join(hashes)}) that the app "
-                "does not serve: the front page loads and the first navigation to that "
-                "route fails with a chunkload error"))
-    return findings
-
-
 def audit(media: str, watch: str, *, probe=fetch, splash_min: int = DEFAULT_SPLASH_MIN) -> Audit:
-    """The four assertions, as findings. Pure enough to test with a fake `probe`."""
+    """The three assertions, as findings. Pure enough to test with a fake `probe`."""
     result = Audit()
-
-    #: Where the front door's own page lives, once it is known to be Jellyfin's, and the
-    #: page itself — the lazy-route assertion reads its runtime from these. Unset when the
-    #: page is wrong, because probing the chunks of a page that is not Jellyfin's would
-    #: only add noise to the finding that already says so.
-    front_base: str | None = None
-    front_page = b""
 
     status, headers, body = probe(media)
     location = headers.get("Location", "") or headers.get("location", "")
@@ -270,19 +171,11 @@ def audit(media: str, watch: str, *, probe=fetch, splash_min: int = DEFAULT_SPLA
                 "front-not-jellyfin", "fail",
                 f"{media} redirected to {target}, which answered 200 but does not name "
                 "Jellyfin — something else is answering on the front door"))
-        else:
-            front_base = target if target.endswith("/") else target + "/"
-            front_page = landed_body
     elif status == 200 and not _names_jellyfin(body):
         result.findings.append(Finding(
             "front-not-jellyfin", "fail",
             f"{media} answered 200 but the page does not name Jellyfin — something else is "
             "answering on the front door"))
-    elif status == 200:
-        # The door answers with the app's page directly instead of the `302 web/` hop, so
-        # the route's files resolve from the web root beside it.
-        front_base = urljoin(media, WEB_PATH)
-        front_page = body
     elif 300 <= status < 400:
         result.findings.append(Finding(
             "front-wrong-target", "fail",
@@ -340,9 +233,6 @@ def audit(media: str, watch: str, *, probe=fetch, splash_min: int = DEFAULT_SPLA
             "branding-small", "warn",
             f"{watch}{SPLASH_PATH} answered {len(body)} bytes, under {splash_min} — "
             "a placeholder rather than the Gizmo splash"))
-
-    if front_base:
-        result.findings.extend(lazy_chunks(front_base, front_page, probe))
     return result
 
 

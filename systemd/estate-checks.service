@@ -325,3 +325,22 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-installed-checks.py
 # `docs/estate-rebalance-2026-11-15.md`): a host in this list that cannot answer costs every
 # run a 25-second timeout and reports the decommission as drift.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-unit-drift.py --host i1=192.168.1.51 --host i2=192.168.1.52 --host i3=192.168.1.53 --prom ${TEXTFILE_DIR}/estate-check-unit-drift.prom
+
+# And that a credential the estate depends on is not older than its rotation window
+# (2026-11-17). Every other check asks whether a credential still *works*; none asked how
+# old it is, and on 2026-11-16 a pair had to be replaced because it had been exposed — a
+# replacement that turned out to be dashboard-only (`docs/mailjet-key-rotation.md`). A
+# secret that is never rotated and never broken looks identical to one rotated yesterday,
+# so the only witness is the vault's own `updated_time`. It reads KV v2 **metadata** and
+# never the values, with a read-only token limited to `cerulean/metadata/*`; VAULT_ADDR and
+# VAULT_TOKEN come from the EnvironmentFile above. A missing token is exit 2, not a pass.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-credential-age.py --path cerulean/mailjet --max-age-days 90 --prom ${TEXTFILE_DIR}/estate-check-credential-age.prom
+
+# And the shape of the history rather than the moment (2026-11-17). The alerts read the
+# current value, which is right for paging and blind to a check that goes red and green
+# every few runs: on 2026-11-16 `media_doors` and `sso_redirects` each produced a red run
+# that repaired itself, and only a hand comparison found it. This reads Prometheus's range
+# API for the series every check already publishes and warns when one changed status more
+# than once in the window. Prometheus is the edge's own (`:9090`); an unreachable one is
+# exit 2, because a flap report that cannot read history is not a clean bill of health.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-flaps.py --days 7 --prom ${TEXTFILE_DIR}/estate-check-estate-flaps.prom
