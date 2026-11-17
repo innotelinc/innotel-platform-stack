@@ -77,6 +77,14 @@ class Age(unittest.TestCase):
                     "versions": {"2": {"created_time": (NOW - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")}}}
         self.assertAlmostEqual(check.age_days(check.last_written(document), NOW), 5, places=3)
 
+    def test_vault_nanosecond_timestamps_are_read_not_refused(self):
+        # Vault writes NINE fractional digits. `fromisoformat` takes at most six, so this
+        # raised ValueError and the check reported a vault it could not read — the first
+        # live run (2026-11-17) exited 2 on a perfectly valid `updated_time`.
+        document = {"updated_time": "2026-11-16T21:00:00.779670597+00:00",
+                    "current_version": 1, "versions": {}}
+        self.assertAlmostEqual(check.age_days(check.last_written(document), NOW), 0.25, places=2)
+
     def test_a_current_secret_is_a_note(self):
         result = check.audit(["cerulean/mailjet"], 90, addr="http://v", token="t",
                              reader=reader_for({"cerulean/mailjet": 2.0}), now=NOW)

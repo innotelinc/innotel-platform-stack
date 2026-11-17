@@ -48,6 +48,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -130,8 +131,17 @@ def read_metadata(addr: str, token: str, path: str, timeout: float = 10.0) -> di
 
 
 def parse_time(value: str) -> datetime:
-    """Vault writes RFC 3339 with a `Z`; `fromisoformat` needs the offset spelled out."""
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    """Vault writes RFC 3339 with a `Z`; `fromisoformat` needs the offset spelled out.
+
+    The fraction is trimmed to six digits first. Vault reports `updated_time` with
+    **nanoseconds** (`2026-11-17T10:14:01.779670597+00:00`), and `fromisoformat` accepts at
+    most microseconds on these interpreters, so it raised `ValueError` on every real
+    timestamp and the check reported a vault it could not read (measured 2026-11-17, the
+    first time this check ran against a live vault). A valid timestamp is not a broken
+    vault, and the extra digits are below the resolution of a 60-day window.
+    """
+    text = re.sub(r"(\.\d{6})\d+", r"\1", value.strip().replace("Z", "+00:00"))
+    return datetime.fromisoformat(text)
 
 
 def last_written(metadata: dict) -> datetime:
