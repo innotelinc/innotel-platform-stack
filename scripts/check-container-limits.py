@@ -127,11 +127,12 @@ from estate_check import Audit, Finding, count_cpus, read_host, ssh, write_prom 
 
 CHECK = "container_limits"
 
-#: The FD walk enumerates every process of every container on docker *and* incus. i1 grew
-#: past the 25-second ssh read: on 2026-11-17 the sweep timed out at 40 s, the check named
-#: the host unreadable, and the identical read finished when run by hand a minute later.
-#: One host is read at a time, so a longer cap costs nothing while a host is healthy.
-READ_TIMEOUT = 90
+#: The FD walk enumerates every process of every container on docker *and* incus, one
+#: `docker top` and one `/proc/<pid>/fd` listing at a time. i1's 58 containers measured
+#: **128 s** on 2026-11-17, so the shared 25-second ssh read (a 40 s subprocess cap) named
+#: the host unreadable while the identical read finished by hand; 90 s was still short at
+#: 105 s. The cap is set from the measurement with room for a busier host.
+READ_TIMEOUT = 240
 
 
 def read(target: str, command: str) -> str:
