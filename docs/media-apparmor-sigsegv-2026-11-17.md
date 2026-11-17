@@ -66,8 +66,14 @@ same choice rather than a confinement that only looks enforced.
 ## The backup gap this exposed
 
 Every Sonarr backup written on 2026-11-17 was rejected by `zipfile.ZipFile`
-(98 files); the newest restorable backup was 2026-11-10. The app's own backup
-writer is therefore not a backup, and the app's schedule has been pushed out to
-36 500 days. `scripts/backup-media-databases.py` replaces it: SQLite's online
+(98 files); the newest restorable backup was 2026-11-10. That writer could not
+produce a good archive while the process was being killed mid-run, and it does
+work again now: a triggered `Backup` command returned 201 and the new zip passes
+`zipfile.testzip` with all 3 members intact. Disabling it was tried and does not
+hold — Sonarr drops an unknown `<BackupInterval>` from `config.xml` when it
+rewrites the file, so the interval lives elsewhere and the schedule is unchanged.
+
+A backup nobody has ever verified is still not a backup, so
+`scripts/backup-media-databases.py` adds an independent one: SQLite's online
 backup API, `PRAGMA integrity_check` on the copy, gzip only after it passes, and
 a keep-N prune, on `media-db-backup.timer` from i2.
