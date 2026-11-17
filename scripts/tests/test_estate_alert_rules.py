@@ -137,6 +137,11 @@ CHECK_SCRIPTS = [
     # sso_redirects publishes into the family from the unit already, and carried no
     # line here — the silent absence this list exists to catch.
     "check-sso-redirects",
+    # The vault token's own renewal (2026-11-17): the one check that writes, because
+    # the credential `check-credential-age` reads is periodic and nothing renewed it.
+    # Publishing here is what makes a renewal that stops holding a metric instead of
+    # an expiry nobody sees until the check above goes red.
+    "check-vault-token-renewal",
 ]
 
 

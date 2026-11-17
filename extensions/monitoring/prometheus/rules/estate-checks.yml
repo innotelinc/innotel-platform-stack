@@ -173,6 +173,10 @@ groups:
           # truncated by an OOM kill and its container still read Up. A check that stops
           # reporting must not be the thing that hides that.
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="media_apps"}), "check", "media_apps", "check", ".*")
+          # The renewal itself (2026-11-17). It is the one check that writes: the
+          # period on the token `check-credential-age` reads is what runs out, and an
+          # expiry looks exactly like a renewal that was never attempted.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="vault_token_renewal"}), "check", "vault_token_renewal", "check", ".*")
         for: 30m
         labels:
           severity: critical
