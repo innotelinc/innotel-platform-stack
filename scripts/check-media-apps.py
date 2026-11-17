@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import shutil
 import sys
 from dataclasses import dataclass
@@ -114,7 +115,11 @@ def command(names: tuple[str, ...] | None = None) -> str:
         '2>/dev/null || echo "$c|missing|0|false"'
     )
     loop = f'for c in {" ".join(wanted)}; do {inspect}; done'
-    return f'incus exec {CONTAINER} -- sh -c {json.dumps(loop)}'
+    # `shlex.quote`, not `json.dumps`: the payload must reach the container shell
+    # with `$c` still literal. Through a double-quoted `sh -c` the host shell expands
+    # it first, `docker inspect` gets no argument, every app reads as missing and the
+    # check reports six failures that are its own (2026-11-17).
+    return f"incus exec {CONTAINER} -- sh -c {shlex.quote(loop)}"
 
 
 def parse(text: str) -> dict[str, AppState]:

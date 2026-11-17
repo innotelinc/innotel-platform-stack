@@ -125,6 +125,14 @@ class CommandCase(unittest.TestCase):
         self.assertIn("docker inspect", line)
         self.assertIn("RestartCount", line)
 
+    def test_the_container_script_is_single_quoted_so_the_host_shell_cannot_expand_it(self):
+        # The first cut passed the loop through a double-quoted `sh -c`, so the host
+        # shell expanded `$c` to nothing: docker inspect was called with no argument,
+        # every app read as missing, and the check paged six failures of its own.
+        line = media.command()
+        self.assertIn("sh -c '", line)
+        self.assertIn('"$c"', line)
+
     def test_it_runs_inside_the_container_that_holds_them(self):
         self.assertIn(f"incus exec {media.CONTAINER}", media.command())
 
