@@ -1,0 +1,15 @@
+[Unit]
+Description=Run the verified media database snapshots daily
+Documentation=file:///usr/local/sbin/backup-media-databases.py
+
+[Timer]
+# Nightly, well clear of the 03:00 library housekeeping the apps run on their own
+# schedules so the snapshot is not competing with a prune.
+OnCalendar=*-*-* 04:20:00
+# A run missed while monarch was down still happens on the next boot.
+Persistent=true
+RandomizedDelaySec=5min
+Unit=media-db-backup.service
+
+[Install]
+WantedBy=timers.target

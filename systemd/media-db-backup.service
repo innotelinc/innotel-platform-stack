@@ -1,0 +1,16 @@
+[Unit]
+Description=Verified SQLite snapshots of the media app databases
+Documentation=file:///usr/local/sbin/backup-media-databases.py
+After=network-online.target incus.service
+Wants=network-online.target
+# A snapshot run that fails is a fact nobody is looking at otherwise: this host's
+# only other channel is the journal.
+OnFailure=estate-notify@%n
+
+[Service]
+Type=oneshot
+# Runs inside monarch, where /docker/appdata holds the live databases and the
+# instance's python3 has sqlite3. The host cannot see a running instance's rootfs.
+ExecStart=/bin/sh -c 'exec incus exec monarch -- python3 /usr/local/sbin/backup-media-databases.py --keep 14'
+Nice=10
+IOSchedulingClass=idle
