@@ -94,9 +94,12 @@ DOMAINS: dict[str, dict[str, object]] = {
 
 #: Names that are **not** mail domains, kept here so the next reader does not add them
 #: back. `signara.innotel.us` was a Stalwart domain with its own SPF/DKIM/DMARC on
-#: 2026-10-03 (see `docs/container-placement.md`); by 2026-10-29 it is a `CNAME` to
-#: `innotel.us` and no Stalwart domain at all. A CNAME cannot carry the TXT records SPF
-#: needs, and the name inherits the parent's `p=reject` DMARC as an organisational
+#: 2026-10-03 (see `docs/container-placement.md`); it is no Stalwart domain now. It was
+#: a `CNAME` to `innotel.us` from 2026-10-29 and is an `A` record since 2026-11-16: a
+#: `CNAME` cannot carry the TXT that SPF needs **and** it answers `MX` with the parent's,
+#: so a message addressed there was routed into the inbound parser for a domain nothing
+#: serves. The `A` keeps the web name resolving and publishes no mail routing at all.
+#: Either way the name inherits the parent's `p=reject` DMARC as an organisational
 #: subdomain, so there is nothing of its own left to publish.
 ALIASES: dict[str, str] = {
     "signara.innotel.us": "innotel.us",
@@ -224,8 +227,8 @@ def alias_finding(name: str, target: str) -> Finding:
     return Finding(
         "alias-not-a-mail-domain",
         "note",
-        f"{name} is a CNAME to {target}: it is a web name with no mail of its own — "
-        "no SPF or DKIM can be published beside a CNAME, and its DMARC is the "
+        f"{name} is a web alias of {target}: it is a web name with no mail of its own — "
+        "it publishes no SPF or DKIM, and its DMARC is the "
         "organisational domain's. Mail claiming an address there does not align; "
         f"give it its own account and records before using it as a From domain",
     )

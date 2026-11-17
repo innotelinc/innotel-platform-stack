@@ -1275,6 +1275,20 @@ placement (finding 7).
   honest answer to "what must the public zone serve". Read it before editing:
   the live set is one JMAP call away, and a stale table fails loudly in the wrong
   direction. Re-proved 2026-10-29: `4/4 records resolved`, exit 0.
+  **Amended 2026-11-16 — the name is an `A` record now, and its mail routing is gone.**
+  `signara.innotel.us` had been a `CNAME` to `innotel.us`, so a query for its `MX` was
+  answered with the *parent's* (`parse.mailjet.com` priority 1, then `mail.innotel.us`):
+  a retired mail domain was still declaring that mail addressed to it goes into the
+  inbound parser. Replaced with `A 73.68.203.71` (TTL 300, via Technitium's API on
+  `.71`). The web name behaves exactly as before — `https://signara.innotel.us` and
+  `https://app.signara.innotel.us` both answer 200 — and now answers **no** `MX`, so
+  nothing is declared about mail. The apex is untouched (`5 mail.innotel.us`,
+  `1 parse.mailjet.com`), which is the live inbound path. Two consequences worth keeping:
+  the receiver's `RETIRED_DOMAINS` had gone empty, so `mailjet-inbound-check` was
+  *skipping* the very assertion this fixes — it is set to `signara.innotel.us` again and
+  the unit reports `ok retired` instead of `skipped`; and `check-mail-auth.py`'s note no
+  longer says "CNAME", because that table is a policy ("this name is not a mail domain")
+  and the zone is free to change the record type underneath it.
   Three operational facts, all learned the hard way:
   - **Stalwart publishes its DKIM records to Technitium itself now — 2026-10-03.** It
     used to do a TSIG dynamic update at `192.168.1.80` (the older BIND copy of the

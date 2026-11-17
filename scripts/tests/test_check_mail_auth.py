@@ -152,7 +152,7 @@ class CollectCase(unittest.TestCase):
         self.assertLess(ok, total)
 
     def test_an_alias_is_a_note_and_not_a_record(self):
-        """A CNAME web name must not inflate the ok/expected series the panel shows."""
+        """A web alias must not inflate the ok/expected series the panel shows."""
         present = {
             "innotel.us": ["v=spf1 mx -all"],
             "_dmarc.innotel.us": ["v=DMARC1; p=reject"],
@@ -167,7 +167,7 @@ class CollectCase(unittest.TestCase):
         alias = [f for f in result.findings if f.code == "alias-not-a-mail-domain"]
         self.assertEqual(len(alias), 1)
         self.assertEqual(alias[0].level, "note")
-        self.assertIn("CNAME", alias[0].message)
+        self.assertIn("web alias", alias[0].message)
 
     def test_a_refused_query_raises_dns_unreadable(self):
         def lookup(name, server):
