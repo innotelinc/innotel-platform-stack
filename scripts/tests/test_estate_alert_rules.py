@@ -84,7 +84,6 @@ CHECK_SCRIPTS = [
     # the bearer probe. It arrived with a branch, because a check whose absence is silent
     # is the failure this list exists to catch.
     "check-stalwart-oidc-preflight",
-    "check-telno-legacy-import",
     # The mailbox -> identity mirror. It is the one job here that retries every fifteen
     # minutes and is deliberately not wired to `OnFailure=` (96 messages a day for one
     # standing cause), so its verdict has to be a series or it is a journal line the next
@@ -108,6 +107,11 @@ CHECK_SCRIPTS = [
     # The apps a request crosses (2026-11-17): the doors answered while Radarr was
     # dead behind them, and nothing looked at the app rather than at its door.
     "check-media-apps",
+    # What comes back after a reboot (2026-11-17): all nine of i2's instances ran with
+    # `boot.autostart=false` on the day the host rejoined, so a reboot would have taken the
+    # media stack and its Prometheus offline in silence. It arrived with a branch, because a
+    # check whose absence is silent is the failure this list exists to catch.
+    "check-container-autostart",
     # The learner-facing door, added the day the class hosts were verified (2026-11-14).
     # `class.atheniq.courses` is where every classroom link in `atheniq-work` goes, and the
     # failure it guards — a 200 where a sign-in should be — is one an app *looks* healthy

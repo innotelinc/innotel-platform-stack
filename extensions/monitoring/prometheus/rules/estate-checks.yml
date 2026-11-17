@@ -131,7 +131,6 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="deploy_door"}), "check", "deploy_door", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="mail_sso"}), "check", "mail_sso", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="stalwart_oidc_cache"}), "check", "stalwart_oidc_cache", "check", ".*")
-          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="telno_legacy_import"}), "check", "telno_legacy_import", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="mail_identities"}), "check", "mail_identities", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="vault_mount"}), "check", "vault_mount", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="vault_disk"}), "check", "vault_disk", "check", ".*")
@@ -142,6 +141,10 @@ groups:
           # nothing — the exact silence this rule exists for, one branch short.
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="media_doors"}), "check", "media_doors", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="host_zombies"}), "check", "host_zombies", "check", ".*")
+          # What boots (2026-11-17). A reboot is the one moment this check's subject stops
+          # being invisible, so a textfile that stopped arriving must not be the thing that
+          # hides it.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="container_autostart"}), "check", "container_autostart", "check", ".*")
           # The mail container's own preflight, published (2026-11-14). `stalwart_oidc_cache`
           # above asks whether the local copy is current; this asks the eleven facts step 1
           # of docs/mail-discovery-canonical.md asks a person — the units, the leaf's SAN

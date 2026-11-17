@@ -315,7 +315,12 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-deploy-door.py --pr
 # the node's own journal; this publishes it as a series beside every other check. It reads
 # the node through `incus exec` because the container has no sshd, and it asks the running
 # image's own importer rather than reimplementing what "present" means here.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-telno-legacy-import.py --prom ${TEXTFILE_DIR}/estate-check-telno-legacy-import.prom
+# Retired 2026-11-17 with the node it watched. The paragraph above is the history of a
+# check that was right while the `telno` container existed; that container is now on none
+# of the four hosts, so the importer exits 1 with `Failed to fetch instance "telno"` on
+# every run — a permanent failure that looked like drift. The check, its tests and its
+# branch of `EstateCheckAbsent` are removed together: a series that will never exist must
+# not keep an alert armed.
 
 # The one scheduled job that retries faster than anything here reports, and the reason it
 # gets a series instead of a notification: `sync-mail-identities` runs every fifteen
