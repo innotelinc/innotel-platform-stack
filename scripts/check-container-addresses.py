@@ -163,6 +163,9 @@ EXPECTED: dict[str, dict[str, str]] = {
         # `workloads` (`.113`) runs here and no row named it, so the check warned about a
         # container that was behaving (`i1 workloads: running and not in the table`).
         "workloads": "192.168.1.113",
+        # `onyx` (`.60`) runs here since the 2026-11-15 rebalance, which is why it is an
+        # `i1` row rather than the `i3` row it was first written as (see the note there).
+        "onyx": "192.168.1.60",
     },
     # `monarch` (`.56`) is an `i2` row. It was listed under `i1` and the check reported
     # "i1 monarch: not present" on every run; i2 is up and running (owner, 2026-11-16) and
@@ -208,6 +211,15 @@ EXPECTED: dict[str, dict[str, str]] = {
         # `onyx` (`.60`) is **not a row** while it is STOPPED waiting for its USB disk:
         # nothing answers and the check dialled it every run. Same shape as `auvik`,
         # `capstone`, `monitor` and `www`; re-add the row the day it runs.
+        # `onyx` (`.60`) **is** a row again (2026-11-17), and it belongs *here*, under `i1`:
+        # the container runs on this host at `.60`, and the check reported exactly that —
+        # `i1 onyx: running and not in the table` — while a row filed under `i3` reported
+        # `i3 onyx: not present`. An address the estate dials plus a row in the wrong host
+        # block is the same false alarm in both directions.
+        # `onyx-retired` (stopped, `i3`) is the copy the 2026-11-15 rebalance left behind as
+        # the rollback, which is why the name appears on two hosts and only one is a row.
+        # This dict must hold **no** `onyx` row: filed here it reported `i3 onyx: not
+        # present` on every run while the running container was in no row at all.
         "pi": "192.168.1.70",
         "signara": "192.168.1.44",
         "subscribe": "192.168.1.58",
@@ -227,7 +239,12 @@ EXPECTED: dict[str, dict[str, str]] = {
         # evening, because the edge needs more RAM than this host had free with them
         # running; their stopped copies remain here as the rollback.
         "proxy": "192.168.1.71",
-        "telno": "192.168.1.95",
+        # `telno` (`.95`) is **not a row** any more (2026-11-17). `incus list` on all four
+        # hosts shows no `telno` instance at all — `i4` carries `telno-turn` (`.96`) and
+        # `telno-restore-check`, and the check reported `i4 telno: not present` on every
+        # run. The row asserted an address nothing owns, which is the same shape as
+        # `auvik`, `capstone`, `monitor` and `www` above. Re-add it with the address the
+        # day telno runs again.
         "telno-turn": "192.168.1.96",
         # `terminal` (`.22`) is **not a row** while it is STOPPED: the web terminal came
         # back off in the 2026-11-15 rebalance and its vhost is dark behind it. Removing the

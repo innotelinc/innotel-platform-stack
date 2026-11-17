@@ -358,6 +358,71 @@ tests:
             exp_annotations:
               summary: 'The media_apps check has never reported'
               description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `media_apps` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+  # The media group keys on the media series rather than the shared family, and that is
+  # the whole reason it exists: these cases assert the alert *names the app*, which the
+  # family-level `EstateCheckFailing` cannot. Each one also carries a well app beside the
+  # broken one, so a rule that fires on every app is not what the case proves.
+  - name: a zero-byte config names the app, not the check
+    interval: 1m
+    input_series:
+      - series: 'innotel_estate_media_app_config_bytes{app="sonarr"}'
+        values: '0x10'
+      - series: 'innotel_estate_media_app_config_bytes{app="radarr"}'
+        values: '4096x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: EstateMediaAppConfigEmpty
+        exp_alerts:
+          - exp_labels: {severity: critical, team: platform, app: sonarr}
+            exp_annotations:
+              summary: 'sonarr has a zero-byte config file'
+              description: 'The app a request crosses has a settings file with no bytes in it — the shape an OOM kill leaves when it lands mid-write, and the app then refuses to start after its next restart while `docker ps` still prints Up for it. Restore it from that app''s own `Backups/scheduled` archive; **do not delete it**, because the app regenerates one with a new API key and the request UI in front of it keeps pointing at the old one.'
+
+  # An unreadable probe is a different repair from a truncated file, so it is a different
+  # alert — and it waits longer, because a container mid-restart answers `-1` briefly.
+  - name: an unreadable config is its own alert and only after fifteen minutes
+    interval: 1m
+    input_series:
+      - series: 'innotel_estate_media_app_config_bytes{app="prowlarr"}'
+        values: '-1x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: EstateMediaAppConfigUnreadable
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: EstateMediaAppConfigUnreadable
+        exp_alerts:
+          - exp_labels: {severity: warning, team: platform, app: prowlarr}
+            exp_annotations:
+              summary: 'prowlarr has no readable config file'
+              description: 'The config probe could not read the app''s settings file at all: a path that is not there, or a container that cannot `stat` it. That is a different repair from a truncated file, which is why it is a separate alert rather than the same one with a different message.'
+
+  # The solver's `oom_kill` is a *cumulative* cgroup counter, so the rule has to read its
+  # rate: a container that killed itself before and is healthy now must not stay red.
+  - name: a solver still being killed fires, a solver that was killed before does not
+    interval: 1m
+    input_series:
+      - series: 'innotel_estate_media_app_solver_oom_kills{app="flaresolverr"}'
+        values: '0+1x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: EstateMediaAppSolverKillingItself
+        exp_alerts:
+          - exp_labels: {severity: warning, team: platform, app: flaresolverr}
+            exp_annotations:
+              summary: 'flaresolverr is being OOM-killed inside its own cap'
+              description: 'The solver `prowlarr` sends indexer challenges to was killed 10 time(s) in the last hour inside its own cgroup. Every solve that dies this way is an indexer `prowlarr` cannot reach, and no door in front of the media estate shows it: the app reads `running` and its page loads. Size the cap to measured use plus headroom (`mem_limit: 3g` since 2026-11-17) and keep `shm_size: 1g` — the 64 MB `/dev/shm` is what started this.'
+
+  - name: a solver that is no longer dying stops alarming
+    interval: 1m
+    input_series:
+      - series: 'innotel_estate_media_app_solver_oom_kills{app="flaresolverr"}'
+        values: '7x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: EstateMediaAppSolverKillingItself
+        exp_alerts: []
+
   - name: a textfile that is still scraped but frozen is a check that is not running
     interval: 1m
     input_series:

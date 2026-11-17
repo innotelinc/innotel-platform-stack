@@ -1538,6 +1538,18 @@ placement (finding 7).
 
 ## Changes applied 2026-11-17
 
+- **The solver stops leaking browsers, and the address table matches the estate again.** Measured
+  today: `flaresolverr` held 78 `chromium` processes under one two-hour-old browser with **zero**
+  requests in the previous hour, 2.95 GiB of anon and no `chromedriver` alive at all — the tree a
+  failed solve leaves behind, not parallel solves. `threads = 1` (the earlier fix) serialises solves
+  and cannot touch that, so `sitecustomize.py` now reaps Chromium older than 600 s (prowlarr's
+  `requestTimeout` is 180 s, so nothing anyone waits for is that old). It reads process age from
+  `time.monotonic()`: the first version used `/proc/uptime`, which Incus masks per container, so it
+  computed a negative age and killed nothing while looking perfectly healthy. In the same pass
+  `check-container-addresses.py` gained `onyx` (`.60`, on `i1` — it runs, and the table said it could
+  not be a row) and lost `telno` (`.95`: no instance of that name on any host since the rebalance, only
+  `telno-turn`), so the check now reports 0 failures and 0 warnings across all four hosts.
+
 - **The media estate has alert rules of its own, and the solver behind `prowlarr` is watched.**
   `extensions/monitoring/prometheus/rules/estate-checks.yml` gained a second group
   (`innotel-media-apps`, three rules) keyed on the media series rather than on the shared family, so a

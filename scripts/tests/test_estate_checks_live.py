@@ -269,12 +269,18 @@ class LimitsLiveCase(LiveCase):
 
 #: i3 was retired on 2026-11-02; the estate is three hosts and a retired one in this
 #: table would make every inventory run exit 2 against a machine that cannot answer.
-INVENTORY_HOSTS = {"i1": f"root@{I1}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
-KNOWN_REMOTES = [I1, I3, I4]
+#: `i2` is here because the inventory asserts it again: the 2026-11-15 note that dropped it
+#: was wrong (the owner confirmed the host on 2026-11-16, and it rejoined the estate on
+#: 2026-11-17 with autostart on all nine instances). A fixture that skipped it would let
+#: `HOSTS` grow a row the live path never exercises.
+INVENTORY_HOSTS = {"i1": f"root@{I1}", "i2": f"root@{I2}", "i3": f"root@{I3}", "i4": f"root@{I4}"}
+KNOWN_REMOTES = [I1, I2, I3, I4]
 
 
 def _inventory_rules(pools=None, remotes=None) -> dict:
-    pools = pools or {"i1": ["incus"],
+    # These mirror `POOLS` in the check, host for host: a fixture that lists fewer pools
+    # than the inventory names turns every clean case into a "missing pool" warning.
+    pools = pools or {"i1": ["incus", "tank"], "i2": ["fast"],
                       "i3": ["incus", "tank"], "i4": ["default", "tank"]}
     remotes = remotes or {host: list(KNOWN_REMOTES) for host in INVENTORY_HOSTS}
     rules = {}
@@ -303,7 +309,7 @@ class InventoryLiveCase(LiveCase):
 
     def test_an_unknown_pool_fails_the_run(self):
         chk = _load("check-estate-inventory")
-        pools = {"i1": ["incus", "scratch"],
+        pools = {"i1": ["incus", "tank"], "i2": ["fast", "scratch"],
                  "i3": ["incus", "tank"], "i4": ["default", "tank"]}
         code, _ = self.run_check(chk, INVENTORY_HOSTS, _inventory_rules(pools=pools))
         self.assertEqual(code, 1)
