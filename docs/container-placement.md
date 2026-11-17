@@ -1530,3 +1530,28 @@ placement (finding 7).
   `dmarc_reports` so “0 reports read” is distinguishable from “0 messages dropped”, which
   are two very different greens. Live: `dmarc_alignment` publishes 1 with the note, and
   the estate is **15/15** for the first time.
+
+## Changes applied 2026-11-17
+
+- **`monarch`'s caps added up to more than its cgroup had.** The container was capped at
+  8 GiB (`limits.memory: 8064MiB`) while the services inside were capped at 4 GiB
+  (`jellyfin`), 4 GiB (`iptv`), 2 GiB (`flaresolverr`), 1 GiB (`prometheus`) and 512 MiB
+  (`grafana`) — 11.6 GiB of ceilings under an 8 GiB roof. `memory.peak` sat at
+  **8 456 343 552 against an 8 456 716 864 limit** and `memory.events` read
+  **`oom_kill 3590`**: the kernel was choosing victims anywhere in the container, which is
+  how Radarr was killed mid-write and left a zero-byte `config.xml` (`req.innotel.us`
+  failed every request while `docker ps` still said `Up`). `jellyfin` is 3 GiB and `iptv`
+  2 GiB now, and the container is at 10 GiB, so the caps fit under the roof with headroom
+  rather than exceeding it. Same rule as `i4`'s row below: measured use plus headroom, not
+  a number that happens to look generous.
+- **`flaresolverr` OOM-killed itself 1 234 times on a 64 MB `/dev/shm`.** The 2 GiB cap was
+  already there and did not help, because every headless Chromium needs shared memory: at
+  64 MB each solve ballooned, the cgroup killed Chromium, and the next request started
+  another (84 Chromium processes at one reading, `oom_kill 1234`, `memory.current` pinned
+  at `memory.max`). `shm_size: 1g` is the fix — after the restart it runs **8** Chromium
+  processes with `oom_kill 0`.
+- **`onyx` is back on `i1` at `.60`**, with the `main-pool` USB disk (`/dev/sdc`, btrfs
+  label `main-pool`) that is attached there now. The `tank` pool its `onyx-data` device
+  names exists again on `i1` (`source=tank/onyx`), so the instance definition needed no
+  edit; the instance came over as `incus copy onyx i1:onyx`, and the stopped `i3` copy is
+  kept as `onyx-retired` rather than deleted.

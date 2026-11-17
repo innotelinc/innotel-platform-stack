@@ -149,5 +149,65 @@ class MetricCase(unittest.TestCase):
         self.assertIn('innotel_estate_media_app_restarts{app="radarr"} 3', media.prometheus_extra(observed))
 
 
+class ConfigCase(unittest.TestCase):
+    """A truncated settings file is the failure that started this, so it is its own boundary.
+
+    `docker ps` says `Up` while the process sits at `Press enter to exit...`, so the only
+    reading that catches this state is the file itself. `0` (truncated) and `None` (not
+    there, or not readable) stay distinct because the repair differs.
+    """
+
+    def _sizes(self, **overrides):
+        sizes = {name: 1024 for name, _reason in media.EXPECTED}
+        sizes.update(overrides)
+        return sizes
+
+    def test_sizes_come_from_two_field_lines(self):
+        text = "\n".join([_line("radarr"), "radarr|1089", "sonarr|0"])
+        self.assertEqual(media.parse_configs(text), {"radarr": 1089, "sonarr": 0})
+
+    def test_a_missing_file_is_none_rather_than_zero(self):
+        self.assertIsNone(media.parse_configs("radarr|missing")["radarr"])
+
+    def test_state_lines_are_not_read_as_configs(self):
+        self.assertEqual(media.parse_configs(_line("radarr")), {})
+
+    def test_an_empty_config_is_a_failure_that_names_the_backup(self):
+        result = media.audit(_all_running(), self._sizes(radarr=0))
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any("zero-byte" in f.message and "Backups/scheduled" in f.message for f in result.failures),
+            [f.message for f in result.failures],
+        )
+
+    def test_an_unreadable_config_is_a_failure(self):
+        result = media.audit(_all_running(), self._sizes(jellyseerr=None))
+        self.assertTrue(
+            any("no readable" in f.message for f in result.failures),
+            [f.message for f in result.failures],
+        )
+
+    def test_a_healthy_config_is_clean(self):
+        result = media.audit(_all_running(), self._sizes())
+        self.assertTrue(result.ok, [f.message for f in result.findings])
+
+    def test_without_config_data_the_running_check_still_stands(self):
+        self.assertTrue(media.audit(_all_running(), None).ok)
+
+    def test_the_probe_names_each_apps_own_path(self):
+        line = media.command()
+        for name, path in media.CONFIG_FILES:
+            self.assertIn(f"{name}:{path}", line)
+        self.assertIn("stat -c %s", line)
+
+    def test_jellyseerr_is_not_probed_at_radarrs_path(self):
+        self.assertEqual(dict(media.CONFIG_FILES)["jellyseerr"], "/app/config/settings.json")
+
+    def test_config_bytes_are_published_with_minus_one_for_unreadable(self):
+        text = media.prometheus_extra(_all_running(), self._sizes(radarr=0, jellyfin=None))
+        self.assertIn('innotel_estate_media_app_config_bytes{app="radarr"} 0', text)
+        self.assertIn('innotel_estate_media_app_config_bytes{app="jellyfin"} -1', text)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

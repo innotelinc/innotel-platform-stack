@@ -82,6 +82,19 @@ EXPECTED: tuple[tuple[str, str], ...] = (
     ("sabnzbd", "the downloader the request apps hand off to"),
 )
 
+#: Each app's own settings file, as the path *inside* its container. A zero-byte file here
+#: is the exact state that made this check necessary: Radarr reads `config.xml` before it
+#: will start, so a truncated one turns a running app into one that refuses to boot, while
+#: `docker ps` still prints `Up` for a container whose process has already given up.
+CONFIG_FILES: tuple[tuple[str, str], ...] = (
+    ("jellyfin", "/config/config/system.xml"),
+    ("jellyseerr", "/app/config/settings.json"),
+    ("radarr", "/config/config.xml"),
+    ("sonarr", "/config/config.xml"),
+    ("prowlarr", "/config/config.xml"),
+    ("sabnzbd", "/config/sabnzbd.ini"),
+)
+
 
 @dataclass
 class AppState:
@@ -115,11 +128,19 @@ def command(names: tuple[str, ...] | None = None) -> str:
         '2>/dev/null || echo "$c|missing|0|false"'
     )
     loop = f'for c in {" ".join(wanted)}; do {inspect}; done'
+    # The config probe rides behind the same loop: two fields per line, which `parse`
+    # skips and `parse_configs` reads, so the whole check stays one round trip.
+    pairs = " ".join(f"{name}:{path}" for name, path in CONFIG_FILES)
+    configs = (
+        f"for p in {pairs}; do a=${{p%%:*}}; f=${{p#*:}}; "
+        'sz=$(docker exec "$a" stat -c %s "$f" 2>/dev/null) || sz=missing; '
+        'printf "%s|%s\\n" "$a" "$sz"; done'
+    )
     # `shlex.quote`, not `json.dumps`: the payload must reach the container shell
     # with `$c` still literal. Through a double-quoted `sh -c` the host shell expands
     # it first, `docker inspect` gets no argument, every app reads as missing and the
     # check reports six failures that are its own (2026-11-17).
-    return f"incus exec {CONTAINER} -- sh -c {shlex.quote(loop)}"
+    return f"incus exec {CONTAINER} -- sh -c {shlex.quote(loop + '; ' + configs)}"
 
 
 def parse(text: str) -> dict[str, AppState]:
@@ -145,9 +166,34 @@ def parse(text: str) -> dict[str, AppState]:
     return out
 
 
-def audit(observed: dict[str, AppState]) -> Audit:
+def parse_configs(text: str) -> dict[str, int | None]:
+    """`name -> config size in bytes` from the same output, `None` when unreadable.
+
+    A two-field line is a config probe; anything else belongs to the state parser and is
+    ignored here. `None` (missing, unreadable, no `stat`) is distinct from `0`, because
+    the repair differs: `0` is a truncation to restore, `None` is a path that is not there.
+    """
+    out: dict[str, int | None] = {}
+    for line in text.splitlines():
+        fields = line.strip().split("|")
+        if len(fields) != 2:
+            continue
+        name = fields[0].lstrip("/")
+        if not name:
+            continue
+        try:
+            out[name] = int(fields[1])
+        except ValueError:
+            out[name] = None
+    return out
+
+
+def audit(
+    observed: dict[str, AppState], configs: dict[str, int | None] | None = None
+) -> Audit:
     """Every expected app that a request cannot currently reach, as findings."""
     out = Audit()
+    config_paths = dict(CONFIG_FILES)
     for name, reason in EXPECTED:
         app = observed.get(name)
         if app is None or app.missing:
@@ -170,19 +216,45 @@ def audit(observed: dict[str, AppState]) -> Audit:
                 )
             )
             continue
+        if configs is not None:
+            path = config_paths.get(name)
+            size = configs.get(name)
+            if path is not None and size is None:
+                out.findings.append(
+                    Finding(
+                        "config_unreadable",
+                        "fail",
+                        f"{name} ({reason}) is running but has no readable {path} — the "
+                        f"process is up with no settings, so the request path it serves is "
+                        f"not the one you configured",
+                    )
+                )
+            elif path is not None and size == 0:
+                out.findings.append(
+                    Finding(
+                        "config_empty",
+                        "fail",
+                        f"{name} ({reason}) has a zero-byte {path} — the shape an OOM kill "
+                        f"leaves behind when it lands mid-write, and the app refuses to start "
+                        f"after its next restart; restore it from Backups/scheduled rather "
+                        f"than deleting it, which would mint a new API key",
+                    )
+                )
         if app.restarts:
             out.findings.append(
                 Finding(
                     "restarted",
                     "warn",
                     f"{name} ({reason}) is running but has restarted {app.restarts} time(s) "
-                    f"— if it dies again, check its config.xml is not truncated",
+                    f"— if it dies again, check its config file is not truncated",
                 )
             )
     return out
 
 
-def prometheus_extra(observed: dict[str, AppState]) -> str:
+def prometheus_extra(
+    observed: dict[str, AppState], configs: dict[str, int | None] | None = None
+) -> str:
     """This check's own series, on top of the shared `innotel_estate_check` contract."""
     lines = [
         "# HELP innotel_estate_media_app_running 1 when the app a request crosses is running",
@@ -198,6 +270,15 @@ def prometheus_extra(observed: dict[str, AppState]) -> str:
     for name, _reason in EXPECTED:
         app = observed.get(name)
         lines.append(f'innotel_estate_media_app_restarts{{app="{name}"}} {app.restarts if app else 0}')
+    lines += [
+        "# HELP innotel_estate_media_app_config_bytes Size of each app's own config file, -1 when unreadable",
+        "# TYPE innotel_estate_media_app_config_bytes gauge",
+    ]
+    for name, _reason in EXPECTED:
+        size = (configs or {}).get(name)
+        lines.append(
+            f'innotel_estate_media_app_config_bytes{{app="{name}"}} {-1 if size is None else size}'
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -225,23 +306,26 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        observed = parse(read_host(args.host, args.target, command()))
+        text = read_host(args.host, args.target, command())
+        observed = parse(text)
+        configs = parse_configs(text)
     except Exception as error:  # noqa: BLE001 — any ssh failure is the same finding here
         print(f"check-media-apps: could not read {args.host}: {error}", file=sys.stderr)
         emit(None, ran=False)
         return 2
 
-    result = audit(observed)
+    result = audit(observed, configs)
     if args.json:
         print(json.dumps([f.__dict__ for f in result.findings], indent=2))
     else:
         running = sum(1 for name, _r in EXPECTED if (observed.get(name) or AppState(name, "", 0)).running)
+        truncated = sum(1 for name, _r in EXPECTED if configs.get(name) == 0)
         print(f"check-media-apps: {running}/{len(EXPECTED)} app(s) a request crosses are running "
-              f"on {CONTAINER}, {len(result.failures)} not")
+              f"on {CONTAINER}, {len(result.failures)} finding(s), {truncated} with an empty config")
         for finding in result.findings:
             print(f"{finding.level.upper()} {finding.message}")
 
-    emit(result, ran=True, extra=prometheus_extra(observed))
+    emit(result, ran=True, extra=prometheus_extra(observed, configs))
     return 0 if result.ok else 1
 
 
