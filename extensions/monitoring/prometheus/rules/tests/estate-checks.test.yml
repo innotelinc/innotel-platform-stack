@@ -362,3 +362,6 @@ tests:
         alertname: EstateCheckNotRunning
         exp_alerts:
           - exp_labels: {severity: critical, team: platform, check: mail_identities}
+            exp_annotations:
+              summary: 'The mail_identities check has not run in two hours'
+              description: 'The last `mail_identities` run reported 4h 0m 0s ago, so its textfile is still being scraped but has not moved since. The timer that runs it is stopped, or every run since died before writing: nothing is watching this invariant now, whatever the last reading said. Check `systemctl list-timers estate-checks.timer` and the unit''s journal on the edge.'
