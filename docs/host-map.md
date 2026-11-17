@@ -23,6 +23,25 @@ credential held in the operator store. The credential itself never belongs in th
 repository, in a roadmap, or in a committed `.env`. The hosts do not all share one
 password, so the checker accepts a per-address override.
 
+## Name resolution
+
+Every command in these docs says `ssh i1`, not `ssh root@192.168.1.51`, so the four
+names have to resolve on whichever host you are standing on. `hosts/estate-hosts` is
+that block:
+
+    # Estate hostnames — docs/host-map.md
+    192.168.1.51 i1
+    192.168.1.52 i2
+    192.168.1.53 i3
+    192.168.1.54 i4
+
+Append it to `/etc/hosts` on a rebuilt host — it is not something the stack install
+writes, and those four addresses are the whole of it. `i2` stays in the block while
+it is parked: its address still answers, and `i1`…`i4` are the names this page and
+the checks use. A host missing the block fails every name-based `ssh` with
+`Could not resolve hostname`, which reads like a network outage rather than a missing
+line (`i4` was in exactly that state on 2026-11-17).
+
 ## Published names
 
 The public name an app answers on is not always the container's name. Read the

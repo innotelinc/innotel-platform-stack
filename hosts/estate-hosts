@@ -1,0 +1,7 @@
+# Estate hostnames — docs/host-map.md
+# Append to /etc/hosts on a rebuilt host: the docs and the checks say `ssh i1`.
+# i2 stays listed while parked; its address still answers.
+192.168.1.51 i1
+192.168.1.52 i2
+192.168.1.53 i3
+192.168.1.54 i4
