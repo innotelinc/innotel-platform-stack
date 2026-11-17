@@ -64,3 +64,15 @@ that is the point.
 - **A secret that cannot be rotated** (an upstream that will not issue a second
   credential, a hard-coded pair in a vendor appliance) is recorded here with the reason
   and the compensating control, rather than left to warn forever with no owner.
+
+## Probes are credentials too
+
+`cerulean/__scope_probe__` holds no key, but it is the object the read-only policy is
+proved against, and it ages like everything else in the mount — it was the first thing
+the sixty-day window caught (67 days, 2026-11-17). It rotates with the same five steps
+and takes seconds.
+
+Do not add a name-based exemption for probe paths. A path called `__probe__` is
+indistinguishable from a real secret renamed to escape this window, and the check would
+have to trust the name to tell them apart — which is the one thing it must not do. If a
+path carries no secret, the fix is a new version, not an allowlist.
