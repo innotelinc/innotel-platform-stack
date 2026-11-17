@@ -38,6 +38,12 @@ WHAT IT ASSERTS
      config, so it is the first thing a Jellyfin upgrade or a reinstall drops; it is a
      note rather than a failure, because the library still plays without it.
 
+A gateway status (502/503/504) is reported as *the app being unreachable*, not as a wrong
+page: the proxy says it could not reach Jellyfin, which is what the app's start-up window
+answers while it initialises. Naming that separately is the difference between a bare 502
+that reads like a misrouted vhost and the one repair it actually calls for — wait for the
+app, or start it — and it is the shape the 2026-11-16 `iptv` splash warning took.
+
 Run it from a host that can reach the names the way a person does (the edge, or any estate
 host with DNS):
 
@@ -84,6 +90,10 @@ CHECK = "media_doors"
 WEB_PATH = "/web/"
 DEFAULT_SPLASH_MIN = 50_000
 USER_AGENT = "innotel-estate-check/1.0 (+media doors)"
+#: What a proxy answers when it cannot reach the app behind it. Jellyfin's own start-up
+#: window answers exactly this, so it is a distinct finding: the door is fine and the app
+#: is not up yet, which is a different repair from "something else is answering".
+GATEWAY_ERRORS = (502, 503, 504)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -164,6 +174,12 @@ def audit(media: str, watch: str, *, probe=fetch, splash_min: int = DEFAULT_SPLA
         result.findings.append(Finding(
             "front-wrong-target", "fail",
             f"{media} redirects off the app to {location or 'nowhere'}"))
+    elif status in GATEWAY_ERRORS:
+        result.findings.append(Finding(
+            "front-gateway", "fail",
+            f"{media} answered {status} — the edge could not reach Jellyfin, so the app is "
+            "down or still starting; that is its start-up window, not another app on the "
+            "front door"))
     elif status != 200:
         result.findings.append(Finding(
             "front-status", "fail",
@@ -174,6 +190,11 @@ def audit(media: str, watch: str, *, probe=fetch, splash_min: int = DEFAULT_SPLA
     if status is None:
         result.findings.append(Finding(
             "watch-unreachable", "fail", f"{watch}{WEB_PATH} did not answer — Jellyfin or the edge is down"))
+    elif status in GATEWAY_ERRORS:
+        result.findings.append(Finding(
+            "watch-gateway", "fail",
+            f"{watch}{WEB_PATH} answered {status} — the edge could not reach Jellyfin: the "
+            "app is down or in its start-up window, and the door recovers when it does"))
     elif status != 200:
         result.findings.append(Finding(
             "watch-status", "fail", f"{watch}{WEB_PATH} answered {status} instead of 200"))
@@ -188,6 +209,12 @@ def audit(media: str, watch: str, *, probe=fetch, splash_min: int = DEFAULT_SPLA
     if status is None:
         result.findings.append(Finding(
             "branding-unreachable", "warn", f"{watch}{SPLASH_PATH} did not answer"))
+    elif status in GATEWAY_ERRORS:
+        result.findings.append(Finding(
+            "branding-gateway", "warn",
+            f"{watch}{SPLASH_PATH} answered {status} — Jellyfin was unreachable when the "
+            "splash was asked for (its start-up window answers this), so this is not "
+            "evidence that the Gizmo splash is uninstalled; re-check once the app is up"))
     elif status != 200:
         result.findings.append(Finding(
             "branding-missing", "warn",

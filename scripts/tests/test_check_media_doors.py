@@ -108,9 +108,18 @@ class FrontPage(unittest.TestCase):
                              probe=probe_for(media=(301, {"Location": "https://example.org/"}, b"")))
         self.assertEqual(codes(result), ["front-wrong-target"])
 
-    def test_a_five_hundred_is_the_app_being_down(self):
+    def test_a_gateway_error_names_the_app_being_unreachable(self):
+        # A 502 is the edge failing to reach Jellyfin — its start-up window looks exactly
+        # like this — so it must not read the same as a wrong page on the door.
         result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
                              probe=probe_for(media=(502, {}, b"<html>502</html>")))
+        self.assertFalse(result.ok)
+        self.assertEqual(codes(result), ["front-gateway"])
+
+    def test_a_server_error_from_the_app_itself_is_front_status(self):
+        # 500 is the app answering, not the proxy failing to reach it.
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
+                             probe=probe_for(media=(500, {}, b"<html>500</html>")))
         self.assertEqual(codes(result), ["front-status"])
 
     def test_no_answer_is_reported_as_unreachable(self):
@@ -137,6 +146,13 @@ class WatchDoor(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual([f.level for f in result.findings], ["fail"])
 
+    def test_a_gateway_error_names_the_restart_window(self):
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
+                             probe=probe_for(web=(502, {}, b"")))
+        self.assertFalse(result.ok)
+        self.assertEqual(codes(result), ["watch-gateway"])
+        self.assertIn("start-up window", result.findings[0].message)
+
 
 class Splash(unittest.TestCase):
     def test_missing_branding_is_a_warning_not_a_failure(self):
@@ -145,6 +161,15 @@ class Splash(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual([(f.code, f.level) for f in result.findings],
                          [("branding-missing", "warn")])
+
+    def test_a_gateway_error_while_jellyfin_restarts_is_not_missing_branding(self):
+        # The 2026-11-16 warning: a 502 on the splash during Jellyfin's start-up window
+        # says nothing about whether the Gizmo splash is still installed.
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
+                             probe=probe_for(splash=(502, {"Content-Type": "text/html"}, b"")))
+        self.assertTrue(result.ok)
+        self.assertEqual([(f.code, f.level) for f in result.findings],
+                         [("branding-gateway", "warn")])
 
     def test_a_placeholder_image_is_under_the_floor(self):
         result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us",
