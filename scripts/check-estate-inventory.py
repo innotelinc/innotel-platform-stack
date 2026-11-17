@@ -80,7 +80,11 @@ NAME_OF_ADDRESS: dict[str, str] = {address: name for name, address in ADDRESS_OF
 
 #: name → the storage pools that host is allowed to have. A pool not listed is a failure.
 POOLS: dict[str, set[str]] = {
-    "i1": {"incus"},
+    # `tank` arrived on 2026-11-17: a dataset of i1's own root zpool (`source=incus/tank`,
+    # the same construction as i3's), created for the `onyx-data` volume as `onyx` moved
+    # here. A pool that exists and is unnamed is exactly what this check is for — it caught
+    # the move mid-flight, which is why the row is recorded rather than the pool hidden.
+    "i1": {"incus", "tank"},
     # `fast` (dir) is the only pool left on `i2`: the rebalance moved six containers to
     # `i3`, and the pool that held them did not travel with them.
     "i2": {"fast"},

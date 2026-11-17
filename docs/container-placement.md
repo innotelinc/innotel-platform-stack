@@ -899,7 +899,7 @@ are in finding 1.
 
 | Host | Address | vCPU | RAM | Load at survey | RAM available | Root disk | Pool |
 |---|---|---|---|---|---|---|---|
-| **i1** | `.51` | 4 | 14.9 GiB | 2.73 / 12.27 / 14.55 † | 3.9 GiB | 98 G (14 %) | `incus` (zfs) |
+| **i1** | `.51` | 4 | 14.9 GiB | 2.73 / 12.27 / 14.55 † | 3.9 GiB | 98 G (14 %) | `incus` (zfs) + `tank` (zfs, 2026-11-17) |
 | **i2** | `.52` | 8 | 13.1 GiB | 0.54 / 0.68 / 0.89 | 4.5 GiB | 23 G (48 %) | `default` (dir) + `fast` (zfs) + `tank` (zfs) |
 | ~~**i3**~~ | ~~`.53`~~ | — | — | — | — | — | **retired 2026-11-02** — containers moved to `i2`; the host no longer answers |
 
@@ -1052,6 +1052,11 @@ before the next host rebuild:
 - **A `tank` pool.** `onyx` mounts a custom volume from pool `tank`, which existed only on `i2`;
   `incus storage create tank zfs source=incus/tank` gives `i3` the same name on the existing
   zpool (the volume itself is 58 MiB of a 79 GiB pool).
+- **`tank` on `i1` (2026-11-17).** Added while `onyx` moved here from `i3`: a dataset of
+  i1's own root zpool (`incus storage create tank zfs source=incus/tank`), holding the
+  `onyx-data` custom volume the instance mounts. The pool is named here for the same reason
+  `i3` names it — `check-estate-inventory.py` fails on a pool it does not know, and it is
+  what reported the move before the docs did.
 - **Cross-host trust.** The certificate was never the problem — `incus remote add … --auth-type=tls`
   is. `oncus copy` now works from `i3` against `i2src:`.
 
