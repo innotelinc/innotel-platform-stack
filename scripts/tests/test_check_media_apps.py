@@ -209,5 +209,97 @@ class ConfigCase(unittest.TestCase):
         self.assertIn('innotel_estate_media_app_config_bytes{app="jellyfin"} -1', text)
 
 
+class SolverCase(unittest.TestCase):
+    """The hop behind `prowlarr` was killing itself at its cap while every app read `running`.
+
+    Two readings, and only together are they the condition: a *cumulative* `oom_kill` count
+    that is non-zero, and a cgroup sitting within 5 % of its own cap. The counter alone is
+    history (196 kills in one day on 2026-11-17, all of them already past); the ratio alone
+    is a solver that is busy and coping. A 5xx in the last hour is the user-visible half and
+    is a warning, not a failure.
+    """
+
+    def _solver(self, **overrides):
+        readings = {
+            "oom_kill": 0,
+            "memory_current": 800 * 1024**2,
+            "memory_max": 3 * 1024**3,
+            "http_5xx": 0,
+        }
+        readings.update(overrides)
+        return readings
+
+    def test_three_field_lines_are_the_solver_probe(self):
+        text = "\n".join([_line("radarr"), "radarr|1089", "solver|oom_kill|196"])
+        self.assertEqual(media.parse_solver(text), {"oom_kill": 196})
+
+    def test_the_other_parsers_ignore_the_solver_lines(self):
+        text = "solver|oom_kill|196"
+        self.assertEqual(media.parse(text), {})
+        self.assertEqual(media.parse_configs(text), {})
+
+    def test_an_unreadable_reading_is_minus_one(self):
+        self.assertEqual(media.parse_solver("solver|memory_max|-1"), {"memory_max": -1})
+
+    def test_a_non_numeric_reading_is_skipped(self):
+        self.assertEqual(media.parse_solver("solver|oom_kill|missing"), {})
+
+    def test_cgroup_file_names_are_normalised_to_series_keys(self):
+        # The probe writes the file's own name (`memory.current`); the audit and the series
+        # read `memory_current`. The first live run published -1 for both memory readings
+        # because of that dot, while the cgroup answered perfectly well.
+        self.assertEqual(
+            media.parse_solver("solver|memory.current|123\nsolver|memory.max|456"),
+            {"memory_current": 123, "memory_max": 456},
+        )
+
+    def test_pinned_with_kills_is_a_failure(self):
+        result = media.audit(
+            _all_running(),
+            None,
+            self._solver(oom_kill=196, memory_current=2 * 1024**3, memory_max=2 * 1024**3),
+        )
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any("mid-solve" in f.message and "3 GiB" in f.message for f in result.failures),
+            [f.message for f in result.failures],
+        )
+
+    def test_busy_but_coping_is_not_a_failure(self):
+        # The state after the 2026-11-17 fix: kills on the counter from earlier in the
+        # container's life, and 0.85 GiB of a 3 GiB cap. Reading the counter alone would
+        # leave this red forever.
+        result = media.audit(
+            _all_running(),
+            None,
+            self._solver(oom_kill=196, memory_current=850 * 1024**2, memory_max=3 * 1024**3),
+        )
+        self.assertTrue(result.ok, [f.message for f in result.findings])
+
+    def test_5xx_without_pinning_is_a_warning(self):
+        result = media.audit(_all_running(), None, self._solver(http_5xx=7))
+        self.assertTrue(result.ok)
+        self.assertTrue(any("5xx" in f.message for f in result.warnings), [f.message for f in result.warnings])
+
+    def test_the_probe_reads_the_solvers_own_cgroup_and_log(self):
+        line = media.command()
+        self.assertIn("memory.events", line)
+        self.assertIn(f'docker inspect -f "{{{{.Id}}}}" {media.SOLVER}', line)
+        self.assertIn("docker logs --since 60m", line)
+
+    def test_solver_series_are_published_with_minus_one_for_unreadable(self):
+        text = media.prometheus_extra(
+            _all_running(),
+            None,
+            {"oom_kill": 0, "memory_current": 1, "memory_max": 2, "http_5xx": 0},
+        )
+        self.assertIn('innotel_estate_media_app_solver_oom_kills{app="flaresolverr"} 0', text)
+        self.assertIn('innotel_estate_media_app_solver_memory_max_bytes{app="flaresolverr"} 2', text)
+        unreadable = media.prometheus_extra(_all_running(), None, None)
+        self.assertIn(
+            'innotel_estate_media_app_solver_oom_kills{app="flaresolverr"} -1', unreadable
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

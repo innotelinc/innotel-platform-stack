@@ -1538,6 +1538,29 @@ placement (finding 7).
 
 ## Changes applied 2026-11-17
 
+- **The media estate has alert rules of its own, and the solver behind `prowlarr` is watched.**
+  `extensions/monitoring/prometheus/rules/estate-checks.yml` gained a second group
+  (`innotel-media-apps`, three rules) keyed on the media series rather than on the shared family, so a
+  zero-byte config names the app instead of reading as one anonymous finding: `EstateMediaAppConfigEmpty`
+  (`config_bytes == 0`, critical), `EstateMediaAppConfigUnreadable` (`< 0`, warning — a path that is not
+  there is a different repair from a truncated file) and `EstateMediaAppSolverKillingItself`
+  (`increase(solver_oom_kills[1h]) > 0`). `check-media-apps.py` now publishes the reading behind that
+  last rule — `flaresolverr`'s own cgroup `oom_kill`, its current/cap bytes and the 5xx it served in the
+  last hour — in the same `incus exec` round trip, so the hop that silently ate indexer requests is a
+  series. Its first live run caught a state the cap change had only hidden: the solver sits at **exactly**
+  its 3 GiB cap with 2 kills since the increase and 23 Chromium processes, so the cap bought time rather
+  than immunity.
+
+- **`i2` rejoined the estate**, and it had never stopped working — `incus list` there shows nine
+  running instances, `monarch` among them, so "parked" described the *autostart flags* and not the
+  host. Every one of the nine carried `boot.autostart=false`, which meant a reboot would have taken
+  the media estate and the metrics stack Prometheus runs on down silently. All nine are now
+  `boot.autostart=true`. The 2026-11-15 reason for disabling it — two live instances of one LAN
+  address after the moves — was checked first and no longer holds: every address on `i2`
+  (`.56 .89 .94 .90 .76 .83 .24 .79 .62`) is unique across `i1`, `i3` and `i4`. Duplicate *names* are
+  not the hazard and were left alone (`atlas`, `blueprint`, `clearpath`, `regcache`, `rizzaura`,
+  `sage` also exist on `i1`/`i4` at different addresses — separate instances of the same product).
+
 - **`monarch`'s caps added up to more than its cgroup had.** The container was capped at
   8 GiB (`limits.memory: 8064MiB`) while the services inside were capped at 4 GiB
   (`jellyfin`), 4 GiB (`iptv`), 2 GiB (`flaresolverr`), 1 GiB (`prometheus`) and 512 MiB

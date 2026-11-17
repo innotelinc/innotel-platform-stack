@@ -267,3 +267,56 @@ groups:
             past 80 %). Worth a look before it becomes one. For `address_latency`, see
             systemd/wifi-powersave-off.service; for `host_disk`, reclaim before a write
             fails.
+
+  # The media estate's apps, and the solver behind them (2026-11-17). These key on the
+  # series `check-media-apps.py` publishes rather than on the shared family, because the
+  # state they name is not "a check found something" — it is one specific file being zero
+  # bytes, or one container killing its own Chromium while every door in front of it
+  # answers 200. `EstateCheckFailing` would report that as one anonymous finding in
+  # `media_apps`; these name the app.
+  - name: innotel-media-apps
+    rules:
+      - alert: EstateMediaAppConfigEmpty
+        expr: innotel_estate_media_app_config_bytes{app=~".+"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: '{{ $labels.app }} has a zero-byte config file'
+          description: >-
+            The app a request crosses has a settings file with no bytes in it — the shape an
+            OOM kill leaves when it lands mid-write, and the app then refuses to start after
+            its next restart while `docker ps` still prints Up for it. Restore it from that
+            app's own `Backups/scheduled` archive; **do not delete it**, because the app
+            regenerates one with a new API key and the request UI in front of it keeps
+            pointing at the old one.
+
+      - alert: EstateMediaAppConfigUnreadable
+        expr: innotel_estate_media_app_config_bytes{app=~".+"} < 0
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: '{{ $labels.app }} has no readable config file'
+          description: >-
+            The config probe could not read the app's settings file at all: a path that is
+            not there, or a container that cannot `stat` it. That is a different repair from
+            a truncated file, which is why it is a separate alert rather than the same one
+            with a different message.
+
+      - alert: EstateMediaAppSolverKillingItself
+        expr: increase(innotel_estate_media_app_solver_oom_kills{app="flaresolverr"}[1h]) > 0
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'flaresolverr is being OOM-killed inside its own cap'
+          description: >-
+            The solver `prowlarr` sends indexer challenges to was killed
+            {{ $value | humanize }} time(s) in the last hour inside its own cgroup. Every
+            solve that dies this way is an indexer `prowlarr` cannot reach, and no door in
+            front of the media estate shows it: the app reads `running` and its page loads.
+            Size the cap to measured use plus headroom (`mem_limit: 3g` since 2026-11-17) and
+            keep `shm_size: 1g` — the 64 MB `/dev/shm` is what started this.

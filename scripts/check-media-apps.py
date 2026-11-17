@@ -28,6 +28,13 @@ For every app a request must cross, each named in `EXPECTED` with the reason it 
      as its own series and raised as a warning. It is cumulative for the container's life,
      so treating it as a failure would leave an app permanently red for a restart that
      healed hours ago; the failure is the app not running now.
+  3. THE SOLVER IS NOT KILLING ITSELF (2026-11-17) — `flaresolverr` is the hop `prowlarr`
+     uses for indexers behind a challenge, so its own memory pressure is a media failure
+     that every door in front of it still answers 200 through. Its `oom_kill` counter,
+     current/cap and the 5xx it handed back in the last hour are published as their own
+     series. Pinned at its cap with kills on the counter is a failure — that is Chromium
+     dying mid-solve; 5xx alone is a warning. The counter is cumulative, so the alert rule
+     reads `increase()`, not the value.
 
 THE REPAIR IT NAMES
 -------------------
@@ -96,6 +103,13 @@ CONFIG_FILES: tuple[tuple[str, str], ...] = (
 )
 
 
+#: The one hop that is not a "media app" but is on every indexer request: `prowlarr` sends
+#: its challenges here. It is capped separately (`mem_limit` in monarch's compose) because
+#: a pile-up of headless Chromium can only safely OOM-kill itself — and on 2026-11-17 it
+#: spent 196 kills doing exactly that, at the cap, while every app above read `running`.
+SOLVER = "flaresolverr"
+
+
 @dataclass
 class AppState:
     """One container as `docker inspect` described it."""
@@ -140,7 +154,20 @@ def command(names: tuple[str, ...] | None = None) -> str:
     # with `$c` still literal. Through a double-quoted `sh -c` the host shell expands
     # it first, `docker inspect` gets no argument, every app reads as missing and the
     # check reports six failures that are its own (2026-11-17).
-    return f"incus exec {CONTAINER} -- sh -c {shlex.quote(loop + '; ' + configs)}"
+    # The solver probe rides behind the same round trip. Its lines carry *three* fields,
+    # so the four-field state parser and the two-field config parser both skip them: a
+    # change to one probe cannot silently feed another's reading.
+    solver = (
+        's=/sys/fs/cgroup/system.slice/docker-$(docker inspect -f "{{.Id}}" '
+        f'{SOLVER}).scope; '
+        'for k in oom_kill; do v=$(awk -v k=$k \'$1==k{print $2}\' "$s/memory.events" '
+        '2>/dev/null); printf "solver|%s|%s\\n" "$k" "${v:--1}"; done; '
+        'for f in memory.current memory.max; do v=$(cat "$s/$f" 2>/dev/null); '
+        'printf "solver|%s|%s\\n" "$f" "${v:--1}"; done; '
+        f'printf "solver|http_5xx|%s\\n" "$(docker logs --since 60m {SOLVER} 2>&1 '
+        "| grep -cE ' 5[0-9][0-9] ')\""
+    )
+    return f"incus exec {CONTAINER} -- sh -c {shlex.quote(loop + '; ' + configs + '; ' + solver)}"
 
 
 def parse(text: str) -> dict[str, AppState]:
@@ -188,8 +215,33 @@ def parse_configs(text: str) -> dict[str, int | None]:
     return out
 
 
+def parse_solver(text: str) -> dict[str, int]:
+    """`metric -> value` from the solver's three-field probe lines.
+
+    `-1` is what the probe writes when it could not read a value at all, which is distinct
+    from `0`: no kills is a healthy zero, an unreadable cgroup is a probe that did not
+    work. A line that is not three fields or not numeric is skipped rather than guessed at.
+    """
+    out: dict[str, int] = {}
+    for line in text.splitlines():
+        fields = line.strip().split("|")
+        if len(fields) != 3 or fields[0] != "solver":
+            continue
+        # The cgroup files are named `memory.current`/`memory.max`; the keys the audit and
+        # the series use are `memory_current`/`memory_max`. Normalising here once is what
+        # keeps a `.` from silently reading as "unreadable" — it did on the first live run
+        # (2026-11-17), which published -1 while the cgroup answered perfectly well.
+        try:
+            out[fields[1].replace(".", "_")] = int(fields[2])
+        except ValueError:
+            continue
+    return out
+
+
 def audit(
-    observed: dict[str, AppState], configs: dict[str, int | None] | None = None
+    observed: dict[str, AppState],
+    configs: dict[str, int | None] | None = None,
+    solver: dict[str, int] | None = None,
 ) -> Audit:
     """Every expected app that a request cannot currently reach, as findings."""
     out = Audit()
@@ -249,11 +301,47 @@ def audit(
                     f"— if it dies again, check its config file is not truncated",
                 )
             )
+    if solver:
+        kills = solver.get("oom_kill", -1)
+        current = solver.get("memory_current", -1)
+        cap = solver.get("memory_max", -1)
+        five_xx = solver.get("http_5xx", 0)
+        gib = 1024**3
+        # Pinned *and* killing: the state measured on 2026-11-17 at 2 GiB, where 12 live
+        # Chromium browsers sat at `memory.max` and every solve died as `chrome not
+        # reachable`. Reading only the counter would have called the historical 196 kills
+        # a live failure forever; reading only the ratio would call a busy-but-coping
+        # solver a failure. Together they are the condition.
+        if cap > 0 and current >= cap * 0.95 and kills > 0:
+            out.findings.append(
+                Finding(
+                    "solver_oom",
+                    "fail",
+                    f"{SOLVER} is at {current / gib:.2f} GiB of its {cap / gib:.2f} GiB cap "
+                    f"with {kills} OOM kill(s) in its own cgroup — Chromium is dying "
+                    f"mid-solve, so every indexer `prowlarr` sends here fails and the "
+                    f"request apps behind it see a healthy `running` container; size the "
+                    f"cap to measured use plus headroom (3 GiB since 2026-11-17) and keep "
+                    f"`shm_size: 1g`",
+                )
+            )
+        elif five_xx > 0:
+            out.findings.append(
+                Finding(
+                    "solver_5xx",
+                    "warn",
+                    f"{SOLVER} answered {five_xx} 5xx in the last hour — a solve that dies "
+                    f"mid-way is what `prowlarr` reports as an indexer that cannot be "
+                    f"reached, and no door in front of it shows that",
+                )
+            )
     return out
 
 
 def prometheus_extra(
-    observed: dict[str, AppState], configs: dict[str, int | None] | None = None
+    observed: dict[str, AppState],
+    configs: dict[str, int | None] | None = None,
+    solver: dict[str, int] | None = None,
 ) -> str:
     """This check's own series, on top of the shared `innotel_estate_check` contract."""
     lines = [
@@ -279,6 +367,21 @@ def prometheus_extra(
         lines.append(
             f'innotel_estate_media_app_config_bytes{{app="{name}"}} {-1 if size is None else size}'
         )
+    readings = solver or {}
+    lines += [
+        "# HELP innotel_estate_media_app_solver_oom_kills OOM kills inside the solver's own cgroup, cumulative",
+        "# TYPE innotel_estate_media_app_solver_oom_kills counter",
+        f'innotel_estate_media_app_solver_oom_kills{{app="{SOLVER}"}} {readings.get("oom_kill", -1)}',
+        "# HELP innotel_estate_media_app_solver_memory_current_bytes What the solver's cgroup holds now",
+        "# TYPE innotel_estate_media_app_solver_memory_current_bytes gauge",
+        f'innotel_estate_media_app_solver_memory_current_bytes{{app="{SOLVER}"}} {readings.get("memory_current", -1)}',
+        "# HELP innotel_estate_media_app_solver_memory_max_bytes The solver's own cap, from its cgroup",
+        "# TYPE innotel_estate_media_app_solver_memory_max_bytes gauge",
+        f'innotel_estate_media_app_solver_memory_max_bytes{{app="{SOLVER}"}} {readings.get("memory_max", -1)}',
+        "# HELP innotel_estate_media_app_solver_http_5xx 5xx the solver answered in the last hour",
+        "# TYPE innotel_estate_media_app_solver_http_5xx gauge",
+        f'innotel_estate_media_app_solver_http_5xx{{app="{SOLVER}"}} {readings.get("http_5xx", -1)}',
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -309,12 +412,13 @@ def main(argv: list[str] | None = None) -> int:
         text = read_host(args.host, args.target, command())
         observed = parse(text)
         configs = parse_configs(text)
+        solver = parse_solver(text)
     except Exception as error:  # noqa: BLE001 — any ssh failure is the same finding here
         print(f"check-media-apps: could not read {args.host}: {error}", file=sys.stderr)
         emit(None, ran=False)
         return 2
 
-    result = audit(observed, configs)
+    result = audit(observed, configs, solver)
     if args.json:
         print(json.dumps([f.__dict__ for f in result.findings], indent=2))
     else:
@@ -325,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         for finding in result.findings:
             print(f"{finding.level.upper()} {finding.message}")
 
-    emit(result, ran=True, extra=prometheus_extra(observed, configs))
+    emit(result, ran=True, extra=prometheus_extra(observed, configs, solver))
     return 0 if result.ok else 1
 
 
