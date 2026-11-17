@@ -31,7 +31,7 @@ Usage (needs both management APIs; credentials are read from the environment):
         ./scripts/sync-mail-identities.py --apply        # create the missing users
 
 Exit codes: 0 = in sync (or dry run with a plan), 1 = `--apply` was refused for some user,
-2 = an API could not be read.
+2 = an API could not be read (a read that times out is retried once first).
 """
 from __future__ import annotations
 
@@ -40,20 +40,59 @@ import base64
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
+#: A read that times out is a slow answer, not a refused mirror, so it is retried rather
+#: than reported. On 2026-11-16 one `TimeoutError: The read operation timed out` from
+#: Stalwart's JMAP response ended a run with **exit 1** — the code this script uses for
+#: "`--apply` was refused for a user" — while every mailbox already had its identity, and
+#: `scripts/check-mail-identities.py` could only read the code, so it announced a refused
+#: user who did not exist. The body read is the part that times out, and it is safe to
+#: repeat because it changes nothing; see `read_json` for why a write is never retried.
+READ_TIMEOUT_SECONDS = 30
+READ_ATTEMPTS = 2
+READ_BACKOFF_SECONDS = 2.0
 
-def read_json(url: str, auth: dict[str, str], data: dict | None = None, method: str | None = None):
+
+def _read_json_once(url: str, auth: dict[str, str], data: dict | None, method: str | None):
     body = json.dumps(data).encode() if data is not None else None
     headers = {"Accept": "application/json", **auth}
     if body is not None:
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=body, headers=headers, method=method)
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=READ_TIMEOUT_SECONDS) as response:
         payload = response.read().decode()
         return json.loads(payload) if payload.strip() else {}
+
+
+def read_json(url: str, auth: dict[str, str], data: dict | None = None, method: str | None = None):
+    """One API call, retried once when a **read** times out.
+
+    `urlopen`'s timeout covers the response body as well as the connect, and a body that
+    arrives too slowly raises `TimeoutError` out of `response.read()` — not the `URLError`
+    that surrounds a failed connect — which is why both are named here.
+
+    A write is tried once. A `POST` whose reply timed out may already have created the
+    user, and repeating it turns one slow answer into a duplicate-username rejection that
+    would be reported as a user this script failed to mirror.
+    """
+    idempotent = method in (None, "GET")
+    attempts = READ_ATTEMPTS if idempotent else 1
+    attempt = 1
+    while True:
+        try:
+            return _read_json_once(url, auth, data, method)
+        except (TimeoutError, urllib.error.URLError) as error:
+            if attempt >= attempts:
+                raise
+            attempt += 1
+            print(f"sync-mail-identities: {error} — retrying read ({attempt}/{attempts})",
+                  file=sys.stderr)
+            time.sleep(READ_BACKOFF_SECONDS * attempt)
+
 
 
 def stalwart_accounts(base: str, admin: str) -> list[tuple[str, str]]:
@@ -168,7 +207,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         accounts = stalwart_accounts(stalwart_url, stalwart_admin)
         existing = authentik_users(api, token)
-    except (urllib.error.URLError, KeyError, ValueError) as error:
+    # `OSError` is both of the ways a read fails here: a `URLError` when the connect does
+    # not happen and a `TimeoutError` when the body does not arrive. Neither is a verdict
+    # about a mailbox, so both are exit 2 — "could not read it" is never "refused".
+    except (OSError, KeyError, ValueError) as error:
         print(f"sync-mail-identities: could not read an estate API: {error}", file=sys.stderr)
         return 2
 

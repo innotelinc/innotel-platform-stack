@@ -224,6 +224,29 @@ groups:
             {{ $value | humanizeDuration }} ago. Either the timer is gone or every run
             since has failed; both mean that invariant is unwatched.
 
+      # A check is only as fresh as the timer that runs it. `EstateCheckAbsent` speaks
+      # about a series that is *gone*, and `EstateCheckStale` waits a whole day for a
+      # clean run, so a textfile that is still scraped but has not moved since yesterday
+      # satisfies both while asserting nothing — which is the shape a stopped timer takes,
+      # and the reason the jobs that retry on their own (the mailbox mirror among them,
+      # docs/estate-alerts-ntfy.md) publish a series instead of an `OnFailure=` message:
+      # a frozen textfile is the only trace a stopped retry leaves. Two hours is four
+      # missed runs of the 30-minute timer, so a slow host cannot trip it.
+      - alert: EstateCheckNotRunning
+        expr: (time() - innotel_estate_check_last_run_timestamp) > 2 * 60 * 60
+        for: 15m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: 'The {{ $labels.check }} check has not run in two hours'
+          description: >-
+            The last `{{ $labels.check }}` run reported {{ $value | humanizeDuration }} ago,
+            so its textfile is still being scraped but has not moved since. The timer that
+            runs it is stopped, or every run since died before writing: nothing is watching
+            this invariant now, whatever the last reading said. Check
+            `systemctl list-timers estate-checks.timer` and the unit's journal on the edge.
+
       - alert: EstateCheckNotPinned
         expr: innotel_estate_check_warnings > 0
         for: 1h

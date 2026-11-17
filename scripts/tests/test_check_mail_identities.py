@@ -93,6 +93,25 @@ class Parse(unittest.TestCase):
     def test_a_missing_message_is_empty_rather_than_unknown_text(self):
         self.assertEqual(chk.parse("result:success\n").last_message, "")
 
+    def test_the_mailboxes_the_run_named_are_read_from_its_log(self):
+        # `FAILED` carries its own colon, so the lines cross ssh joined by ESC rather than
+        # by newlines — the parse has to split on that, not on the first colon.
+        report = FAILED.replace(
+            "message:TimeoutError: The read operation timed out\n",
+            "message:  FAILED b@example.com: 400 {\"username\": [\"already exists\"]}\n"
+            "unmirrored:  MISSING a@example.com\x1f  FAILED b@example.com: 400 rejected\x1f"
+            "  CREATED c@example.com (pk=3)\x1f  MISSING a@example.com\n",
+        )
+        facts = chk.parse(report)
+        self.assertEqual(facts.planned, ["a@example.com"])
+        self.assertEqual(facts.refused, ["b@example.com"])
+        # Refused first: those are the ones still without an identity *after* --apply ran.
+        self.assertEqual(facts.unmirrored, ["b@example.com", "a@example.com"])
+
+    def test_a_created_address_is_not_a_gap(self):
+        facts = chk.parse(CLEAN + "unmirrored:  CREATED c@example.com (pk=3)\n")
+        self.assertEqual(facts.unmirrored, [])
+
 
 class Verdict(unittest.TestCase):
     def test_a_clean_fresh_run_is_a_note_and_not_a_failure(self):
@@ -109,6 +128,23 @@ class Verdict(unittest.TestCase):
         message = result.findings[0].message
         self.assertIn("(1)", message)
         self.assertIn("TimeoutError", message)
+
+    def test_a_failed_run_names_the_mailbox_it_could_not_mirror(self):
+        # The sentence a person needs: which address, not how many runs went wrong.
+        report = FAILED.replace(
+            "message:TimeoutError: The read operation timed out\n",
+            "message:  FAILED b@example.com: 400 rejected\n"
+            "unmirrored:  FAILED b@example.com: 400 rejected\n",
+        )
+        result = chk.audit(chk.parse(report))
+        self.assertEqual(codes(result), ["last_run_failed"])
+        self.assertIn("b@example.com", result.findings[0].message)
+
+    def test_a_crash_that_named_no_mailbox_says_nothing_about_one(self):
+        # 2026-11-16 itself: a timeout named no address, and the check does not invent one.
+        result = chk.audit(chk.parse(FAILED))
+        self.assertIn("TimeoutError", result.findings[0].message)
+        self.assertNotIn("mailboxes with no identity", result.findings[0].message)
 
     def test_a_refusal_is_named_when_the_log_says_nothing(self):
         # Without a logged line the check still fails, and names the documented reason — it
@@ -175,6 +211,22 @@ class Signal(unittest.TestCase):
     def test_an_unreadable_run_publishes_no_age(self):
         # A run that could not happen has no age to report; inventing one would hide it.
         self.assertIsNone(chk.metric_age(chk.parse("now:100\n")))
+
+    def test_a_failed_run_publishes_one_series_per_mailbox(self):
+        facts = chk.parse(
+            FAILED + "unmirrored:  FAILED b@example.com: 400 rejected\x1f  MISSING a@example.com\n")
+        text = chk.metrics(facts)
+        self.assertIn(
+            'innotel_estate_check_mail_identities_unmirrored{check="mail_identities",'
+            'mailbox="b@example.com"} 1', text)
+        self.assertIn('mailbox="a@example.com"', text)
+        self.assertIn('innotel_estate_check_mail_identities_age_seconds', text)
+
+    def test_a_clean_run_publishes_no_unmirrored_series(self):
+        # A clean `--apply` run prints what it created; those addresses are not gaps, and a
+        # series left over from an earlier failure must not survive a green run.
+        facts = chk.parse(CLEAN + "unmirrored:  CREATED c@example.com (pk=3)\x1f  MISSING d@example.com\n")
+        self.assertNotIn("unmirrored", chk.metrics(facts) or "")
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -239,7 +239,8 @@ class RuleCase(unittest.TestCase):
         self.assertIn("{{ $labels.check }}", block)
 
     def test_the_other_rules_reference_the_shared_family(self):
-        for alert in ("EstateCheckFailing", "EstateCheckCouldNotRun", "EstateCheckStale", "EstateCheckNotPinned"):
+        for alert in ("EstateCheckFailing", "EstateCheckCouldNotRun", "EstateCheckStale",
+                      "EstateCheckNotPinned", "EstateCheckNotRunning"):
             self.assertIn("innotel_estate_check", _block(self.text, alert), alert)
 
     def test_the_stale_window_is_a_whole_day(self):
@@ -249,6 +250,16 @@ class RuleCase(unittest.TestCase):
         block = _block(self.text, "EstateCheckStale")
         self.assertRegex(block, r">\s*24\s*\*\s*60\s*\*\s*60")
         self.assertIn("24 hours", block)
+
+    def test_a_frozen_textfile_has_its_own_rule(self):
+        # `EstateCheckAbsent` only speaks about a series that is gone and `EstateCheckStale`
+        # waits a whole day for a clean run, so a textfile that is scraped but no longer
+        # written — the shape a stopped timer takes — read green under both. Two hours is
+        # four missed runs of the 30-minute timer.
+        block = _block(self.text, "EstateCheckNotRunning")
+        self.assertIn("last_run_timestamp", block)
+        self.assertRegex(block, r">\s*2\s*\*\s*60\s*\*\s*60")
+        self.assertIn("two hours", block)
 
     def test_the_promtool_test_carries_every_branch(self):
         # `EstateCheckAbsent` fires on a series that is *missing*, so the only way to
