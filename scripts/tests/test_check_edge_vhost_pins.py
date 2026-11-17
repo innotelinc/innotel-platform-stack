@@ -11,10 +11,12 @@ that serves video).
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
@@ -413,6 +415,40 @@ class CredentialTest(unittest.TestCase):
     def test_an_unreachable_panel_is_unreadable_not_empty(self):
         with self.assertRaises(pins.Unreadable):
             pins.token_for("http://127.0.0.1:1", "a@b", "secret")
+
+
+class CliCredentialTest(unittest.TestCase):
+    """A missing credential must fail the run *and* the metric it publishes.
+
+    The unit starts every check with `-`, so the exit status is not what reaches
+    anyone — the textfile is. A run that could not ask NPM anything has to leave
+    `last_status` at 0, the value `estate-checks.yml` pages on; writing the 1 a
+    clean run writes would make a check that never ran read as the estate's
+    tidiest, which is the silent pass this check exists to prevent.
+    """
+
+    def test_no_credential_fails_the_run_and_the_metric(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "nginx" / "proxy_host").mkdir(parents=True)
+            (root / "nginx" / "proxy_host" / "215.conf").write_text(
+                VHOST.format(domain="app.ontrak.technology", host="192.168.1.21",
+                             port=3002),
+                encoding="utf-8")
+            declaration = root / "pins.tsv"
+            declaration.write_text("app.ontrak.technology\t192.168.1.21\t3002\n",
+                                   encoding="utf-8")
+            metric = root / "pins.prom"
+            with mock.patch.dict(os.environ,
+                                 {"NPM_ADMIN_EMAIL": "", "NPM_ADMIN_PASSWORD": ""}):
+                code = pins.main(["--config-dir", str(root / "nginx"),
+                                  "--pins", str(declaration),
+                                  "--redirect-pins", "none",
+                                  "--prom", str(metric)])
+            self.assertEqual(code, 2, "a credential it does not have is not a clean estate")
+            body = metric.read_text(encoding="utf-8")
+            self.assertIn('innotel_estate_check_last_status{check="edge_vhost_pins"} 0', body)
+            self.assertNotIn('innotel_estate_check_last_status{check="edge_vhost_pins"} 1', body)
 
 
 class ReportTest(unittest.TestCase):
