@@ -102,6 +102,22 @@ class Age(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(codes(result), [("missing-secret", "fail")])
 
+    def test_the_window_is_sixty_days_and_the_unit_says_so(self):
+        # Two numbers decide when an operator is told: the default here and the flag the
+        # timer passes. A test that only pinned one would let them part company, and the
+        # check would report one window while the estate ran another.
+        self.assertEqual(check.DEFAULT_MAX_AGE_DAYS, 60.0)
+        unit = (SCRIPTS.parent / "systemd" / "estate-checks.service").read_text()
+        line = next(l for l in unit.splitlines()
+                    if l.startswith("ExecStart=") and "check-credential-age.py" in l)
+        self.assertIn(f"--max-age-days {check.DEFAULT_MAX_AGE_DAYS:.0f}", line)
+
+    def test_a_secret_past_sixty_days_is_already_warning(self):
+        result = check.audit(["cerulean/mailjet"], check.DEFAULT_MAX_AGE_DAYS,
+                             addr="http://v", token="t",
+                             reader=reader_for({"cerulean/mailjet": 61.0}), now=NOW)
+        self.assertEqual(codes(result), [("overdue", "warn")])
+
     def test_only_metadata_is_read(self):
         reader = reader_for({"cerulean/mailjet": 1.0})
         check.audit(["cerulean/mailjet"], 90, addr="http://v:8200", token="tok",

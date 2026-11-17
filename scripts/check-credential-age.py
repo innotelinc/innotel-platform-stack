@@ -24,8 +24,10 @@ nothing else; the `data` paths are not granted.
 
 THE RULES
 ---------
-1. A secret whose current version is older than `--max-age-days` is a **warning**: it still
-   works, which is exactly why nothing else notices it.
+1. A secret whose current version is older than `--max-age-days` (60 by default) is a
+   **warning**: it still works, which is exactly why nothing else notices it. The window
+   sits inside the 90-day rotation policy on purpose — it starts the conversation a month
+   before the policy would, so a rotation can be scheduled rather than squeezed in.
 2. A secret that is current states its age as a **note**, so "ok" says how fresh the answer
    is and a secret that stops being written does not go quiet.
 3. A vault that cannot be read — no token, no address, a denied policy, a transport error —
@@ -61,7 +63,7 @@ CHECK = "credential_age"
 #: The pair that caused this check to exist. `--path` adds to it rather than replacing it,
 #: so a second credential does not silently drop the first from the audit.
 DEFAULT_PATHS = ("cerulean/mailjet",)
-DEFAULT_MAX_AGE_DAYS = 90.0
+DEFAULT_MAX_AGE_DAYS = 60.0
 #: Where a person is told to look when the overdue secret is the one this check was written
 #: for. The message names a runbook, never a value.
 ROTATION_DOCS = {
