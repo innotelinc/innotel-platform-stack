@@ -42,3 +42,8 @@ iptv.innotel.us	192.168.1.56	14016	Jellyfin direct publish — the watch door th
 # vhost forwards there unrewritten. Pinned so a regeneration cannot send the name back to a
 # managed host, and so a dark target fails this check instead of an App Store reviewer.
 mint.innotel.tech	192.168.1.113	8930	Mintmark site on our own box — one origin since 2026-11-16, no Host rewrite
+# `app` is the family's control-plane door and had no vhost at all until 2026-11-17: the
+# container was up and healthy on :3002 while `app.ontrak.technology` did not resolve. It is
+# pinned because that door is the only way in, and a regeneration that dropped it would leave
+# a healthy app nobody could reach.
+app.ontrak.technology	192.168.1.21	3002	OnTrak control-plane app — the family's second front on the training build
