@@ -1,0 +1,59 @@
+#!/bin/bash
+# Kill the Chromium trees a failed FlareSolverr solve left behind.
+#
+# Measured 2026-11-17: flaresolverr held 78 `chromium` processes under one two-hour-old
+# browser, **zero** requests in the hour before, and no `chromedriver` alive — the tree a
+# solve leaves when its driver dies — while the cgroup sat at its 3 GiB cap and the next
+# solve was the one the kernel killed. Serialising solves (`threads = 1` in
+# sitecustomize.py) cannot reach that, and neither can a reaper *inside* the container:
+# that one got PermissionError for every PID, because the trees are not owned by the user
+# the app runs as. Root on the host owns them.
+#
+# 300 s is the ceiling because prowlarr's requestTimeout is 180 s: a browser that has been
+# part of a session for five minutes cannot belong to a solve anyone is still waiting for.
+#
+# The age comes from `ps -o etimes=` and deliberately not from /proc/uptime: Incus masks
+# uptime per container, so `uptime - starttime` is *negative* here and no process is ever
+# old enough to kill (measured 2026-11-17 — the first version of this file reported
+# "killed 0" against a fake browser started seconds earlier with a zero-second ceiling).
+#
+# It reads the whole ancestry, and that half is not decoration. When a browser crashes inside
+# a live session, ChromeDriver relaunches it: the browser processes are then always seconds
+# old while the session that owns them is not, and a rule that only looks at each process's
+# own age never fires. Measured 2026-11-17: one 90-minute-old `chromedriver`, 65 fresh
+# `chromium` children, the cgroup at its 3 GiB cap and 1033 OOM kills, no solve in the log —
+# the age-only version had been running every five minutes and killed nothing.
+set -u
+name=${FLARESOLVERR_NAME:-flaresolverr}
+ceiling=${FLARESOLVERR_CHROMIUM_MAX_AGE_S:-300}
+id=$(docker inspect -f '{{.Id}}' "$name" 2>/dev/null) || exit 0
+[ -n "$id" ] || exit 0
+scope=/sys/fs/cgroup/system.slice/docker-$id.scope
+[ -d "$scope" ] || exit 0
+killed=0
+# Is one process part of the browser family? `comm` is truncated to 15 characters, which is
+# longer than every name here, so the comparison is exact.
+family() {
+  case "$(cat "/proc/$1/comm" 2>/dev/null)" in chromium|chrome|chromedriver) return 0 ;; esac
+  return 1
+}
+# Is this process, or any browser-family ancestor of it, past the ceiling? The walk stops at
+# PID 1, at a non-browser ancestor (the app itself), or after eight hops — a browser tree is
+# deeper than eight only if something is already wrong.
+too_old() {
+  local pid=$1 age
+  for _ in 1 2 3 4 5 6 7 8; do
+    [ -n "$pid" ] && [ "$pid" != 0 ] && [ "$pid" != 1 ] || return 1
+    family "$pid" || return 1
+    age=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ -n "$age" ] || return 1
+    [ "$age" -ge "$ceiling" ] && return 0
+    pid=$(awk '/^PPid:/{print $2}' "/proc/$pid/status" 2>/dev/null)
+  done
+  return 1
+}
+for pid in $(cat "$scope/cgroup.procs" 2>/dev/null); do
+  family "$pid" || continue
+  too_old "$pid" && kill -9 "$pid" 2>/dev/null && killed=$((killed + 1))
+done
+echo "flaresolverr-reap-chromium: killed $killed browser process(es) with a ${ceiling}s-old self or ancestor (of $(grep -c . "$scope/cgroup.procs" 2>/dev/null) in the cgroup)"

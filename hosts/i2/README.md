@@ -26,6 +26,7 @@ parameter that no container can set.
 | `../../scripts/restore-proxy.sh` | `/usr/local/sbin/restore-proxy.sh` on i2 (run by hand when restoring) |
 | `proxy-backup/proxy-backup.service` | `/etc/systemd/system/proxy-backup.service` on i2 (host) |
 | `proxy-backup/proxy-backup.timer` | `/etc/systemd/system/proxy-backup.timer` on i2 (host) |
+| `monarch/flaresolverr/` | inside `monarch`: the `/patch/sitecustomize.py` mount, plus the Chromium reaper and its units on the host — see [its README](monarch/flaresolverr/README.md) |
 
 ## Install / re-apply
 

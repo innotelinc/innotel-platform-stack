@@ -37,6 +37,17 @@ Environment=TEXTFILE_DIR=/var/lib/node_exporter/textfile
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-addresses.py --prom ${TEXTFILE_DIR}/estate-check-container-address.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-limits.py --prom ${TEXTFILE_DIR}/estate-check-container-limits.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-inventory.py --prom ${TEXTFILE_DIR}/estate-check-estate-inventory.prom
+
+# And that a container which is *running* would still be running after a reboot
+# (2026-11-17). `boot.autostart=false` is the quiet half of every move: it is right while
+# a copy is being parked and wrong the moment the move finishes, and nothing is visibly
+# broken in between — the instance answers every probe and disappears at the next boot.
+# All nine of `i2`'s instances carried it on the day the host rejoined the estate, and a
+# reboot would have taken the media stack, its Prometheus, the NAS and the rest with it.
+# `check-retired-instances.py` asserts the other direction (instances that must stay
+# down); this asserts that everything else comes back, with `onyx`'s USB-disk dependency
+# carried as a named exemption that is published as a note rather than passed over.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-autostart.py --prom ${TEXTFILE_DIR}/estate-check-container-autostart.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-address-latency.py --prom ${TEXTFILE_DIR}/estate-check-address-latency.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-host-disk.py --prom ${TEXTFILE_DIR}/estate-check-host-disk.prom
 

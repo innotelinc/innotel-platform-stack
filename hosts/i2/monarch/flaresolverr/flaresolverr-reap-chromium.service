@@ -1,0 +1,6 @@
+[Unit]
+Description=Reap Chromium trees an abandoned FlareSolverr solve left behind
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/flaresolverr-reap-chromium
