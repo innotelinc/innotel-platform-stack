@@ -1559,4 +1559,12 @@ placement (finding 7).
   label `main-pool`) that is attached there now. The `tank` pool its `onyx-data` device
   names exists again on `i1` (`source=tank/onyx`), so the instance definition needed no
   edit; the instance came over as `incus copy onyx i1:onyx`, and the stopped `i3` copy is
-  kept as `onyx-retired` rather than deleted.
+  kept as `onyx-retired` rather than deleted. That copy needed a retry loop, not one pass:
+  it aborted twice at **5.32 GB** while `i1` logged `cowsql: Failed to get current raft
+  members` (`i1` is a single-member cluster, so it was left to recover rather than
+  restarted), and the killed export probes left two non-cancelable `Backing up instance`
+  tasks wedged in `i3`'s `incusd` — `incus operation delete` refuses them with an
+  `authorization object` error, so the daemon was restarted (containers keep running) and
+  the retry loop finished at 29.8 MB/s. `incus copy` also mints a new
+  `volatile.eth0.hwaddr`; it was set back to `10:66:6a:60:d4:9d` before the start, so the
+  container still answers on `.60`.
