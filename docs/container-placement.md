@@ -24,22 +24,38 @@ estate as it is, not as it was.
   route and nameserver on `192.168.1.1`) — the same shape `ontrak` uses to hold `.21`. No
   address, route or resolver changed: `netplan apply` kept `.113` and the check now reports
   zero warnings. Pre-change copy in the container at `/root/10-lxc.yaml.bak-20261116`.
-- **Three `limits.cpu` values were above the host that enforces them.** `i1 atheniq` was
-  `6` on a 4-CPU host, `i3 copilotkit` `6` on a 4-CPU host, and `i4 proxy` `4` on a 2-CPU
-  host — incus clamps each to the host, so the written cap was not the fenced one and
-  `check-container-limits.py` warned on all three. Each is now the count the host can
-  actually give (`4`, `4`, `2`). All three were already pinned to their host's whole CPU
-  set, so scheduling did not change; the config now says what the kernel does. Verified
-  live: `cpuset.cpus.effective` reads `0-3`, `0-3` and `0-1`, and the check reports zero
-  warnings. (A cap *below* the host count — the stronger fence this page argues for — is a
-  capacity decision, not this correction.)
+- **CPU caps no longer reach the whole host.** `i1 atheniq` was `6` on a 4-CPU host, `i3
+  copilotkit` `6` on 4, and `i4 proxy` `4` on 2 — incus clamped each, so the written cap
+  was not the fenced one and `check-container-limits.py` warned on all three. They were
+  first written to the count the host enforces (`4`, `4`, `2`) and then tightened to the
+  fence this page argues for, so **no container can claim a whole host**: `atheniq` and
+  `workloads` **3** on i1, `copilotkit` **3** on i3, and `proxy`, `telno` and `sage` **1** on
+  i4. Verified live: `cpuset.cpus.effective` is `0-2`, `1-3`, `0,2-3`, `1` and `0`, and the
+  check reports zero warnings.
 - **`iptv.innotel.us/Branding/Splashscreen` answered 502 because Jellyfin was down, not
   because the vhost was wrong.** The `jellyfin` container's current run began at 18:29 UTC
   with `i2`'s return and it has not restarted since (`RestartCount=0`). The door answers
   **200 `image/png`, 344 514 bytes** through NPM and directly on `192.168.1.56:14016`, every
   `Accept` variant the `Vary` header distinguishes, and `check-media-doors.py` is green on
   all three assertions. No edge change was needed: there is no `proxy_cache` in front of
-  this vhost, so the 502 was never cached and the door recovered with the app.
+  this vhost, so the 502 was never cached and the door recovered with the app. A gateway
+  status is now its own finding — `watch-gateway`, `front-gateway`, `branding-gateway` —
+  because "the edge could not reach Jellyfin" is a different repair from "something else
+  answered", and the next start-up window should read as the app rather than as a
+  misrouted vhost.
+
+- **`i2`'s `chromedriver` zombies were FlareSolverr failing to reap, not a stuck process.**
+  Fifteen of them accumulated in under an hour, one per `/v1` request: Prowlarr pings
+  `prowlarr.servarr.com/v1/ping` through FlareSolverr every couple of minutes, and on a
+  crashed tab selenium's `Service._terminate_process()` raises `PermissionError` from
+  `os.kill()`, and its retry calls `process.kill()` through the same `Popen.send_signal`,
+  so teardown aborts before `Popen.wait()` and the exited driver is never reaped. The fix is
+  in the **monarch** repo's existing `flaresolverr/sitecustomize.py` (mounted at `/patch`,
+  `PYTHONPATH=/patch`): it swallows `PermissionError` in `Popen.send_signal`, so a signal
+  that cannot be delivered no longer aborts the teardown and Selenium's own `wait()` reaps
+  the child. Verified by sending the same request three times after the restart: **0
+  zombies**, no `Error terminating service process` in the log, and
+  `check-zombie-processes.py` green.
 
 ## Changes applied 2026-11-16 — `i2` is decommissioned
 
