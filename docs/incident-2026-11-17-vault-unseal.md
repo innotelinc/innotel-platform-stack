@@ -120,3 +120,14 @@ with the previous file kept beside it as `ontrak.token.bak-20261117`. A future r
 enumerate consumers that mount a token — not ones that log in through an AppRole — before
 the barrier is touched, not after: `grep -rl 'vault/token' ` across the estate is the cheap
 version of this step.
+
+`genesis` is the second instance of the same trap, and the one that proves the check belongs
+in the enumerate-first step rather than in a cleanup pass. It mounts its own copy at
+`/opt/genesis/data/vault/token/genesis.token` inside the `genesis` incus container
+(i1 `.66`) and resolves `vault://cerulean/genesis` for `SESSION_SECRET` and
+`OIDC_CLIENT_SECRET` at boot. Its stale file was a 96-byte token from 2026-10-01, so every
+boot logged `vault: reading cerulean/genesis failed (HTTP 403)` and exited 1 — twelve
+restarts by the time anyone looked. The re-minted file is 95 bytes and was verified by
+`sha256` against the Vault host, with the old one kept as `genesis.token.bak-20261117`.
+After the swap it resolves both references and stays up with no 403s: the byte count differs
+between the old and new token, so compare the digest, never the length.
