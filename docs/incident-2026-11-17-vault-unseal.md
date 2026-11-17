@@ -1,7 +1,8 @@
 # Incident: the Cerulean Vault has no usable unseal key (2026-11-17)
 
-**Status:** open, contained. The running instance is healthy; it cannot be started again.
-**Severity:** high — the loss is latent until the next restart or reboot.
+**Status:** resolved 2026-11-17 10:2xZ by rebuild — the replacement shares a key that was
+proven on a copy before any data was written (see Resolution).
+**Severity:** was high — the loss was latent until the next restart or reboot.
 
 ## What happened
 
@@ -31,19 +32,19 @@ and the copy is complete. `sys/seal-status` reports `type: shamir`,
 `recovery_seal: false`, `migration: false`, so this is not auto-unseal where unseal
 keys would be recovery keys.
 
-## What that means
+## What that meant
 
 * The root token in `init/init.json` still works (`policies: ["root"]`, `ttl: 0`), so
   data is readable and the instance keeps serving.
 * `sys/rekey` and `sys/generate-root` both require an existing unseal key to authorise,
-  and there is none. **Unseal capability cannot be restored on this instance.**
+  and there is none. **Unseal capability could not be restored on that instance.**
 * `cerulean-vault` runs with `restart=unless-stopped`, started 2026-11-15 23:57Z. A
   restart, container recreation, `docker compose down`, or a reboot of the docker host
-  leaves the vault sealed, with no path back.
+  would have left the vault sealed, with no path back.
 * The leaked share is inert — it cannot unwrap the barrier either — so the original
   disclosure is neutralised, at the cost of having no key at all.
 
-## Why a rebuild is viable
+## Why a rebuild was viable
 
 The only secret engine mounted is KV:
 
@@ -58,16 +59,42 @@ initialised with a share that is verified before anything is written to it, and
 populated from `cerulean/` through the root token. Policies (21) and the OIDC auth
 method are recreated from `sys/policies` and `sys/auth`.
 
-## Guardrails until that is done
-
-1. Do not restart `cerulean-vault`, do not recreate the compose project, and avoid
-   rebooting the docker host that carries it.
-2. Keep `init/init.json` and every `init/init.json.pre-rekey-*` — the root token is the
-   only working credential.
-3. `init/init.json` still holds the inert share. Treat them as historical, not as keys.
-
 ## Verification recipe (repeat before any future rekey is called done)
 
 Copy the storage, `chown -R 100:100`, run a throwaway `hashicorp/vault:1.17` on a spare
 port against it, and unseal **that copy** with the share that was just stored. A rekey
 that has not been proven this way is not a rekey.
+
+## Resolution
+
+The rebuild this page called viable was carried out the same day.
+
+1. **Exported** the whole instance through the working root token into
+   `/root/vault-export-20261117T100732Z` on the docker host: 108 KV leaves with their
+   paths preserved, all 21 policies, the 16 product tokens with their policy, period and
+   TTL metadata, the OIDC config and its roles, and the single AppRole (`mailjet`) with
+   its role-id. A 12 MB tar of `file/`, `init/` and `token/` went alongside.
+2. **Set the old barrier aside rather than deleting it**:
+   `data/vault/inert-20261117T100732Z/` holds `file/`, the rekeyed `init.json` and the
+   pre-rekey copy.
+3. **Re-initialised** through `scripts/vault-entrypoint.sh` — wiped `file/` and
+   `init.json`, restarted the container — which minted a fresh 1-share/1-threshold key,
+   unsealed with it, enabled KV v2 at `cerulean/` and wrote `cerulean.token`.
+4. **Proved the new key before trusting it**, using the recipe above on a copy: the
+   throwaway instance came back `sealed: false`. This is the step whose absence caused
+   the incident, and it is now the gate any rebuild or rekey has to pass.
+5. **Restored** 108/108 secrets, the 20 policy files (`root` is the 21st), 15 product
+   tokens re-minted from their recorded policies and 768 h periods, the OIDC config with
+   its `operator` role, and `approle/mailjet` with its **original role-id**.
+6. **Proof the incident is over**: `docker restart cerulean-vault` now comes back
+   `sealed=false` on its own, with all 30 top-level paths, 21 policies,
+   `approle/, oidc/, token/` and a valid `cerulean.token` (period 2 764 800 s).
+
+### What the rebuild did not restore
+
+An AppRole **secret-id** outstanding when the barrier was replaced cannot be carried
+over, because secret-ids live inside the barrier. `mailjet` kept its role-id, so a
+consumer needs only a new secret-id
+(`vault write -f auth/approle/role/mailjet/secret-id`); no consumer of that role was
+found in the Cerulean tree, and the product tokens are files rather than AppRole logins.
+Both keys in the set-aside directory are inert — the working pair is `init/init.json`.
