@@ -1,7 +1,13 @@
-# Removing the Codebuff trailers from the platform-stack history — plan, not applied
+# Removing the Codebuff trailers from the platform-stack history — applied 2026-11-17
 
-**Status: not applied. Needs an explicit go-ahead, because applying it rewrites published
-history and requires a force-push to `main`.**
+**Status: applied on 2026-11-17, after an explicit go-ahead.** The rewrite was made on a
+mirror clone, verified (message clean, added-line clean, `fsck` clean, same commit count,
+tree identical except the line in this document that quoted the footer), and pushed with
+`--force-with-lease` pinned to the then-current tip. `223bd43` became `559e21c`; every
+commit from the oldest offending one onward has a new SHA, and the file contents a
+checkout ends with are unchanged apart from the quoted footer in this document, which now
+reads "the codebuff footer" so the guard's phrase rule is not tripped by the record of the
+removal itself.**
 
 ## Why
 
@@ -85,10 +91,11 @@ The bundle and the mirror clone are the rollback: `git push --force-with-lease o
 <old-tip>:main` restores the previous history, and the guard returns to failing exactly as
 it does now. Nothing in the tree needs restoring.
 
-## Why this is not done automatically
+## Why it needed a go-ahead first
 
 A force-push to a protected default branch is destructive and hard to undo for anyone
-holding an old clone, and the user has not authorized it. The two alternatives are both
+holding an old clone. It was done only after the owner asked for it, with the backup below
+kept on disk. The two alternatives are both
 worse: adding `.githooks/attribution-baseline` would silence the guard over the offending
 range instead of removing the trailers (and the guard exists to prevent exactly that kind of
 silencing), and leaving it red means the guard's verdict carries no information.
