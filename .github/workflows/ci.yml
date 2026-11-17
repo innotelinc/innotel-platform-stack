@@ -132,6 +132,20 @@ jobs:
           python3 scripts/fetch-group-members.py "$root"
           python3 scripts/gen-group-compose.py --root "$root" --check
 
+      # The step above asks the generator; the estate's timer asks
+      # `check-group-compose-freshness.py`, which is the same comparison by another route
+      # and is the series the `GroupComposesFresh` alert reads. It clones the stack repo
+      # when it runs on the edge; in CI `--stack-dir` points it at this checkout, so the
+      # pushed `groups/` files are what gets compared, and `--root` reuses the members the
+      # step above already fetched. A rule that only ever failed on the host now fails
+      # here first.
+      - name: Group compose freshness (the timer's own check)
+        run: |
+          set -euo pipefail
+          root="$(mktemp -d)"
+          python3 scripts/fetch-group-members.py "$root"
+          python3 scripts/check-group-compose-freshness.py --stack-dir "$PWD" --root "$root"
+
       # A `vault://` reference is only better than a plaintext secret if it
       # resolves, and an unresolvable one looks configured in every review: the
       # conversion plan's Phase 2 pass found Atlas's Vault path holding one of
