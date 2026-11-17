@@ -116,20 +116,14 @@ CHECK_SCRIPTS = [
     # weeks with nothing reporting it. It arrived with a branch, because the whole point of
     # the check is that the leak is silent: a textfile that stops arriving must be named.
     "check-zombie-processes",
-    # The age of a vault-held credential (2026-11-17): a secret that is never
-    # rotated looks identical to one rotated yesterday, which is why nothing else
-    # could have reported the Mailjet pair. It arrived with a branch.
+    # The age of a vault-held credential (2026-11-17). A secret that is never rotated looks
+    # identical to one rotated yesterday, which is why nothing else could have reported the
+    # Mailjet pair; it arrived with a branch like every other check in this list.
     "check-credential-age",
-    # And the shape of the history rather than the moment (2026-11-17): a check
-    # that goes red and green every few runs costs the same attention as an
-    # outage and looks like neither.
+    # And the shape of the history rather than the moment (2026-11-17): a check that goes
+    # red and green every few runs costs the same attention as an outage, and looks like
+    # neither. Its own textfile is the only witness to a check that stops reporting.
     "check-estate-flaps",
-    # retired_instances publishes into the family from the unit already, and had no line
-    # here — which is the silent-absence this list exists to catch.
-    "check-retired-instances",
-    # sso_redirects publishes into the family from the unit already, and carried no
-    # line here — the silent absence this list exists to catch.
-    "check-sso-redirects",
 ]
 
 
