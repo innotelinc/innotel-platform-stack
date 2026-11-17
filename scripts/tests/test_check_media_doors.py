@@ -57,21 +57,81 @@ SEARCH_CSS_HASH = "b1c2d3e4f5061728394b"
 ACTIVITY_JS_HASH = "c1d2e3f4051627384950"
 INDEX = (b'<!doctype html><html><head><title>Jellyfin</title>'
          b'<script src="runtime.bundle.js?d66e3c0638b9381c83a7"></script></head></html>')
-RUNTIME_BODY = (
-    b'{"27424":"mn-json",27962:"home",28110:"livetvguideprovider",80187:"search",88788:"activity"};'
-    b'{"27884":"a81bf06d441dff4daa07",27962:"' + JS_HASH.encode()
-    + b'",28048:"af136e13aa9d3b08b468",80187:"' + SEARCH_JS_HASH.encode()
-    + b'",88788:"' + ACTIVITY_JS_HASH.encode() + b'"};'
-    b'{"27884":"bda8d58a4ecedec16b11",27962:"' + CSS_HASH.encode()
-    + b'",28312:"14fffe456f27b2c8eecc",80187:"' + SEARCH_CSS_HASH.encode() + b'"};')
+
+#: Every route the check asks about, as the build names it: name → (runtime chunk id,
+#: script hash, stylesheet hash or None). Both shapes the 12.4 build has are here on
+#: purpose — the collection views and the detail page import a stylesheet, the admin pages
+#: do not — so this fixture fails if the check starts demanding a `.css` for `activity` or
+#: stops asking for one on `itemDetails`. The ids and hashes are stand-ins with the real
+#: shape; only their structure matters to the check.
+ROUTE_IDS: dict[str, tuple[str, str, str | None]] = {
+    "home": ("27962", JS_HASH, CSS_HASH),
+    "search": ("80187", SEARCH_JS_HASH, SEARCH_CSS_HASH),
+    "favorites": ("4062", "1a2b3c4d5e6f708192a3", "2b3c4d5e6f708192a3b4"),
+    "movies": ("17420", "3c4d5e6f708192a3b4c5", "4d5e6f708192a3b4c5d6"),
+    "livetv": ("73567", "5e6f708192a3b4c5d6e7", "6f708192a3b4c5d6e7f8"),
+    "shows": ("49911", "708192a3b4c5d6e7f809", "8192a3b4c5d6e7f8091a"),
+    "music": ("75692", "92a3b4c5d6e7f8091a2b", "a3b4c5d6e7f8091a2b3c"),
+    "settings": ("26472", "b4c5d6e7f8091a2b3c4d", "c5d6e7f8091a2b3c4d5e"),
+    "itemDetails": ("75844", "d6e7f8091a2b3c4d5e6f", "e7f8091a2b3c4d5e6f70"),
+    "library": ("77920", "f8091a2b3c4d5e6f7081", "091a2b3c4d5e6f708192"),
+    "list": ("83715", "1a2b3c4d5e6f708192a4", "2b3c4d5e6f708192a4b5"),
+    "playlists": ("20488", "3c4d5e6f708192a4b5c6", "4d5e6f708192a4b5c6d7"),
+    "books": ("95155", "5e6f708192a4b5c6d7e8", "6f708192a4b5c6d7e8f9"),
+    "homevideos": ("37470", "708192a4b5c6d7e8f90a", "8192a4b5c6d7e8f90a1b"),
+    "musicvideos": ("50220", "92a4b5c6d7e8f90a1b2c", "a3b4c5d6e7f8091a2b3d"),
+    "activity": ("88788", ACTIVITY_JS_HASH, None),
+    "devices": ("23920", "b4c5d6e7f8091a2b3d4e", None),
+    "keys": ("24167", "c5d6e7f8091a2b3d4e5f", None),
+    "branding": ("10878", "d6e7f8091a2b3d4e5f60", None),
+}
+
+
+def _runtime_body() -> bytes:
+    """The runtime's maps, built from `ROUTE_IDS` in the shape the served bundle has.
+
+    `id:"name"`, then one hash map per asset kind; nothing on disk is named by the id.
+    Two names outside the route tuple stay in the name map, as they are in the real body,
+    so a chunk name and a content hash cannot be mistaken for one another.
+    """
+    names = ",".join(f'{cid}:"{name}"' for name, (cid, _, _) in ROUTE_IDS.items())
+    scripts = ",".join(f'{cid}:"{js}"' for _, (cid, js, _) in ROUTE_IDS.items())
+    styles = ",".join(f'{cid}:"{css}"' for _, (cid, _, css) in ROUTE_IDS.items() if css)
+    return (
+        ('{"27424":"mn-json",' + names + ',"28110":"livetvguideprovider"};'
+         '{"27884":"a81bf06d441dff4daa07",' + scripts + ',"28048":"af136e13aa9d3b08b468"};'
+         '{"27884":"bda8d58a4ecedec16b11",' + styles + ',"28312":"14fffe456f27b2c8eecc"};').encode()
+    )
+
+
+RUNTIME_BODY = _runtime_body()
 RUNTIME_URL = "https://media.innotel.us/web/runtime.bundle.js?d66e3c0638b9381c83a7"
+
+
+def _chunk_answers() -> dict[str, tuple[int | None, dict[str, str], bytes]]:
+    """Every chunk file of the fixture build, with only the true pairing served.
+
+    As in a real build the script's hash is not a stylesheet and the stylesheet's hash is
+    not a script, so each extension must be matched to its own file. A route with no
+    stylesheet gets no `.css` answer at all: asking for one raises `KeyError`, which is
+    how the tests catch a check that invented the file.
+    """
+    out: dict[str, tuple[int | None, dict[str, str], bytes]] = {}
+    for name, (_cid, js, css) in ROUTE_IDS.items():
+        out[f"https://media.innotel.us/web/{name}.{js}.chunk.js"] = (200, {}, f"{name}()".encode())
+        out[f"https://media.innotel.us/web/{name}.{js}.css"] = (404, {}, b"")
+        if css:
+            out[f"https://media.innotel.us/web/{name}.{css}.chunk.js"] = (404, {}, b"")
+            out[f"https://media.innotel.us/web/{name}.{css}.css"] = (200, {}, b".card{color:red}")
+    return out
 
 
 def probe_for(*, media=(302, {"Location": "web/"}, b""), web=(200, {}, JELLYFIN_PAGE),
               splash=(200, {"Content-Type": "image/png"}, SPLASH),
               front=(200, {}, INDEX), runtime=(200, {}, RUNTIME_BODY),
               js=(200, {}, b"console.log('home')"), css=(200, {}, b".card{color:red}"),
-              search_css=(200, {}, b".search{color:red}")):
+              search_css=(200, {}, b".search{color:red}"),
+              item_css=(200, {}, b".item{color:red}")):
     # Only the true pairing exists, as in a real build: the JS hash is not a stylesheet and
     # the CSS hash is not a script, so the check has to match each extension to its own
     # file rather than assume which map it read.
@@ -79,21 +139,15 @@ def probe_for(*, media=(302, {"Location": "web/"}, b""), web=(200, {}, JELLYFIN_
         "https://media.innotel.us/": media,
         "https://media.innotel.us/web/": front,
         RUNTIME_URL: runtime,
-        f"https://media.innotel.us/web/home.{JS_HASH}.chunk.js": js,
-        f"https://media.innotel.us/web/home.{JS_HASH}.css": (404, {}, b""),
-        f"https://media.innotel.us/web/home.{CSS_HASH}.chunk.js": (404, {}, b""),
-        f"https://media.innotel.us/web/home.{CSS_HASH}.css": css,
-        # The second route: its own hashes, and only the true pairing exists.
-        f"https://media.innotel.us/web/search.{SEARCH_JS_HASH}.chunk.js": (200, {}, b"search()"),
-        f"https://media.innotel.us/web/search.{SEARCH_JS_HASH}.css": (404, {}, b""),
-        f"https://media.innotel.us/web/search.{SEARCH_CSS_HASH}.chunk.js": (404, {}, b""),
-        f"https://media.innotel.us/web/search.{SEARCH_CSS_HASH}.css": search_css,
-        # A route with no stylesheet: one hash only, so no `.css` request may be made — and
-        # if one were, this 404 would fail the check and say so.
-        f"https://media.innotel.us/web/activity.{ACTIVITY_JS_HASH}.chunk.js": (200, {}, b"activity()"),
-        f"https://media.innotel.us/web/activity.{ACTIVITY_JS_HASH}.css": (404, {}, b""),
         "https://iptv.innotel.us/web/": web,
         "https://iptv.innotel.us/Branding/Splashscreen": splash,
+        **_chunk_answers(),
+        # The overrides land last, so a case changes exactly the file it names and leaves
+        # every other route answering as the fixture build does.
+        f"https://media.innotel.us/web/home.{JS_HASH}.chunk.js": js,
+        f"https://media.innotel.us/web/home.{CSS_HASH}.css": css,
+        f"https://media.innotel.us/web/search.{SEARCH_CSS_HASH}.css": search_css,
+        f"https://media.innotel.us/web/itemDetails.{ROUTE_IDS['itemDetails'][2]}.css": item_css,
     }
 
     def probe(url, timeout=20.0):
@@ -256,6 +310,39 @@ class LazyRouteChunks(unittest.TestCase):
         result = self._audit()
         self.assertTrue(result.ok)
         self.assertEqual(codes(result), [])
+
+    def test_a_route_with_no_stylesheet_is_never_asked_for_one(self):
+        # The same rule, observed from the request side: an admin page's `.css` is never
+        # requested, so a 404 there can never be the thing that fails the check.
+        asked: list[str] = []
+        base = probe_for()
+
+        def probe(url, timeout=20.0):
+            asked.append(url)
+            return base(url)
+
+        result = check.audit("https://media.innotel.us/", "https://iptv.innotel.us", probe=probe)
+        self.assertTrue(result.ok, [f.message for f in result.failures])
+        stylesheets = [url for url in asked if url.endswith(".css")]
+        self.assertTrue(stylesheets, "the routes that do import a stylesheet must be asked")
+        for name in ("activity", "devices", "keys", "branding"):
+            self.assertEqual([url for url in stylesheets if f"/{name}." in url], [],
+                             f"{name} imports no stylesheet; asking for one invents a file")
+
+    def test_the_detail_page_and_the_collection_views_are_asserted_too(self):
+        # The click after the front page: a poster opens `itemDetails`, and the library,
+        # list, playlist, book and video views are the siblings beside it. A chunk missing
+        # from any of them breaks the app exactly as `home` did on 2026-11-16.
+        result = self._audit(item_css=(404, {}, b""))
+        self.assertFalse(result.ok)
+        self.assertEqual(codes(result), ["chunk-file-missing"])
+        self.assertIn("itemDetails", result.findings[0].message)
+
+    def test_the_fixture_covers_every_route_the_check_asks_about(self):
+        # `lazy_chunks` skips a route the build does not name, so a route added to
+        # `ROUTE_CHUNKS` without a fixture entry would be asked about and answer nothing —
+        # a silently vacuous assertion. This is the test that keeps the tuple honest.
+        self.assertEqual(set(ROUTE_IDS), set(check.ROUTE_CHUNKS))
 
     def test_a_missing_lazy_stylesheet_is_the_reported_outage(self):
         result = self._audit(css=(404, {}, b""))

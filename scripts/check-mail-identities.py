@@ -25,8 +25,8 @@ of them is systemd's own rather than an inference from a log:
 
 * whether the timer is active and enabled — a mirror with nothing scheduling it is not
   failing, it is stopped, which looks identical on the mail server;
-* the last run's `Result` and `ExecMainStatus` — `exit-code` 1 is a create Authentik
-  refused, 2 is an API that could not be read, which is the script's own contract;
+* the last run's `Result` and `ExecMainStatus` — exit-code 1 is a create Authentik
+  refused **and** also what the script exits with when it fails outright
 * when that run finished, which is the number that says whether it is *still* running.
 
 THE RULES
@@ -84,8 +84,9 @@ STALE_SECONDS = 2 * INTERVAL_SECONDS + 5 * 60
 #: number (`scripts/sync-mail-identities.py`, "Exit codes").
 STATUS_MEANING = {
     0: "it exited cleanly",
-    1: "`--apply` was refused for at least one user, so that mailbox still has no identity "
-       "it can sign in with",
+    1: "`--apply` was refused for at least one user, so that mailbox may still have no "
+       "identity it can sign in with — though 1 is also what the script itself exits with "
+       "when it fails outright, so the logged line below says which",
     2: "an estate API could not be read — the Stalwart admin or the Authentik token",
 }
 
@@ -103,6 +104,11 @@ printf 'timer_active:%s\\n' "$(systemctl is-active {TIMER} 2>/dev/null || echo u
 printf 'timer_enabled:%s\\n' "$(systemctl is-enabled {TIMER} 2>/dev/null || echo unknown)"
 printf 'result:%s\\n' "$(systemctl show -p Result --value {UNIT} 2>/dev/null || echo unknown)"
 printf 'status:%s\\n' "$(systemctl show -p ExecMainStatus --value {UNIT} 2>/dev/null || echo unknown)"
+# The last line the unit logged. Exit 1 is `--apply` refusing a user *and* what the script
+# exits with when it crashes, and on 2026-11-16 it was a read timeout that this check
+# reported as a refused user who had in fact already been mirrored. The line is printed
+# raw and trimmed here, so the finding names the cause the container actually recorded.
+printf 'message:%s\\n' "$(journalctl -u {UNIT} -n 1 -o cat --no-pager 2>/dev/null | tr '\\n' ' ' | cut -c1-300)"
 # `ExecMainExitTimestamp` is empty until the unit has run once, which is a different fact
 # from "it ran at an unreadable time" and must not be flattened into it.
 last="$(systemctl show -p ExecMainExitTimestamp --value {UNIT} 2>/dev/null || true)"
@@ -125,6 +131,9 @@ class Facts:
     timer_enabled: str = "unknown"
     result: str = "unknown"
     status: int | None = None
+    #: The last line the unit logged, so a failed run is named rather than guessed at
+    #: from its exit code (see `STATUS_MEANING`). Empty when the unit logged nothing.
+    last_message: str = ""
     last: int | None = None
     last_unreadable: bool = False
     now: int = 0
@@ -173,6 +182,8 @@ def parse(output: str) -> Facts:
             facts.result = value or "unknown"
         elif key == "status":
             facts.status = int(value) if value.lstrip("-").isdigit() else None
+        elif key == "message":
+            facts.last_message = value
         elif key == "last":
             if value.isdigit():
                 facts.last = int(value)
@@ -209,13 +220,16 @@ def audit(facts: Facts) -> Audit:
 
     if facts.result != "success":
         meaning = STATUS_MEANING.get(facts.status, "no exit status was recorded")
+        # What the container itself recorded, quoted, so the finding leads with the cause
+        # instead of asserting the one `--apply` refusal an exit code cannot distinguish.
+        logged = f" — the last line it logged was {facts.last_message!r}" if facts.last_message else ""
         out.findings.append(
             Finding(
                 "last_run_failed",
                 "fail",
                 f"the last run ended {facts.result}"
                 + (f" ({facts.status})" if facts.status is not None else "")
-                + f", and {meaning}",
+                + f", and {meaning}{logged}",
             )
         )
 

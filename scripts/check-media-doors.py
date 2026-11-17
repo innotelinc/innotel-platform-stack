@@ -86,14 +86,28 @@ WATCH_DOOR = "https://iptv.innotel.us"
 #: exists for, one rename later.
 AUTH_HOSTS = ("auth.cerulean.innotel.us", "auth.innotel.us")
 SPLASH_PATH = "/Branding/Splashscreen"
-#: The SPA's top-level routes that carry their own chunk, as the served bundle declares
-#: them (`path:"home"`, `path:"search"`, `path:"movies"`, …). `home` is the one the
+#: The SPA's routes that carry their own chunk, as the served bundle declares them
+#: (`path:"home"`, `path:"search"`, `path:"movies"`, …). `home` is the one the
 #: 2026-11-16 error was on; the rest are the siblings a person clicks next, and they fail
 #: the same way one click further in. A route this build does not name is skipped rather
 #: than warned — a rename is not an outage — and walking *every* chunk would be a load test
 #: of the edge rather than an answer about the app.
+#:
+#: Two groups, because the build separates them and an assertion that did not would be
+#: wrong about half of it:
+#:
+#: * the **collection views** — the eight top-level routes, then the detail page a person
+#:   reaches by clicking a poster (`itemDetails`), and the library, list, playlist, book,
+#:   home-video and music-video views beside them. These import a stylesheet as well as a
+#:   script, so each names two hashes and both files must answer;
+#: * the **admin pages that import no stylesheet** — `activity`, `devices`, `keys`,
+#:   `branding`. They name the script's hash only, and `lazy_chunks` demands a `.css` only
+#:   where the runtime maps a second hash (2026-11-16: the 12.4 build has seven route
+#:   chunks with no stylesheet of their own, so "every route serves a .css" is a false
+#:   assertion, not a strict one).
 ROUTE_CHUNKS = ("home", "search", "favorites", "movies", "livetv", "shows", "music",
-                "settings")
+                "settings", "itemDetails", "library", "list", "playlists", "books",
+                "homevideos", "musicvideos", "activity", "devices", "keys", "branding")
 RUNTIME_HINT = "runtime.bundle.js"
 
 # What this check is called in the shared family, and why it is a constant here at all:
