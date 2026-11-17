@@ -1551,7 +1551,10 @@ placement (finding 7).
   ChromeDriver kept relaunching inside one hung session left every process seconds old while the
   session was ninety minutes old, so an age-only rule never fired and the cgroup sat at its cap.
   Both halves were measured: that session grew to ~90 processes and the whole 3 GiB cap in under
-  five minutes, which is why the timer now ticks every two minutes rather than every five. All four files —
+  five minutes, which is why the timer now ticks every two minutes rather than every five. Age alone
+  still was not enough, because the same session regrew 65 fresh processes and the cap again in under
+  three minutes — so the rule now also allows **one tree at a time**: the estate solves one request
+  at a time (`threads = 1`), which makes a second browser root a leak whatever its age. All four files —
   the patch, the reaper and both units — are versioned in `hosts/i2/monarch/flaresolverr/`, whose
   README is the re-apply; writing them only on the host during an incident is how they would be
   lost again. In the same pass

@@ -40,6 +40,13 @@ against prowlarr's 180 s `requestTimeout`, so nothing a person is waiting for is
 and the cadence is two minutes, because the same session grew to ~90 processes and hit the cap
 in under five.
 
+Age was still not enough, and the third rule is what bounds it: **one tree at a time**. The
+estate solves one request at a time (`threads = 1` in `sitecustomize.py`), so a second browser
+root is a leak however young its processes are. The newest tree always survives (with a 45 s
+grace so a root is not killed mid-spawn), and everything else goes. Verified on `monarch`:
+five trees seen, the extras killed at each two-minute tick, the cgroup holding between 0.55
+and 1.3 GiB of 3 GiB with `oom_kill 0` and a solve still answering 200.
+
 ## Install / re-apply
 
 ```sh

@@ -29,6 +29,10 @@
 set -u
 name=${FLARESOLVERR_NAME:-flaresolverr}
 ceiling=${FLARESOLVERR_CHROMIUM_MAX_AGE_S:-180}
+# A tree that is not the newest is not killed the instant it appears: a solve spawns its
+# browser and its children over a second or two, and killing a root mid-spawn leaves exactly
+# the orphaned children this is meant to prevent.
+grace=${FLARESOLVERR_SPAWN_GRACE_S:-45}
 id=$(docker inspect -f '{{.Id}}' "$name" 2>/dev/null) || exit 0
 [ -n "$id" ] || exit 0
 scope=/sys/fs/cgroup/system.slice/docker-$id.scope
@@ -55,8 +59,55 @@ too_old() {
   done
   return 1
 }
+ppid_of() {
+  awk '/^PPid:/{print $2}' "/proc/$1/status" 2>/dev/null
+}
+# The top of a process's browser tree: walk up while the parent is browser-family. A browser
+# launched by ChromeDriver roots at the driver; one launched by the app roots at itself (its
+# parent is `dumb-init`), which is the shape measured on 2026-11-17.
+root_of() {
+  local pid=$1 parent
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    parent=$(ppid_of "$pid")
+    [ -n "$parent" ] && [ "$parent" != 0 ] && [ "$parent" != 1 ] || break
+    family "$parent" || break
+    pid=$parent
+  done
+  echo "$pid"
+}
+
+# Age every tree once, so "newest" is a fact rather than a guess.
+declare -A root_age=()
 for pid in $(cat "$scope/cgroup.procs" 2>/dev/null); do
   family "$pid" || continue
-  too_old "$pid" && kill -9 "$pid" 2>/dev/null && killed=$((killed + 1))
+  root=$(root_of "$pid")
+  [ -n "${root_age[$root]:-}" ] && continue
+  root_age[$root]=$(ps -o etimes= -p "$root" 2>/dev/null | tr -d ' ')
 done
-echo "flaresolverr-reap-chromium: killed $killed browser process(es) with a ${ceiling}s-old self or ancestor (of $(grep -c . "$scope/cgroup.procs" 2>/dev/null) in the cgroup)"
+newest=""
+newest_age=""
+for root in "${!root_age[@]}"; do
+  [ -n "${root_age[$root]}" ] || continue
+  if [ -z "$newest_age" ] || [ "${root_age[$root]}" -lt "$newest_age" ]; then
+    newest=$root
+    newest_age=${root_age[$root]}
+  fi
+done
+
+# Two rules, and the second is the one that bounds a session that keeps relaunching its
+# browser: at most ONE tree may live at a time. The estate solves one request at a time
+# (`threads = 1`), so a second root is always a leak, however young its processes are —
+# measured 2026-11-17, one hung session regrew 65 fresh processes and the whole 3 GiB cap in
+# under three minutes, so an age-only rule never found anything to kill.
+trees=0
+for pid in $(cat "$scope/cgroup.procs" 2>/dev/null); do
+  family "$pid" || continue
+  root=$(root_of "$pid")
+  [ "$root" = "$newest" ] || trees=$((trees + 1))
+  if too_old "$pid"; then
+    kill -9 "$pid" 2>/dev/null && killed=$((killed + 1))
+  elif [ "$root" != "$newest" ] && [ "${root_age[$root]:-0}" -ge "$grace" ]; then
+    kill -9 "$pid" 2>/dev/null && killed=$((killed + 1))
+  fi
+done
+echo "flaresolverr-reap-chromium: killed $killed browser process(es) — ceiling ${ceiling}s, grace ${grace}s, $((${#root_age[@]})) tree(s) seen, newest is ${newest:-none} at ${newest_age:-?}s, $(grep -c . "$scope/cgroup.procs" 2>/dev/null) in the cgroup"
