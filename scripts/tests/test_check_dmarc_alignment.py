@@ -27,7 +27,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -407,6 +407,19 @@ class OutboundCase(unittest.TestCase):
         self.assertTrue(dmarc._internal("mail.atheniq.courses"))
         self.assertFalse(dmarc._internal("gmail.com"))
         self.assertFalse(dmarc._internal("notinnotel.us"))
+
+    def test_mail_sent_inside_the_reporting_delay_cannot_have_been_reported_on(self):
+        # A report covers a completed period and arrives after it. On 2026-11-17 a real
+        # delivery proof put one message on the wire and this check claimed reports were
+        # due inside the same minute — a red nobody can act on.
+        now = datetime(2026, 11, 17, 0, 30, tzinfo=timezone.utc).timestamp()
+        self.assertFalse(dmarc._old_enough("2026-11-17T00:24:58Z", now))
+        self.assertTrue(dmarc._old_enough("2026-11-14T23:00:00Z", now))
+
+    def test_an_undatable_line_still_counts_as_mail_that_left(self):
+        # The same rule as an unreadable log: an unknown must not be used to explain
+        # silence away, so a stamp this check cannot parse stays counted.
+        self.assertTrue(dmarc._old_enough("not-a-time", datetime(2026, 11, 17, tzinfo=timezone.utc).timestamp()))
 
 
 if __name__ == "__main__":  # pragma: no cover

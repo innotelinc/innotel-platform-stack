@@ -84,7 +84,7 @@ import re
 import sys
 import zipfile
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -386,8 +386,33 @@ def _mail_traffic_module():
     return module
 
 
-def outbound_messages(days: int, runner=None) -> int | None:
-    """How many messages were submitted to an address outside the estate in the window.
+#: How long a receiver gets before its silence means anything (2026-11-17).
+#:
+#: An aggregate report covers a *completed* reporting period and is mailed after that
+#: period ends, so mail sent minutes ago is not reportable yet: no receiver has closed the
+#: period it falls in. Counting it made this check claim "reports were due" for a message
+#: that had only just left — the 2026-11-17 delivery proof put one message on the wire and
+#: turned a quiet domain red inside the same minute. Two days is the outside edge of the
+#: usual 24-hour delivery, so mail older than this *could* have been reported on and its
+#: silence is evidence; anything younger proves nothing either way.
+REPORT_DELAY_HOURS = 48
+
+
+def _old_enough(ts: str, now: float, delay_hours: int = REPORT_DELAY_HOURS) -> bool:
+    """Whether a message stamped `ts` is old enough that a report about it could exist."""
+    try:
+        sent = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return True  # undatable is still mail that left: an unknown must not explain silence
+    return sent <= now - delay_hours * 3600
+
+
+def outbound_messages(days: int, runner=None, now: float | None = None) -> int | None:
+    """How many messages left for an outside address *long enough ago to have counted*.
+
+    Only mail the receiving side could already have reported on is counted: a message sent
+    inside `REPORT_DELAY_HOURS` cannot appear in a report, so counting it would call the
+    reporting path broken for something that has not had its period closed yet.
 
     Returns `None` when the log cannot be read: an unreachable host is not evidence that
     the domain has been quiet, and must not be read as zero.
@@ -400,10 +425,13 @@ def outbound_messages(days: int, runner=None) -> int | None:
         lines = traffic.read_log(target, cutoff, runner, host)
     except Exception:  # noqa: BLE001 — unreadable is unknown, never zero
         return None
+    now = time.time() if now is None else now
     count = 0
     for line in lines:
         match = traffic.LINE.match(line)
         if not match or not match.group("event").startswith("queue."):
+            continue
+        if not _old_enough(match.group("ts"), now):
             continue
         domain = traffic._domain(traffic._first_recipient(match.group("fields")))
         if domain and not _internal(domain) and not _undeliverable(domain):
@@ -436,9 +464,10 @@ def no_reports_finding(
                 "no-outbound-mail",
                 "note",
                 f"no DMARC report in the last {window} day(s), and no message was submitted to "
-                f"an address outside the estate in that window — a receiver only reports on "
-                f"mail it has seen, so there is nothing to answer with yet. This is a quiet "
-                f"domain, not a broken reporting path",
+                f"an address outside the estate long enough ago to have been reported on — a "
+                f"receiver only reports on mail it has seen, and it reports after the period "
+                f"closes, so there is nothing to answer with yet. This is a quiet domain, not "
+                f"a broken reporting path",
             ),
             False,
         )
