@@ -87,7 +87,7 @@ EXPECTED: tuple[tuple[str, str], ...] = (
 #: will start, so a truncated one turns a running app into one that refuses to boot, while
 #: `docker ps` still prints `Up` for a container whose process has already given up.
 CONFIG_FILES: tuple[tuple[str, str], ...] = (
-    ("jellyfin", "/config/config/system.xml"),
+    ("jellyfin", "/config/system.xml"),  # hotio image keeps it at the data root, not /config/config
     ("jellyseerr", "/app/config/settings.json"),
     ("radarr", "/config/config.xml"),
     ("sonarr", "/config/config.xml"),
