@@ -126,7 +126,7 @@ services:
   jellyfin:   # from monarch
     <<: *common-keys
     container_name: jellyfin
-    # Pinned to Jellyfin 12.2. hotio publishes no version tags for this
+    # Pinned to Jellyfin 12.4. hotio publishes no version tags for this
     # image (only `latest`/`release`, which track the stable channel and
     # silently rolled 11 -> 12 — that jump crash-looped on migration
     # 20260815063607_RemoveOrphanedUserPermissionsAndPreferences). The digest
