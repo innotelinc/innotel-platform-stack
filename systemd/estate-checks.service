@@ -234,6 +234,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-pins.py 
 # nowhere. `tv.innotel.us` is Sonarr as of 2026-11-11, which is why the watch assertions
 # follow `iptv` — Jellyfin's direct 14016 publish — rather than the name they used to.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-media-doors.py --prom ${TEXTFILE_DIR}/estate-check-media-doors.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-media-apps.py --prom ${TEXTFILE_DIR}/estate-check-media-apps.prom
 
 # And that the door still opens for the people it is for: drives
 # `POST /api/tokens/sso` inside the edge container as the gateway's hop, where a

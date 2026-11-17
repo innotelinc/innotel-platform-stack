@@ -165,6 +165,11 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="estate_flaps"}), "check", "estate_flaps", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="retired_instances"}), "check", "retired_instances", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="sso_redirects"}), "check", "sso_redirects", "check", ".*")
+          # The media apps a request crosses (2026-11-17). Every door in front of a
+          # request answered while the app behind it was dead: Radarr's config had been
+          # truncated by an OOM kill and its container still read Up. A check that stops
+          # reporting must not be the thing that hides that.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="media_apps"}), "check", "media_apps", "check", ".*")
         for: 30m
         labels:
           severity: critical

@@ -105,6 +105,9 @@ CHECK_SCRIPTS = [
     # reporting entirely and `EstateCheckAbsent` would not have named it. The list being
     # typed by hand is what let that happen; the test is what stops the next one.
     "check-media-doors",
+    # The apps a request crosses (2026-11-17): the doors answered while Radarr was
+    # dead behind them, and nothing looked at the app rather than at its door.
+    "check-media-apps",
     # The learner-facing door, added the day the class hosts were verified (2026-11-14).
     # `class.atheniq.courses` is where every classroom link in `atheniq-work` goes, and the
     # failure it guards — a 200 where a sign-in should be — is one an app *looks* healthy
