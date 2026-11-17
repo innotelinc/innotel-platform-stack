@@ -15,6 +15,32 @@ evening pass moved the edge services back onto i1, right-sized i1's CPU caps, an
 put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
 
+## Changes applied 2026-11-16 (evening) — `workloads` pinned, three caps right-sized
+
+- **`workloads` (`.113`) no longer takes its address from DHCP.** It was the last
+  `not_pinned` warning `check-container-addresses.py` reported: the address was dialled by
+  address and held only by a lease, which is the state the 2026-10-01 renumber came from.
+  Its `10-lxc.yaml` is now static (`dhcp4: false`, `addresses: [192.168.1.113/24]`, default
+  route and nameserver on `192.168.1.1`) — the same shape `ontrak` uses to hold `.21`. No
+  address, route or resolver changed: `netplan apply` kept `.113` and the check now reports
+  zero warnings. Pre-change copy in the container at `/root/10-lxc.yaml.bak-20261116`.
+- **Three `limits.cpu` values were above the host that enforces them.** `i1 atheniq` was
+  `6` on a 4-CPU host, `i3 copilotkit` `6` on a 4-CPU host, and `i4 proxy` `4` on a 2-CPU
+  host — incus clamps each to the host, so the written cap was not the fenced one and
+  `check-container-limits.py` warned on all three. Each is now the count the host can
+  actually give (`4`, `4`, `2`). All three were already pinned to their host's whole CPU
+  set, so scheduling did not change; the config now says what the kernel does. Verified
+  live: `cpuset.cpus.effective` reads `0-3`, `0-3` and `0-1`, and the check reports zero
+  warnings. (A cap *below* the host count — the stronger fence this page argues for — is a
+  capacity decision, not this correction.)
+- **`iptv.innotel.us/Branding/Splashscreen` answered 502 because Jellyfin was down, not
+  because the vhost was wrong.** The `jellyfin` container's current run began at 18:29 UTC
+  with `i2`'s return and it has not restarted since (`RestartCount=0`). The door answers
+  **200 `image/png`, 344 514 bytes** through NPM and directly on `192.168.1.56:14016`, every
+  `Accept` variant the `Vary` header distinguishes, and `check-media-doors.py` is green on
+  all three assertions. No edge change was needed: there is no `proxy_cache` in front of
+  this vhost, so the 502 was never cached and the door recovered with the app.
+
 ## Changes applied 2026-11-16 — `i2` is decommissioned
 
 `i2` (`192.168.1.52`) is **parked, not decommissioned**. Its work is being served elsewhere: six
