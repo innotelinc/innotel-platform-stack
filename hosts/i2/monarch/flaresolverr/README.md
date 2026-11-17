@@ -11,9 +11,9 @@ and are mirrored here so a rebuilt host does not have to rediscover them.
 | File | Goes to | Why |
 |---|---|---|
 | `sitecustomize.py` | `/usr/src/projects/complete/3-media/monarch/flaresolverr/sitecustomize.py` on `monarch`, mounted into the container as `/patch/sitecustomize.py` | Pins `waitress.serve(threads=1)`: FlareSolverr's solver queue is the driver's, and parallel solves fight over one browser profile |
-| `flaresolverr-reap-chromium` | `/usr/local/bin/flaresolverr-reap-chromium` on `monarch` | Kills browser trees a dead or hung session left in `flaresolverr`'s cgroup: any `chromium`/`chrome`/`chromedriver` whose own age **or an ancestor's** is past 300 s |
+| `flaresolverr-reap-chromium` | `/usr/local/bin/flaresolverr-reap-chromium` on `monarch` | Kills browser trees a dead or hung session left in `flaresolverr`'s cgroup: any `chromium`/`chrome`/`chromedriver` whose own age **or an ancestor's** is past 180 s |
 | `flaresolverr-reap-chromium.service` | `/etc/systemd/system/` on `monarch` | Runs the reaper once per timer tick |
-| `flaresolverr-reap-chromium.timer` | `/etc/systemd/system/` on `monarch` | Every five minutes, `OnBootSec=5min` |
+| `flaresolverr-reap-chromium.timer` | `/etc/systemd/system/` on `monarch` | Every two minutes, `OnBootSec=2min` |
 
 ## Why the reaper is on the host and not in the container
 
@@ -35,8 +35,10 @@ The rule reads **ancestry, not only the process**. When a browser crashes inside
 session, ChromeDriver relaunches it, so every browser process is seconds old while the
 session owning them is not; an age-only rule fires never. Measured 2026-11-17 while this
 file was being written: one 90-minute-old `chromedriver`, 65 fresh `chromium` children, the
-cgroup at its 3 GiB cap, 1033 OOM kills and no solve in the log. The ceiling is 300 s
-against prowlarr's 180 s `requestTimeout`, so nothing a person is waiting for is that old.
+cgroup at its 3 GiB cap, 1033 OOM kills and no solve in the log. The ceiling is 180 s
+against prowlarr's 180 s `requestTimeout`, so nothing a person is waiting for is that old —
+and the cadence is two minutes, because the same session grew to ~90 processes and hit the cap
+in under five.
 
 ## Install / re-apply
 

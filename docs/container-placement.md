@@ -1546,10 +1546,12 @@ placement (finding 7).
   the browser trees are not owned by the user the app runs as. So the reaper is
   `flaresolverr-reap-chromium` on `monarch` (`flaresolverr-reap-chromium.timer`, root, every five
   minutes), which kills browser processes in `flaresolverr`'s own cgroup whose own age **or an
-  ancestor's** is past 300 s: prowlarr's `requestTimeout` is 180 s, so nothing anyone is still
+  ancestor's** is past 180 s: prowlarr's `requestTimeout` is 180 s, so nothing anyone is still
   waiting for is that old. The ancestor half is what matters — on the same day a browser that
   ChromeDriver kept relaunching inside one hung session left every process seconds old while the
-  session was ninety minutes old, so an age-only rule never fired and the cgroup sat at its cap. All four files —
+  session was ninety minutes old, so an age-only rule never fired and the cgroup sat at its cap.
+  Both halves were measured: that session grew to ~90 processes and the whole 3 GiB cap in under
+  five minutes, which is why the timer now ticks every two minutes rather than every five. All four files —
   the patch, the reaper and both units — are versioned in `hosts/i2/monarch/flaresolverr/`, whose
   README is the re-apply; writing them only on the host during an incident is how they would be
   lost again. In the same pass

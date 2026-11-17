@@ -1,10 +1,10 @@
 [Unit]
-Description=Run the FlareSolverr Chromium reaper every five minutes
+Description=Run the FlareSolverr Chromium reaper every two minutes
 
 [Timer]
-OnBootSec=5min
-OnUnitActiveSec=5min
-AccuracySec=30s
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
 
 [Install]
 WantedBy=timers.target

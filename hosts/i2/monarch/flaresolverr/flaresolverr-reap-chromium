@@ -9,8 +9,11 @@
 # that one got PermissionError for every PID, because the trees are not owned by the user
 # the app runs as. Root on the host owns them.
 #
-# 300 s is the ceiling because prowlarr's requestTimeout is 180 s: a browser that has been
-# part of a session for five minutes cannot belong to a solve anyone is still waiting for.
+# 180 s is the ceiling because prowlarr's requestTimeout is 180 s: a browser that has been
+# part of a session for three minutes cannot belong to a solve anyone is still waiting for.
+# The cadence matters as much as the ceiling — measured 2026-11-17, a session in this shape
+# grew to ~90 `chromium` processes and the 3 GiB cap in under five minutes, so the timer runs
+# every two minutes rather than every five.
 #
 # The age comes from `ps -o etimes=` and deliberately not from /proc/uptime: Incus masks
 # uptime per container, so `uptime - starttime` is *negative* here and no process is ever
@@ -25,7 +28,7 @@
 # the age-only version had been running every five minutes and killed nothing.
 set -u
 name=${FLARESOLVERR_NAME:-flaresolverr}
-ceiling=${FLARESOLVERR_CHROMIUM_MAX_AGE_S:-300}
+ceiling=${FLARESOLVERR_CHROMIUM_MAX_AGE_S:-180}
 id=$(docker inspect -f '{{.Id}}' "$name" 2>/dev/null) || exit 0
 [ -n "$id" ] || exit 0
 scope=/sys/fs/cgroup/system.slice/docker-$id.scope
