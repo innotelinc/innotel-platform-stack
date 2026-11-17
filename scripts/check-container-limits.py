@@ -127,6 +127,19 @@ from estate_check import Audit, Finding, count_cpus, read_host, ssh, write_prom 
 
 CHECK = "container_limits"
 
+#: The FD walk enumerates every process of every container on docker *and* incus. i1 grew
+#: past the 25-second ssh read: on 2026-11-17 the sweep timed out at 40 s, the check named
+#: the host unreadable, and the identical read finished when run by hand a minute later.
+#: One host is read at a time, so a longer cap costs nothing while a host is healthy.
+READ_TIMEOUT = 90
+
+
+def read(target: str, command: str) -> str:
+    """`ssh` with room for the whole sweep; `read_host` still names the host on failure."""
+    return ssh(target, command, timeout=READ_TIMEOUT)
+
+
+
 #: Where each estate host is reachable. `i4` is in scope from 2026-10-02: it took the
 #: edge and three other containers off i1, each of which declares a `limits.cpu`, so a
 #: cap there is a fence to check like any other. i4 is a 2-vCPU host and the moved
@@ -485,7 +498,7 @@ def memory_findings(host: str, inst: Container, mem_total: int) -> list[Finding]
 
 
 def gather(
-    hosts: dict[str, str], runner=ssh
+    hosts: dict[str, str], runner=read
 ) -> tuple[
     dict[str, list[Container]],
     dict[str, int],
