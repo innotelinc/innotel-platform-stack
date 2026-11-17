@@ -84,8 +84,11 @@ DOORS: dict[str, str | None] = {"deploy.innotel.us": "coolify"}
 #: rest are answers (a gate's 401/403 is still an open door).
 GOOD_STATUS = {200, 301, 302, 303, 307, 308, 401, 403}
 
-#: Certificate runway: warn with a fortnight left, fail when it has effectively gone.
-WARN_DAYS = 14
+#: Certificate runway: warn three weeks out, fail when it has effectively gone.
+#: Let's Encrypt renews at thirty days left, so a name under twenty-one has already
+#: missed a renewal cycle and still has three weeks to be fixed. A fortnight left is
+#: late enough that the warning arrives as part of the incident it was meant to prevent.
+WARN_DAYS = 21
 FAIL_DAYS = 3
 
 #: A door that takes this long is "up" but not usable — the VM's lossy path showed up as
