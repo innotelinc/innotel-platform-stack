@@ -356,6 +356,18 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-unit-drift.py --hos
 # listing are skipped; their children are named with `--path` when one of them matters.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-credential-age.py --all --mount cerulean --max-age-days 60 --prom ${TEXTFILE_DIR}/estate-check-credential-age.prom
 
+# And the token that check reads with, kept alive (2026-11-17). It is **periodic**
+# (`-period=720h`), and nothing else in the estate renews it, so credential_age would go
+# red about a month after the token was minted — for a reason that is the estate's own
+# credential rather than the estate. This calls `auth/token/renew-self` with that token
+# and nothing else: it cannot mint, revoke or read a secret, and the endpoint does not
+# consult the credential's policy, so the renewal is confined to extending its own lease.
+# A refusal is a failure here rather than a warning, because the next event is
+# credential_age exiting 2. Re-minting a token that has stopped renewing needs
+# `auth/token/create`, which is not a credential a check should hold — that is a person's
+# job and the message says so.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-vault-token-renewal.py --min-days 7 --prom ${TEXTFILE_DIR}/estate-check-vault-token-renewal.prom
+
 # And the shape of the history rather than the moment (2026-11-17). The alerts read the
 # current value, which is right for paging and blind to a check that goes red and green
 # every few runs: on 2026-11-16 `media_doors` and `sso_redirects` each produced a red run
