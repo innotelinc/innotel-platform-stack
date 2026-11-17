@@ -131,7 +131,9 @@ class Verdict(unittest.TestCase):
             "timer_enabled:enabled", "timer_enabled:disabled")
         result = chk.audit(chk.parse(report))
         self.assertFalse(result.ok)
-        self.assertEqual(sorted(codes(result)), ["timer_disabled", "timer_inactive"])
+        # The run itself was clean and fresh, so the age note is still there and still
+        # right: what is broken is that nothing will schedule the next one.
+        self.assertEqual(sorted(codes(result)), ["in_sync", "timer_disabled", "timer_inactive"])
 
     def test_a_run_past_two_intervals_is_not_firing(self):
         report = CLEAN.replace(f"last:{NOW - 114}", f"last:{NOW - chk.STALE_SECONDS - 1}")
