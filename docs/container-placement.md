@@ -1541,11 +1541,12 @@ placement (finding 7).
 - **The solver stops leaking browsers, and the address table matches the estate again.** Measured
   today: `flaresolverr` held 78 `chromium` processes under one two-hour-old browser with **zero**
   requests in the previous hour, 2.95 GiB of anon and no `chromedriver` alive at all — the tree a
-  failed solve leaves behind, not parallel solves. `threads = 1` (the earlier fix) serialises solves
-  and cannot touch that, so `sitecustomize.py` now reaps Chromium older than 600 s (prowlarr's
-  `requestTimeout` is 180 s, so nothing anyone waits for is that old). It reads process age from
-  `time.monotonic()`: the first version used `/proc/uptime`, which Incus masks per container, so it
-  computed a negative age and killed nothing while looking perfectly healthy. In the same pass
+  failed solve leaves behind, not parallel solves.  `threads = 1` (the earlier fix) serialises solves and cannot touch that. A reaper *inside* the
+  container cannot either — written first, it got `PermissionError` on every PID it tried, because
+  the browser trees are not owned by the user the app runs as. So the reaper is
+  `flaresolverr-reap-chromium` on `monarch` (`flaresolverr-reap-chromium.timer`, root, every five
+  minutes), which kills Chromium in `flaresolverr`'s own cgroup older than 600 s: prowlarr's
+  `requestTimeout` is 180 s, so nothing anyone is still waiting for is that old. In the same pass
   `check-container-addresses.py` gained `onyx` (`.60`, on `i1` — it runs, and the table said it could
   not be a row) and lost `telno` (`.95`: no instance of that name on any host since the rebalance, only
   `telno-turn`), so the check now reports 0 failures and 0 warnings across all four hosts.
