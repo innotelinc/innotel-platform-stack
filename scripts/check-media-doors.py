@@ -86,10 +86,14 @@ WATCH_DOOR = "https://iptv.innotel.us"
 #: exists for, one rename later.
 AUTH_HOSTS = ("auth.cerulean.innotel.us", "auth.innotel.us")
 SPLASH_PATH = "/Branding/Splashscreen"
-#: The route whose lazy chunks are asserted: `home` is what `/web/home` opens, and what the
-#: reported chunkload error was on. One route, because the build changes per upgrade and a
-#: check that walks every chunk is a load test of the edge rather than an answer about it.
-CHUNK_ROUTE = "home"
+#: The SPA's top-level routes that carry their own chunk, as the served bundle declares
+#: them (`path:"home"`, `path:"search"`, `path:"movies"`, …). `home` is the one the
+#: 2026-11-16 error was on; the rest are the siblings a person clicks next, and they fail
+#: the same way one click further in. A route this build does not name is skipped rather
+#: than warned — a rename is not an outage — and walking *every* chunk would be a load test
+#: of the edge rather than an answer about the app.
+ROUTE_CHUNKS = ("home", "search", "favorites", "movies", "livetv", "shows", "music",
+                "settings")
 RUNTIME_HINT = "runtime.bundle.js"
 
 # What this check is called in the shared family, and why it is a constant here at all:
@@ -177,22 +181,24 @@ def _chunk_hashes(runtime: str, chunk_id: str) -> list[str]:
 
 
 def lazy_chunks(base: str, page: bytes, probe=fetch,
-                route: str = CHUNK_ROUTE) -> list[Finding]:
-    """Does the front page's own route code exist, for the chunks it loads after boot?
+                routes: tuple[str, ...] = ROUTE_CHUNKS) -> list[Finding]:
+    """Do the route chunks this page loads *after* boot exist, for the routes it has?
 
     Everything the index names can answer 200 and the first navigation still fail, because
     a route's files are named by the runtime map rather than by the index — the 2026-11-16
-    shape. A runtime that cannot be read is a warning (the page may work, and a start-up
-    window answers 502), but a runtime the page names and the app does not serve, or a
-    route file that answers nothing, is a failure: the page loads and the click breaks.
+    shape. Every top-level route is asked the same way: the runtime's ids for that name
+    give its content hashes, and each asset kind's file must answer 200. A runtime that
+    cannot be read is a warning (the page may work, and a start-up window answers 502), but
+    a runtime the page names and the app does not serve, or a route file that answers
+    nothing, is a failure: the page loads and the click breaks.
     """
     findings: list[Finding] = []
     runtime_url = _runtime_url(base, page)
     if runtime_url is None:
         return [Finding(
             "chunk-map-unreadable", "warn",
-            f"{base} serves a page that names no {RUNTIME_HINT}, so the {route} route's "
-            "chunks cannot be read from here — the page may still work")]
+            f"{base} serves a page that names no {RUNTIME_HINT}, so the routes' chunks "
+            "cannot be read from here — the page may still work")]
 
     status, _, body = probe(runtime_url)
     if status is None or status in GATEWAY_ERRORS:
@@ -207,26 +213,33 @@ def lazy_chunks(base: str, page: bytes, probe=fetch,
             "boot at all")]
 
     runtime = body.decode("utf-8", "replace")
-    hashes = sorted({value for chunk_id in _chunk_ids(runtime, route)
-                     for value in _chunk_hashes(runtime, chunk_id)})
-    if not hashes:
+    asked = 0
+    for route in routes:
+        hashes = sorted({value for chunk_id in _chunk_ids(runtime, route)
+                         for value in _chunk_hashes(runtime, chunk_id)})
+        if not hashes:
+            continue  # this build has no such route: a rename is not an outage
+        asked += 1
+        # One hash per asset kind. `activity`, `keys` and `branding` import no stylesheet,
+        # so they carry the script's hash only; demanding a `.css` for them would invent a
+        # missing file on this build and on every build shaped like it.
+        for suffix in (".chunk.js", ".css")[:min(len(hashes), 2)]:
+            for value in hashes:
+                url = urljoin(base, f"{route}.{value}{suffix}")
+                status, _, payload = probe(url)
+                if status == 200 and payload:
+                    break
+            else:
+                findings.append(Finding(
+                    "chunk-file-missing", "fail",
+                    f"{base} names a {route}{suffix} chunk ({', '.join(hashes)}) that the "
+                    "app does not serve: the front page loads and the first navigation to "
+                    "that route fails with a chunkload error"))
+    if not asked:
         return [Finding(
             "chunk-map-unreadable", "warn",
-            f"{runtime_url} names no {route} chunk with a content hash — the client's build "
-            "format has changed, so this assertion asked nothing")]
-
-    for suffix in (".chunk.js", ".css"):
-        for value in hashes:
-            url = urljoin(base, f"{route}.{value}{suffix}")
-            status, _, payload = probe(url)
-            if status == 200 and payload:
-                break
-        else:
-            findings.append(Finding(
-                "chunk-file-missing", "fail",
-                f"{base} names a {route}{suffix} chunk ({', '.join(hashes)}) that the app "
-                "does not serve: the front page loads and the first navigation to that "
-                "route fails with a chunkload error"))
+            f"{runtime_url} names none of {', '.join(routes)} with a content hash — the "
+            "client's build format has changed, so this assertion asked nothing")]
     return findings
 
 

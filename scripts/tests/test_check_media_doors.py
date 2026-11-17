@@ -49,19 +49,29 @@ SPLASH = b"\x89PNG\r\n\x1a\n" + b"0" * 60_000
 #: for `27962*` found nothing while the chunkload error named it.
 JS_HASH = "6f5c86d430f38b204798"
 CSS_HASH = "193c6fa7a64e52078d35"
+#: Two more of the app's top-level routes. `search` carries a stylesheet; `activity` does
+#: not, which is what makes "every route must serve a .css" a wrong assertion — the real
+#: 12.4 build has seven route chunks with no stylesheet of their own.
+SEARCH_JS_HASH = "a1b2c3d4e5f60718293a"
+SEARCH_CSS_HASH = "b1c2d3e4f5061728394b"
+ACTIVITY_JS_HASH = "c1d2e3f4051627384950"
 INDEX = (b'<!doctype html><html><head><title>Jellyfin</title>'
          b'<script src="runtime.bundle.js?d66e3c0638b9381c83a7"></script></head></html>')
 RUNTIME_BODY = (
-    b'{"27424":"mn-json",27962:"home",28110:"livetvguideprovider"};'
-    b'{"27884":"a81bf06d441dff4daa07",27962:"' + JS_HASH.encode() + b'",28048:"af136e13aa9d3b08b468"};'
-    b'{"27884":"bda8d58a4ecedec16b11",27962:"' + CSS_HASH.encode() + b'",28312:"14fffe456f27b2c8eecc"};')
+    b'{"27424":"mn-json",27962:"home",28110:"livetvguideprovider",80187:"search",88788:"activity"};'
+    b'{"27884":"a81bf06d441dff4daa07",27962:"' + JS_HASH.encode()
+    + b'",28048:"af136e13aa9d3b08b468",80187:"' + SEARCH_JS_HASH.encode()
+    + b'",88788:"' + ACTIVITY_JS_HASH.encode() + b'"};'
+    b'{"27884":"bda8d58a4ecedec16b11",27962:"' + CSS_HASH.encode()
+    + b'",28312:"14fffe456f27b2c8eecc",80187:"' + SEARCH_CSS_HASH.encode() + b'"};')
 RUNTIME_URL = "https://media.innotel.us/web/runtime.bundle.js?d66e3c0638b9381c83a7"
 
 
 def probe_for(*, media=(302, {"Location": "web/"}, b""), web=(200, {}, JELLYFIN_PAGE),
               splash=(200, {"Content-Type": "image/png"}, SPLASH),
               front=(200, {}, INDEX), runtime=(200, {}, RUNTIME_BODY),
-              js=(200, {}, b"console.log('home')"), css=(200, {}, b".card{color:red}")):
+              js=(200, {}, b"console.log('home')"), css=(200, {}, b".card{color:red}"),
+              search_css=(200, {}, b".search{color:red}")):
     # Only the true pairing exists, as in a real build: the JS hash is not a stylesheet and
     # the CSS hash is not a script, so the check has to match each extension to its own
     # file rather than assume which map it read.
@@ -73,6 +83,15 @@ def probe_for(*, media=(302, {"Location": "web/"}, b""), web=(200, {}, JELLYFIN_
         f"https://media.innotel.us/web/home.{JS_HASH}.css": (404, {}, b""),
         f"https://media.innotel.us/web/home.{CSS_HASH}.chunk.js": (404, {}, b""),
         f"https://media.innotel.us/web/home.{CSS_HASH}.css": css,
+        # The second route: its own hashes, and only the true pairing exists.
+        f"https://media.innotel.us/web/search.{SEARCH_JS_HASH}.chunk.js": (200, {}, b"search()"),
+        f"https://media.innotel.us/web/search.{SEARCH_JS_HASH}.css": (404, {}, b""),
+        f"https://media.innotel.us/web/search.{SEARCH_CSS_HASH}.chunk.js": (404, {}, b""),
+        f"https://media.innotel.us/web/search.{SEARCH_CSS_HASH}.css": search_css,
+        # A route with no stylesheet: one hash only, so no `.css` request may be made — and
+        # if one were, this 404 would fail the check and say so.
+        f"https://media.innotel.us/web/activity.{ACTIVITY_JS_HASH}.chunk.js": (200, {}, b"activity()"),
+        f"https://media.innotel.us/web/activity.{ACTIVITY_JS_HASH}.css": (404, {}, b""),
         "https://iptv.innotel.us/web/": web,
         "https://iptv.innotel.us/Branding/Splashscreen": splash,
     }
@@ -219,6 +238,21 @@ class LazyRouteChunks(unittest.TestCase):
                            probe=probe_for(**kwargs))
 
     def test_a_complete_build_passes_the_lazy_route_assertion(self):
+        result = self._audit()
+        self.assertTrue(result.ok)
+        self.assertEqual(codes(result), [])
+
+    def test_a_second_route_is_asserted_too(self):
+        # The 2026-11-16 failure is not special to `home`: any route whose chunk is not
+        # served breaks on the click that opens it.
+        result = self._audit(search_css=(404, {}, b""))
+        self.assertFalse(result.ok)
+        self.assertEqual(codes(result), ["chunk-file-missing"])
+        self.assertIn("search", result.findings[0].message)
+
+    def test_a_route_without_a_stylesheet_is_not_a_missing_file(self):
+        # `activity` carries only the script's hash; demanding a `.css` for it would invent
+        # a missing file on this build and on every build shaped like it.
         result = self._audit()
         self.assertTrue(result.ok)
         self.assertEqual(codes(result), [])
