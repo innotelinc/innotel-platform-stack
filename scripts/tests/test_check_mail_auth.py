@@ -243,7 +243,11 @@ class MainCase(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             prom = Path(directory) / "mail-auth.prom"
-            with mock.patch.object(mail, "query_txt", side_effect=lookup):
+            # `main` also reads MX (the retired-domain check) and calls `dig` for it, so a
+            # harness that stubs only TXT reaches the network and exits 2 wherever dig is
+            # absent — as CI is. Stub both.
+            with mock.patch.object(mail, "query_txt", side_effect=lookup), \
+                 mock.patch.object(mail, "query_mx", side_effect=lambda name, server: ("NOERROR", [])):
                 code = mail.main(["--prom", str(prom), "--domains", "innotel.us"])
             body = prom.read_text(encoding="utf-8") if prom.exists() else ""
         return code, body

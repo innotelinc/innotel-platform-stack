@@ -124,7 +124,7 @@ class AddressCase(unittest.TestCase):
 
     def test_a_stopped_container_is_reported_and_not_failed(self):
         # A stopped container has no address to be wrong; it is a note, not a failure.
-        result = chk.audit(estate({("i4", "terminal"): dict(state="STOPPED", address=None)}))
+        result = chk.audit(estate({("i4", "proxy"): dict(state="STOPPED", address=None)}))
         self.assertTrue(result.ok, [f.message for f in result.failures])
         self.assertEqual([f.code for f in result.findings if f.level == "note"], ["stopped"])
 
@@ -139,7 +139,7 @@ class AddressCase(unittest.TestCase):
         # `atlas`, not a name the table dropped: an override for a container no longer in
         # `EXPECTED` appends an *extra* instance, which this check reports as unexpected
         # rather than as a missing address. `www` was that row until 2026-10-29.
-        result = chk.audit(estate({("i1", "atlas"): dict(state="RUNNING", address=None)}))
+        result = chk.audit(estate({("i1", "mail"): dict(state="RUNNING", address=None)}))
         self.assertFalse(result.ok)
         self.assertEqual([f.code for f in result.failures], ["no_address"])
 

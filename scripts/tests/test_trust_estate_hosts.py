@@ -109,12 +109,22 @@ class CheckModeCase(unittest.TestCase):
         self.addCleanup(self._dir.cleanup)
         self.config = Path(self._dir.name) / "config"
 
+    def _config(self) -> str:
+        """The config as this script would write it for the hosts under test.
+
+        `config_with("")` renders the block from the module's default table, which still
+        holds `i2`; `--check` renders from the hosts it is given, so a fixture that used
+        the default would compare two different client sets and call it drift.
+        """
+        hosts = dict(pair.split("=", 1) for pair in self._hosts().split(","))
+        return trust.config_with("", trust.config_block(hosts))
+
     def _hosts(self):
         # `i2` was decommissioned on 2026-11-16, so it is not a host this script writes.
         return "i1=root@192.168.1.51,i3=root@192.168.1.53,i4=root@192.168.1.54"
 
     def test_a_host_whose_key_is_not_trusted_is_drift(self):
-        self.config.write_text(trust.config_with(""), encoding="utf-8")
+        self.config.write_text(self._config(), encoding="utf-8")
         original = trust.key_works
         trust.key_works = lambda target: target.endswith("192.168.1.51")  # only i1 works
         self.addCleanup(lambda: setattr(trust, "key_works", original))
@@ -122,7 +132,7 @@ class CheckModeCase(unittest.TestCase):
         self.assertEqual(code, 1)
 
     def test_a_fully_trusted_estate_passes(self):
-        self.config.write_text(trust.config_with(""), encoding="utf-8")
+        self.config.write_text(self._config(), encoding="utf-8")
         original = trust.key_works
         trust.key_works = lambda target: True
         self.addCleanup(lambda: setattr(trust, "key_works", original))
