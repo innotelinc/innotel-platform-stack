@@ -63,6 +63,16 @@ under incus. The alternative — a hand-written profile that allows
 stay meaningful, so declaring the container unconfined is the honest form of the
 same choice rather than a confinement that only looks enforced.
 
+That trade was reviewed and accepted on 2026-11-17: the estate prefers working
+apps over a confinement rule that is already broken under incus. Only the media
+apps declare it; the incus profile and every other container keep their own
+confinement. `security_opt` is fixed at container creation, so a service picks
+it up when it is next created — the five that were crashing were recreated that
+day, and `docker inspect -f '{{index .HostConfig.SecurityOpt 0}}' <name>` is how
+to confirm any of them. AppArmor itself stays enabled on the host; disabling it
+there would drop confinement for unrelated services to fix a peer-label bug that
+one container option already routes around.
+
 ## The backup gap this exposed
 
 Every Sonarr backup written on 2026-11-17 was rejected by `zipfile.ZipFile`
