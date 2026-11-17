@@ -150,8 +150,12 @@ EXPECTED: dict[str, dict[str, str]] = {
         "genesis": "192.168.1.66",
         "mail": "192.168.1.15",
         "ontrak": "192.168.1.21",
-        "regcache": "192.168.1.79",
-        "rizzaura": "192.168.1.62",
+        # `regcache` (.79) and `rizzaura` (.62) are **not** rows here any more. Both
+        # containers still exist on this host but are STOPPED (`incus list` on i1 and
+        # i2, 2026-11-16): they are the copies the 2026-10-30 move left behind, and
+        # only the `i2` rows run, at these same addresses. Two rows for one service
+        # published `innotel_estate_check_address_latency_ms` twice with identical
+        # labels — a duplicate series in the textfile, not a second measurement.
         # `sage` (.94) and `vault` (.73) arrived from `i4` on 2026-11-15 to make room for
         # the edge, which needed the ~2 GiB they held and `i4` did not have. `i4` keeps
         # both stopped as the rollback, so the address answers on exactly one host.
