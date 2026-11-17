@@ -334,7 +334,10 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-unit-drift.py --hos
 # so the only witness is the vault's own `updated_time`. It reads KV v2 **metadata** and
 # never the values, with a read-only token limited to `cerulean/metadata/*`; VAULT_ADDR and
 # VAULT_TOKEN come from the EnvironmentFile above. A missing token is exit 2, not a pass.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-credential-age.py --path cerulean/mailjet --max-age-days 90 --prom ${TEXTFILE_DIR}/estate-check-credential-age.prom
+# `--all` ages every top-level secret the mount lists rather than a hand-kept list, so a
+# credential added tomorrow is covered without this line changing. Directories in the
+# listing are skipped; their children are named with `--path` when one of them matters.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-credential-age.py --all --mount cerulean --max-age-days 90 --prom ${TEXTFILE_DIR}/estate-check-credential-age.prom
 
 # And the shape of the history rather than the moment (2026-11-17). The alerts read the
 # current value, which is right for paging and blind to a check that goes red and green

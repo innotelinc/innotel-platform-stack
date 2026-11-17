@@ -12,6 +12,7 @@ OUT=/run/mailjet/mailjet.env
 
 [ -r "$ENV_FILE" ] || { echo "vault-mailjet-env: missing $ENV_FILE" >&2; exit 1; }
 set -a
+# shellcheck source=/dev/null  # the path is a runtime constant on the mail host
 . "$ENV_FILE"
 set +a
 : "${VAULT_ADDR:?VAULT_ADDR missing}"

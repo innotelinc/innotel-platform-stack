@@ -112,6 +112,13 @@ class Age(unittest.TestCase):
         self.assertEqual(check.metadata_url("http://v:8200/", "cerulean/mailjet"),
                          "http://v:8200/v1/cerulean/metadata/mailjet")
 
+    def test_a_listing_is_narrowed_to_secrets(self):
+        # A real listing mixes directories (`acme/`) with secrets (`mailjet`); a directory has
+        # no age of its own, and counting it would report a wolf that is not there.
+        self.assertEqual(
+            check.top_level(["acme/", "mailjet", "pki/", "technitium"], "cerulean"),
+            ["cerulean/mailjet", "cerulean/technitium"])
+
 
 class Main(unittest.TestCase):
     def _run(self, *args, reader=None):
@@ -138,6 +145,34 @@ class Main(unittest.TestCase):
         code, _, err = self._run("--addr", "http://v", "--token", "t", reader=reader)
         self.assertEqual(code, 2)
         self.assertIn("could not be read", err)
+
+    def test_all_ages_every_listed_secret(self):
+        original_list, original_read = check.list_secrets, check.read_metadata
+        check.list_secrets = lambda addr, token, mount="cerulean", timeout=10.0: [
+            "cerulean/alpha", "cerulean/beta"]
+        check.read_metadata = lambda addr, token, path, timeout=10.0: metadata(1)
+        try:
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = check.main(["--all", "--addr", "http://v", "--token", "t"])
+        finally:
+            check.list_secrets, check.read_metadata = original_list, original_read
+        self.assertEqual(code, 0)
+        text = out.getvalue()
+        self.assertIn("cerulean/alpha", text)
+        self.assertIn("cerulean/beta", text)
+
+    def test_an_unreadable_listing_is_exit_two(self):
+        def listing(*args, **kwargs):
+            raise check.VaultUnreadable("HTTP 403")
+
+        original = check.list_secrets
+        check.list_secrets = listing
+        try:
+            _, _, err = self._run("--all", "--addr", "http://v", "--token", "t")
+        finally:
+            check.list_secrets = original
+        self.assertIn("listing could not be read", err)
 
     def test_a_warning_still_exits_zero(self):
         code, out, _ = self._run(

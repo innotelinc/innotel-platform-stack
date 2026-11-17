@@ -90,6 +90,28 @@ def metadata_url(addr: str, path: str) -> str:
     return f"{addr.rstrip('/')}/v1/{mount}/metadata/{name}"
 
 
+def top_level(keys: list[str], mount: str) -> list[str]:
+    """The secrets in a metadata listing, with the directories left out.
+
+    A listing mixes both (`acme/` beside `mailjet`); a directory has no age of its own, and
+    its children are named by `--path` when one is what matters.
+    """
+    return [f"{mount}/{key}" for key in keys if not key.endswith("/")]
+
+
+def list_secrets(addr: str, token: str, mount: str = "cerulean",
+                 timeout: float = 10.0) -> list[str]:
+    """Every top-level secret under `mount`, so a new secret is aged without an edit."""
+    url = f"{addr.rstrip('/')}/v1/{mount}/metadata?list=true"
+    request = urllib.request.Request(url, headers={"X-Vault-Token": token})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            keys = json.loads(response.read(512_000))["data"]["keys"]
+    except Exception as error:  # noqa: BLE001 — denied, transport, bad JSON: all unreadable
+        raise VaultUnreadable(f"listing {mount}/metadata failed: {error}") from error
+    return top_level(keys, mount)
+
+
 def read_metadata(addr: str, token: str, path: str, timeout: float = 10.0) -> dict:
     """The KV v2 metadata document for one path. Never fetches the values."""
     request = urllib.request.Request(metadata_url(addr, path),
@@ -174,6 +196,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--path", action="append", dest="paths", metavar="MOUNT/NAME",
                         help=f"a vault path to age (repeatable; default {', '.join(DEFAULT_PATHS)})")
+    parser.add_argument("--all", action="store_true",
+                        help="also age every top-level secret the mount lists")
+    parser.add_argument("--mount", default="cerulean",
+                        help="the mount --all lists (default cerulean)")
     parser.add_argument("--max-age-days", type=float, default=DEFAULT_MAX_AGE_DAYS,
                         help="how old a secret may be before it is a warning")
     parser.add_argument("--addr", default=os.environ.get("VAULT_ADDR", ""),
@@ -184,8 +210,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here")
     parser.add_argument("--json", action="store_true", help="machine-readable result")
     args = parser.parse_args(argv)
-
-    paths = list(dict.fromkeys([*DEFAULT_PATHS, *(args.paths or [])]))
 
     def emit(result: Audit | None, ran: bool) -> None:
         if not args.prom:
@@ -200,6 +224,17 @@ def main(argv: list[str] | None = None) -> int:
         print("check-credential-age: VAULT_ADDR/VAULT_TOKEN are not set — the check carries no "
               "vault credential of its own", file=sys.stderr)
         return 2
+
+    listed: list[str] = []
+    if args.all:
+        try:
+            listed = list_secrets(args.addr, args.token, args.mount, timeout=args.timeout)
+        except VaultUnreadable as error:
+            emit(None, ran=False)
+            print(f"check-credential-age: the vault listing could not be read: {error}",
+                  file=sys.stderr)
+            return 2
+    paths = list(dict.fromkeys([*DEFAULT_PATHS, *(args.paths or []), *listed]))
 
     try:
         result = audit(paths, args.max_age_days, addr=args.addr, token=args.token,

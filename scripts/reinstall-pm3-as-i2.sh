@@ -52,6 +52,8 @@ if [ -z "${ISO_BYTES}" ] || [ "${ISO_BYTES}" -lt 2000000000 ]; then
   exit 1
 fi
 echo "   ISO served: ${ISO_BYTES} bytes"
+# shellcheck disable=SC2016  # the awk program runs in the remote shell, so $5/$9 must
+# reach it unexpanded: this string is quoted locally and expanded there, by design.
 SSH 'pveversion; ls -l /root/install/vmlinuz /root/install/initrd | awk "{print \$5, \$9}"
      curl -s -m 5 -o /dev/null -w "autoinstall fetch=%{http_code}\n" http://192.168.1.54:8080/user-data
      echo "vm: $(qm list | sed 1d | awk "{print \$2, \$3}")"'

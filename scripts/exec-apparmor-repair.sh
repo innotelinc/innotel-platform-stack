@@ -109,10 +109,9 @@ pids_of() {
 }
 
 mem_of() {
-  local c=$1 f
-  for f in "/sys/fs/cgroup/lxc.payload.$c/memory.current"; do
-    [ -r "$f" ] && awk '{printf "%.0fM", $1/1048576}' "$f" 2>/dev/null
-  done
+  local c=$1
+  local f="/sys/fs/cgroup/lxc.payload.$c/memory.current"
+  [ -r "$f" ] && awk '{printf "%.0fM", $1/1048576}' "$f" 2>/dev/null
 }
 
 # Profile names mentioning this container. NOTE: aa-status reports the kernel's
@@ -164,8 +163,7 @@ wait_running() {
 # A container is "healthy enough" if it is RUNNING, has processes, and stays
 # RUNNING for a settle period without the daemon restarting it.
 settle_check() {
-  local c=$1 before after
-  before=$(pids_of "$c")
+  local c=$1 after
   sleep 12
   [ "$(state_of "$c")" = "RUNNING" ] || return 1
   after=$(pids_of "$c")
@@ -231,7 +229,7 @@ run_diagnose() {
   head2 "AppArmor / exec diagnosis on $(hostname) ($(date -Is))"
   say "  kernel: $(uname -r)   incus: $(incus version 2>/dev/null | awk -F': ' '/Server version/{print $2}')"
   say "  incus profiles loaded: $(aa-status 2>/dev/null | grep -c 'incus-')"
-  say "  profile files on disk: $(ls /etc/apparmor.d 2>/dev/null | grep -c incus)"
+  say "  profile files on disk: $(find /etc/apparmor.d -maxdepth 1 -name '*incus*' 2>/dev/null | wc -l | tr -d ' ')"
   say "  apparmor dirs: $(apparmor_dirs | tr '\n' ' ')"
   for c in $TARGETS; do
     diagnose_one "$c"; r=$?
