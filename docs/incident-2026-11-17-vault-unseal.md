@@ -98,3 +98,25 @@ consumer needs only a new secret-id
 (`vault write -f auth/approle/role/mailjet/secret-id`); no consumer of that role was
 found in the Cerulean tree, and the product tokens are files rather than AppRole logins.
 Both keys in the set-aside directory are inert — the working pair is `init/init.json`.
+
+### Consumers held their own copy of the product tokens
+
+Re-minting a token in Vault does not reach an app that mounts a **copy** of it. The OnTrak
+family keeps `/usr/src/ontrak/data/vault/token/ontrak.token` inside the `ontrak` incus
+container and bind-mounts that one file over `/vault/token/ontrak.token` in six
+containers, each resolving `vault://cerulean/ontrak/...` at boot. They fail closed — the
+right behaviour, but it reads like an app bug:
+
+```
+[ontrak-tix][vault] vault: reading cerulean/ontrak/tix failed (HTTP 403)
+!!! vault-env resolution failed — refusing to boot with unresolved vault:// refs
+```
+
+`tix-app`, `genie-app`, `genie-preview`, `portal-app`, `sentinel-app` and `sync-api`
+crash-looped until that file was replaced with the re-minted token. The replacement is
+checked by `sha256` equality with `data/vault/token/ontrak.token` on the Vault host, written
+in place so the bind mount and the `0600` mode the uid-1001 drop relies on are untouched,
+with the previous file kept beside it as `ontrak.token.bak-20261117`. A future rebuild has to
+enumerate consumers that mount a token — not ones that log in through an AppRole — before
+the barrier is touched, not after: `grep -rl 'vault/token' ` across the estate is the cheap
+version of this step.
