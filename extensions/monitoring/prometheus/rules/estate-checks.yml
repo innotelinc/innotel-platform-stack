@@ -156,6 +156,15 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="atheniq_doors"}), "check", "atheniq_doors", "check", ".*")
             or label_replace(absent(innotel_estate_check_last_run_timestamp{check="installed_checks"}), "check", "installed_checks", "check", ".*")
             or label_replace(absent(innotel_estate_check_last_run_timestamp{check="unit_drift"}), "check", "unit_drift", "check", ".*")
+          # The age of the vault's credentials (2026-11-17): every other check
+          # asks whether a credential works, and one that is never rotated works
+          # exactly like one rotated yesterday.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="credential_age"}), "check", "credential_age", "check", ".*")
+          # And the check that reads history instead of the moment: its own series
+          # is the one place a flapping check is visible.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="estate_flaps"}), "check", "estate_flaps", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="retired_instances"}), "check", "retired_instances", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="sso_redirects"}), "check", "sso_redirects", "check", ".*")
         for: 30m
         labels:
           severity: critical

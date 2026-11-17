@@ -84,7 +84,7 @@ class GateTableCase(unittest.TestCase):
                 ("re.genie.innotel.us", "/oauth2/callback", "oauth2-proxy"),
                 ("uc.genie.innotel.us", "/oauth2/callback", "oauth2-proxy"),
                 ("nas.innotel.us", "/oauth2/callback", "oauth2-proxy"),
-                ("proxy.innotel.us", "/oauth2/callback", "oauth2-proxy"),
+                ("npm.cerulean.innotel.us", "/outpost.goauthentik.io/callback", "app"),
                 ("tix.ontrak.technology", "/api/sso/callback", "app"),
             ],
         )
