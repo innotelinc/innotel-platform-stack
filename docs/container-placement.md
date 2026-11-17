@@ -1330,7 +1330,11 @@ placement (finding 7).
   *skipping* the very assertion this fixes — it is set to `signara.innotel.us` again and
   the unit reports `ok retired` instead of `skipped`; and `check-mail-auth.py`'s note no
   longer says "CNAME", because that table is a policy ("this name is not a mail domain")
-  and the zone is free to change the record type underneath it.
+  and the zone is free to change the record type underneath it. Because that env file
+  exists only on the container (`/opt/oasis` there is plain files, no `git`, and no host
+  carries an `oasis` checkout), the list now has a home a rebuild reads:
+  `scripts/restore-mailjet-retired-domains.py` sets it, runs the unit, and **fails when
+  the run says `skipped`** — a check that skips is not a check that passes.
   Three operational facts, all learned the hard way:
   - **Stalwart publishes its DKIM records to Technitium itself now — 2026-10-03.** It
     used to do a TSIG dynamic update at `192.168.1.80` (the older BIND copy of the

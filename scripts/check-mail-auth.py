@@ -34,6 +34,12 @@ THE RULES
 3. **DKIM** must resolve for each selector in `DOMAINS` and carry a `v=DKIM1` tag with
    a non-empty `p=` key.
 4. A server that answers `SERVFAIL`/`REFUSED`/nothing is **exit 2**, naming it.
+5. A **retired** mail domain must answer **no** `MX` at all. While
+   `signara.innotel.us` was a `CNAME` to the apex, a query for its `MX` returned the
+   *parent's*, so a name nobody serves still declared where its mail was routed — and
+   mail addressed to it went into the inbound parser for a domain with no mailbox.
+   Replaced with an `A` record on 2026-11-16 (see `docs/container-placement.md`); this
+   rule is what keeps it that way.
 
 The selector table is deliberate and versioned: a rotation adds a selector *here* as
 well as to the zone, and that edit is the record of what the public zone must serve —
@@ -105,6 +111,13 @@ ALIASES: dict[str, str] = {
     "signara.innotel.us": "innotel.us",
 }
 
+#: Names that were mail domains and are not any more. They must answer no `MX`: a name
+#: that still does declares that mail for it is routed somewhere, which is exactly the
+#: half-retirement this file's rule 5 exists to catch. Kept beside `ALIASES` because the
+#: two describe the same name from different angles — one says what it is, this says what
+#: it must not do.
+RETIRED: tuple[str, ...] = ("signara.innotel.us",)
+
 #: A TXT answer is one or more quoted character-strings that decode to one value; a
 #: long RSA key is split across two `"…" "…"` chunks on one line (measured, 2026-10-03),
 #: so the chunks are concatenated rather than compared one by one.
@@ -172,6 +185,54 @@ def query_txt(name: str, server: str, runner=subprocess.run) -> tuple[str, list[
     return status, records
 
 
+def parse_mx(output: str) -> list[str]:
+    """The `MX` exchanges in a dig answer, `priority host` as written.
+
+    `parse_answer` extracts quoted strings, which an `MX` answer has none of, so the
+    answer section is read directly here. Every `MX` in the section counts: when the name
+    was a `CNAME`, the section held the **target's** records, and those are the ones that
+    made a retired name look routed.
+    """
+    records: list[str] = []
+    in_answer = False
+    for line in output.splitlines():
+        if line.startswith(";; ANSWER SECTION:"):
+            in_answer = True
+            continue
+        if not in_answer:
+            continue
+        if line.startswith(";;") or not line.strip():
+            in_answer = False
+            continue
+        fields = line.split()
+        if "MX" in fields:
+            at = fields.index("MX")
+            records.append(" ".join(fields[at + 1:at + 3]))
+    return records
+
+
+def query_mx(name: str, server: str, runner=subprocess.run) -> tuple[str, list[str]]:
+    """Read `name`'s `MX` records from `server`. Raises `DnsUnreadable` on a refused query."""
+    command = ["dig", "+time=3", "+tries=1", "+noall", "+answer", "+comments", "MX", name, f"@{server}"]
+    proc = runner(command, capture_output=True, text=True, timeout=15)
+    status, _ = parse_answer(proc.stdout)
+    if status in {"UNREADABLE", "SERVFAIL", "REFUSED", "NOTIMP"}:
+        raise DnsUnreadable(server, proc.stdout or proc.stderr)
+    return status, parse_mx(proc.stdout)
+
+
+def retired_finding(name: str, exchanges: list[str]) -> Finding:
+    """A retired mail domain: silent about mail, or failing loudly because it is not."""
+    if exchanges:
+        return Finding(
+            "retired-domain-publishes-mx",
+            "fail",
+            f"{name} is retired as a mail domain but still answers MX ({', '.join(exchanges)}) — "
+            "mail addressed there is routed to a name nobody serves",
+        )
+    return Finding("retired-domain-unrouted", "note", f"{name} is retired and answers no MX")
+
+
 def _spf(texts: list[str]) -> str | None:
     return next((t for t in texts if t.lower().startswith("v=spf1")), None)
 
@@ -235,7 +296,8 @@ def alias_finding(name: str, target: str) -> Finding:
 
 
 def collect(
-    domains: dict[str, dict[str, object]], server: str, lookup=None, aliases: dict[str, str] | None = None
+    domains: dict[str, dict[str, object]], server: str, lookup=None, aliases: dict[str, str] | None = None,
+    retired: tuple[str, ...] | None = None, mx_lookup=None,
 ) -> tuple[Audit, int, int]:
     """Run every query and fold the answers into one `Audit` plus its ok/total counts.
 
@@ -253,15 +315,24 @@ def collect(
         records.append((domain, "dmarc", _dmarc(dmarc_texts)))
         for selector in spec.get("dkim", []):  # type: ignore[union-attr]
             detail.findings.append(evaluate(domain, selector, lambda name: lookup(name, server)))
+    extras: list[Finding] = []
     for name, target in (aliases or {}).items():
-        detail.findings.append(alias_finding(name, target))
+        extras.append(alias_finding(name, target))
+    mx_lookup = mx_lookup or query_mx
+    for name in retired or ():
+        _, exchanges = mx_lookup(name, server)
+        extras.append(retired_finding(name, exchanges))
+    detail.findings.extend(extras)
 
     result = audit(records)
     result.findings.extend(detail.findings)
-    # The alias notes are not records the zone must serve, so they are stated but kept
-    # out of the ok/expected series — a panel that said "5/5 records" for four records
-    # and one CNAME would overstate what was verified.
-    stated = len(aliases or {})
+    # The alias and retirement notes are not records the zone must serve, so they are
+    # stated but kept out of the ok/expected series — a panel that said "5/5 records" for
+    # four records and one CNAME would overstate what was verified. Only *these* notes are
+    # discounted: a DKIM note is a record that was read and is right, and it belongs in the
+    # denominator. A retired name that does answer MX is a failure and stays counted too,
+    # because it is a record that was read and is wrong.
+    stated = len([f for f in extras if f.level == "note"])
     ok = len([f for f in result.findings if f.level == "note"]) - stated
     return result, ok, len(result.findings) - stated
 
@@ -291,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        result, ok, total = collect(domains, args.server, aliases=ALIASES)
+        result, ok, total = collect(domains, args.server, aliases=ALIASES, retired=RETIRED)
     except DnsUnreadable as error:
         print(f"check-mail-auth: {error}", file=sys.stderr)
         emit(None, ran=False)

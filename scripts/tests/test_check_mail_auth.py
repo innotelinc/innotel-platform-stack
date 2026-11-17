@@ -169,6 +169,58 @@ class CollectCase(unittest.TestCase):
         self.assertEqual(alias[0].level, "note")
         self.assertIn("web alias", alias[0].message)
 
+    def test_a_retired_domain_that_answers_mx_fails(self):
+        """The signara case: a retired name whose MX answer was the parent's, not its own."""
+        present = {
+            "innotel.us": ["v=spf1 mx -all"],
+            "_dmarc.innotel.us": ["v=DMARC1; p=reject"],
+        }
+        result, _ok, _total = mail.collect(
+            {"innotel.us": {"dkim": []}},
+            "192.168.1.71", self._lookup(present),
+            retired=("signara.innotel.us",),
+            mx_lookup=lambda name, server: ("NOERROR", ["1 parse.mailjet.com.", "5 mail.innotel.us."]),
+        )
+        self.assertFalse(result.ok)
+        [failure] = result.failures
+        self.assertEqual(failure.code, "retired-domain-publishes-mx")
+        self.assertIn("parse.mailjet.com", failure.message)
+
+    def test_a_retired_domain_with_no_mx_is_only_a_note(self):
+        present = {
+            "innotel.us": ["v=spf1 mx -all"],
+            "_dmarc.innotel.us": ["v=DMARC1; p=reject"],
+        }
+        result, ok, total = mail.collect(
+            {"innotel.us": {"dkim": []}},
+            "192.168.1.71", self._lookup(present),
+            retired=("signara.innotel.us",),
+            mx_lookup=lambda name, server: ("NOERROR", []),
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual((ok, total), (2, 2), "a retired name is stated, not counted as a record")
+
+    def test_parse_mx_reads_the_preference_and_host(self):
+        """A `CNAME` answer carries the target's `MX`, which is exactly what fooled the name."""
+        output = (
+            ";; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 1\n"
+            ";; ANSWER SECTION:\n"
+            "signara.innotel.us.\t300\tIN\tCNAME\tinnotel.us.\n"
+            "innotel.us.\t300\tIN\tMX\t1 parse.mailjet.com.\n"
+            "innotel.us.\t300\tIN\tMX\t5 mail.innotel.us.\n"
+        )
+        self.assertEqual(mail.parse_mx(output), ["1 parse.mailjet.com.", "5 mail.innotel.us."])
+
+    def test_a_refused_mx_query_raises_dns_unreadable(self):
+        def lookup(name, server):
+            raise mail.DnsUnreadable(server, "REFUSED")
+
+        with self.assertRaises(mail.DnsUnreadable):
+            mail.collect(
+                {"innotel.us": {"dkim": []}}, "192.168.1.71", self._lookup({}),
+                retired=("signara.innotel.us",), mx_lookup=lookup,
+            )
+
     def test_a_refused_query_raises_dns_unreadable(self):
         def lookup(name, server):
             raise mail.DnsUnreadable(server, "REFUSED")
