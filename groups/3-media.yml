@@ -143,8 +143,8 @@ services:
       com.centurylinklabs.watchtower.enable: "false"
     # Memory posture (docs/service-audit.md): transcode bursts are the media
     # stack's biggest consumer; cap and keep swap off.
-    mem_limit: 4g
-    memswap_limit: 4g
+    mem_limit: 3g
+    memswap_limit: 3g
     healthcheck:
       # The image's first start after a recreate can stall in its own init: the
       # container reports Up while the app service never starts, and nothing that
@@ -539,9 +539,9 @@ services:
     <<: *common-keys
     container_name: flaresolverr
     # Caps this service so a pile-up of headless Chromium instances can only
-    # OOM-kill itself, not the rest of the 8 GiB monarch cgroup (62 of 89
+    # OOM-kill itself, not the rest of the 10 GiB monarch cgroup (62 of 89
     # kernel OOM kills in one boot were in this scope).
-    mem_limit: 2g
+    mem_limit: 3g
     image: ghcr.io/flaresolverr/flaresolverr@sha256:c80ae007ce2ccdcd217a12426e4f039ef763ff90738c808d38810c3e59323767
     # waitress (the server FlareSolverr switched to for FlareSolverr#680) runs
     # four worker threads, and every /v1 request starts its own headless
@@ -559,6 +559,7 @@ services:
       TZ: ${TZ:-America/New_York}
       LOG_LEVEL: info
       PYTHONPATH: /patch
+    shm_size: 1g
 
   ###############################################
   # AUTOBRR - Indexer Automation
@@ -662,7 +663,7 @@ services:
       # for a part with room to spare, and the container limit is still the boundary a
       # runaway dies at - inside its own cgroup, not as the host's OOM killer.
       NODE_OPTIONS: "--max-old-space-size=3072"
-    mem_limit: 4g
+    mem_limit: 2g
     volumes:
       - /etc/localtime:/etc/localtime:ro
       # Host /opt/epg holds channels.xml (EPG channel list, written by
@@ -748,7 +749,7 @@ services:
   authentik-ldap:   # from monarch
     <<: *common-keys
     container_name: authentik-ldap
-    image: ghcr.io/goauthentik/ldap:2026.8.4
+    image: ghcr.io/goauthentik/ldap:2026.8.5
     environment:
       AUTHENTIK_HOST: http://${AUTHENTIK_LDAP_AUTHORITY:-auth.cerulean.innotel.us}:${AUTHENTIK_LDAP_AUTHORITY_PORT:-9000}
       AUTHENTIK_INSECURE: "true"          # the authority is plain http on the LAN
@@ -1347,9 +1348,6 @@ services:
 
 
   dashboard:   # from plutus (profiles: "dashboard")
-    # Opt-in: the upstream dashboard image is no longer anonymously pullable
-    # from GHCR, so the default stack must not depend on it. Bring it up with
-    # `docker compose --profile dashboard up -d` when your account can pull it.
     profiles: ["dashboard"]
     image: ghcr.io/get-convex/convex-dashboard:latest
     stop_grace_period: 10s
