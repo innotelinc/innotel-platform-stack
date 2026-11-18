@@ -54,7 +54,7 @@ Read from each guest's own kernel and daemon config. `signal_denials` is
 
 | Host | Guest | Containers | `apparmor-profile` | Profile loaded | Signal denials |
 | --- | --- | --- | --- | --- | --- |
-| i1 `.51` | `atheniq` | 21 | unset — **daemon has no such option** | `docker-default (enforce)` | 0 |
+| i1 `.51` | `atheniq` | 22 | unset — **daemon has no such option**; profile installed by hand | `docker-default (complain)` | 0 |
 | i1 `.51` | `genesis` | 1 | unset | `docker-default (enforce)` | 0 |
 | i1 `.51` | `mail` | 1 | unset | none | 0 |
 | i1 `.51` | `ontrak` | 28 | `/etc/apparmor.d/docker-default` | `docker-default (complain)` | 0 before, 0 after |
@@ -72,23 +72,23 @@ Read from each guest's own kernel and daemon config. `signal_denials` is
 
 ## What this means
 
-**Three guests are fixed** (`monarch`, `signara`, and `ontrak` as of 2026-11-18).
-**Eleven Docker daemons still run the stock profile in enforce** — `atheniq` (21
-containers), `proxy` (24), `onyx` (14), `vault` (8), `rizzaura` (5), `atlas` (4) and the
-single-container guests.
+**Four guests are fixed** (`monarch`, `signara`, `ontrak` and — as of 2026-11-18 —
+`atheniq`).
+**Ten Docker daemons still run the stock profile in enforce** — `proxy` (24),
+`onyx` (14), `vault` (8), `rizzaura` (5), `atlas` (4) and the single-container guests.
 
 None of them had logged a signal denial at the time of the audit, so none is wedged. The
 exposure is real but **latent**: the denial only bites a workload that signals across the
 namespaced boundary — the postgres entrypoint's checkpoint/`urg` path, or a Go privilege
 drop. `ontrak` and `atheniq` both run Postgres images whose entrypoint drops with
-`gosu`, which is exactly the composition that failed on `signara`, so they are the two
-worth applying this to first.
+`gosu` — exactly the composition that failed on `signara` — and both now run the profile,
+`ontrak` through the daemon key and `atheniq` through the reloaded profile.
 
 Applying it is one command per guest, and the containers that already exist keep the
 label they were created with until they are recreated once — the daemon-wide selection
 only covers containers started after it.
 
-### `atheniq` cannot take it at all
+### `atheniq`: no daemon-wide selector, but the profile is live
 
 `atheniq` runs Docker **29.1.3**, which has no `--apparmor-profile` option: `dockerd
 --help` has no match for `apparmor` (`grep` exits 1), and a `daemon.json` carrying the
@@ -99,11 +99,23 @@ unable to configure the Docker daemon with file /etc/docker/daemon.json:
 the following directives don't match any configuration option: apparmor-profile
 ```
 
-So there is no daemon-wide selection on that host. Per-container
-(`--security-opt apparmor=docker-default`) is the remaining option, and that means
-recreating the containers, which is a decision about a running service rather than a
-config change. `atheniq` therefore stays on the stock profile in enforce; it had logged
-no denial, so nothing is wedged today.
+So the daemon cannot be told to load a profile. What it *can* do is load the profile its
+containers already name: `/etc/apparmor.d/docker-default` is installed on the guest, and
+`apparmor_parser -r` puts it into the kernel in **complain**, replacing the stock profile
+of the same name that Docker loads from its own binary.
+
+Measured 2026-11-18 after installing it: `docker-default (complain)` in
+`/sys/kernel/security/apparmor/profiles`; 21 of the 22 running containers report
+`docker-default`, and a live container process reads `docker-default (complain)` in
+`/proc/<pid>/attr/current` — **without recreating a single container**, because a
+profile reload reattaches to processes already running under that name. The one
+exception is the buildx builder (`/buildx_buildkit_serial0`: `privileged`,
+`label=disable`), which is unconfined by design and is not a workload. `journalctl -k`
+shows 0 AppArmor denials in the 24 hours after the change.
+
+So the earlier conclusion held only for the *daemon-wide selector*. The audit posture is
+reachable on `atheniq` without a maintenance window: the profile Docker applies by
+default is identified by name, and that name can be reloaded underneath it.
 
 ### What applying it cost, and the guard it produced (2026-11-18)
 
