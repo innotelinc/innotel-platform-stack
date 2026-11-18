@@ -186,12 +186,21 @@ EXPECTED: dict[str, dict[str, str]] = {
         # across, and `deploy.innotel.us` was repointed the same evening.
         "coolify": "192.168.1.85",
         "clearpath": "192.168.1.83",
+        # `copilotkit` (`.114`) came back here from `i3` on 2026-11-18, with `subscribe`
+        # (`.58`) below. The address never moved — it is pinned in the container's netplan —
+        # so only the host key changes, as it did for `atheniq` and `mail` before. Filed
+        # under `i3` it reported `i3 copilotkit: not present` while the running container sat
+        # in no row at all, which is the false alarm in both directions that this table's
+        # notes describe for `onyx`.
+        "copilotkit": "192.168.1.114",
         "genie-preview": "192.168.1.24",
         "monarch": "192.168.1.56",
         "nas": "192.168.1.89",
         "regcache": "192.168.1.79",
         "rizzaura": "192.168.1.62",
         "sage": "192.168.1.94",
+        # `subscribe` (`.58`) returned here from `i3` on 2026-11-18 — see `copilotkit` above.
+        "subscribe": "192.168.1.58",
     },
     # `capstone` (`.30`, Zeus telephony) is **not** a row any more. It stopped on
     # 2026-11-02 and cannot be started on `i2`: the host reports 4.8 GiB total (1.3 GiB
@@ -206,8 +215,10 @@ EXPECTED: dict[str, dict[str, str]] = {
     # containers while `i2` is reinstalled. Every one of them keeps the address it had —
     # it is pinned in the container's own netplan — so only the host key moved, which is
     # the point of the pin. `docs/estate-rebalance-2026-11-15.md` §14 has the cutover.
-    "i3": {
-        "copilotkit": "192.168.1.114",
+    # `copilotkit` and `subscribe` came back to `i2` on 2026-11-18, which is why they are
+    # rows under `i2` and not here: filed here they reported `i3 copilotkit: not present`
+    # while the running container sat in no row at all — the same false alarm in both
+    # directions this table's own notes describe for `onyx`.    "i3": {
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
         # `onyx` is imported here and **STOPPED**: it mounts the USB block device
@@ -228,7 +239,6 @@ EXPECTED: dict[str, dict[str, str]] = {
         # present` on every run while the running container was in no row at all.
         "pi": "192.168.1.70",
         "signara": "192.168.1.44",
-        "subscribe": "192.168.1.58",
     },
     "i4": {
         # Created 2026-11-15: the Tix database left host Docker for a capped container

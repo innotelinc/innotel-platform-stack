@@ -84,7 +84,11 @@ except ImportError:  # a bare copy still has to run: --prom is then simply unava
 
 #: The `check` label this check publishes under (`estate-checks.yml` alerts on it).
 CHECK = "edge_vhost_targets"
-DEFAULT_CONFIG_DIR = Path("/data/nginx")
+#: Where NPM keeps its vhosts. It was `/data/nginx` while NPM ran on the host; the edge
+#: runs it in the `cerulean-npm` container since the 2026-11-15 move, whose `/data` is the
+#: bind mount `/usr/src/proxy/data` — so the old default looked at an empty path and this
+#: check reported `no proxy hosts under /data/nginx/proxy_host` instead of comparing them.
+DEFAULT_CONFIG_DIR = Path("/usr/src/proxy/data/nginx")
 DEFAULT_EXPECT = SCRIPT_DIR / "edge-vhost-targets.tsv"
 #: Targets allowed to be dark, with the reason (see rule 3). Beside this file when
 #: installed; absent means nothing is allowed to be dark.
