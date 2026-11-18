@@ -47,6 +47,16 @@
 # expect containers to stop and come back. Either way the containers that were
 # already wedged keep the label they were created with and need one recreate.
 #
+# The value written is the profile's **path**; Docker loads that file and applies the
+# profile named inside it. A bare name there makes dockerd refuse to start.
+#
+# Not every daemon can be configured this way. Docker 29.1.3 (atheniq) has no
+# `--apparmor-profile` at all and rejects the key with "the following directives don't
+# match any configuration option". The script therefore asks
+# `dockerd --validate --config-file=` BEFORE restarting, and rolls the config back and
+# leaves Docker running if the daemon would not accept it — the first version of this
+# script restarted first and took all 21 containers on atheniq down with it.
+#
 # Exit: 0 already correct / repaired, 1 drift or a failed repair, 2 bad usage.
 set -uo pipefail
 
@@ -111,14 +121,38 @@ profile $NAME flags=(complain,attach_disconnected,mediate_deleted) {
 PROFILE_TEXT
 }
 
+# The value is the profile **file** (Docker loads the profile from it), not the profile
+# name. Measured 2026-11-18: a name here makes dockerd refuse to start, and the failure
+# takes every container on the host with it. `--security-opt apparmor=<name>` is where a
+# name belongs; this key is a path.
+daemon_selects() {
+  python3 - "$DAEMON" "$PROFILE" <<'PY' 2>/dev/null
+import json, sys
+config, profile = sys.argv[1], sys.argv[2]
+try:
+    current = json.load(open(config))
+except Exception:
+    sys.exit(1)
+sys.exit(0 if current.get("apparmor-profile") == profile else 1)
+PY
+}
+
+restore_daemon() { # put back the newest backup; never leave a daemon without a config
+  local backup
+  backup=$(ls -1t "$DAEMON".bak-* 2>/dev/null | head -1)
+  if [ -n "$backup" ]; then
+    cp -p "$backup" "$DAEMON" && echo "restored $DAEMON from $backup"
+  else
+    rm -f "$DAEMON" && echo "removed $DAEMON (there was no backup)"
+  fi
+}
+
 drift=""
 [ -f "$PROFILE" ] || drift="$drift profile-missing"
 if [ -f "$PROFILE" ] && ! cmp -s "$PROFILE" <(profile_body); then
   drift="$drift profile-content"
 fi
-if ! grep -q "\"apparmor-profile\"" "$DAEMON" 2>/dev/null; then
-  drift="$drift daemon-config"
-fi
+daemon_selects || drift="$drift daemon-config"
 [ "$LOADED" = "$WANT_LOADED" ] || drift="$drift not-loaded-in-complain"
 
 if [ -z "$drift" ]; then
@@ -147,8 +181,8 @@ rm -f "$PROFILE.tmp"
 apparmor_parser -r "$PROFILE" 2>/dev/null || { echo "apparmor_parser refused $PROFILE" >&2; exit 1; }
 
 # ── the daemon's selection of it ────────────────────────────────────────────
-if ! grep -q "\"apparmor-profile\"" "$DAEMON" 2>/dev/null; then
-  cp -n "$DAEMON" "$DAEMON.bak-$(date +%s)" 2>/dev/null || true
+if ! daemon_selects; then
+  cp -p "$DAEMON" "$DAEMON.bak-$(date +%s)" 2>/dev/null || true
   python3 - "$DAEMON" "$PROFILE" <<'PY' || { echo "could not update $DAEMON" >&2; exit 1; }
 import json, sys
 path, profile = sys.argv[1], sys.argv[2]
@@ -161,8 +195,33 @@ with open(path, "w") as handle:
     json.dump(current, handle, indent=2)
     handle.write("\n")
 PY
-  echo "added apparmor-profile to $DAEMON; restarting docker"
-  systemctl restart docker || { echo "docker did not restart" >&2; exit 1; }
+
+  # Ask the daemon whether it understands the file *before* bouncing it. Docker 29.1.3
+  # (atheniq, 2026-11-18) answers `the following directives don't match any
+  # configuration option: apparmor-profile` — a restart there stops every container on
+  # the host until somebody notices, which is exactly what this validate step prevents.
+  if command -v dockerd >/dev/null 2>&1 &&
+     ! dockerd --validate --config-file="$DAEMON" >/tmp/dockerd-validate.log 2>&1; then
+    echo "this daemon does not accept apparmor-profile: $(grep -o 'directives.*' /tmp/dockerd-validate.log | head -1)"
+    echo "leaving $DAEMON unchanged (the profile stays installed for per-container use)"
+    restore_daemon
+    echo "the label can still be applied per container: docker run --security-opt apparmor=$NAME …"
+    exit 1
+  fi
+
+  running_before=$(docker ps -q 2>/dev/null | wc -l)
+  echo "added apparmor-profile=$PROFILE to $DAEMON; restarting docker"
+  if ! systemctl restart docker; then
+    echo "docker did not restart; rolling $DAEMON back" >&2
+    restore_daemon
+    systemctl start docker
+    exit 1
+  fi
+  sleep 5
+  running_after=$(docker ps -q 2>/dev/null | wc -l)
+  if [ "$running_after" -lt "$running_before" ]; then
+    echo "warning: containers running $running_before → $running_after after the restart" >&2
+  fi
 fi
 
 # ── verify, never assume ────────────────────────────────────────────────────
