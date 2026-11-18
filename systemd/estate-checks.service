@@ -36,10 +36,11 @@ Environment=TEXTFILE_DIR=/var/lib/node_exporter/textfile
 #
 # JOBS is deliberately small: this is 2 vCPU that also carries 24 containers, and the
 # point is to overlap the waiting, not to fork the estate at once. Measured 2026-11-18:
-# 39 checks took 254 s one after another, of which 54 s was the single slowest, and 76-93 s
-# at six (four runs: 75.8, 76.9, 79, 89.7 s of drain). That is ~3x, and the spread is the
-# edge's own load, so the number to expect is a minute and a half rather than a minute.
-# Raising it would load the edge, which is the host every other check is measuring.
+# 39 checks took 254 s one after another, of which 54 s was the single slowest, and 76-101 s
+# at six (six runs: 75.8, 76.9, 79, 89.7, 100.6 of drain). The spread is the edge's own load
+# — the slowest run was the one that began while another agent was busy — so the honest
+# number to expect is 1.5-2 minutes, not a minute. Raising this would load the edge, which
+# is the host every other check is measuring.
 # SPOOL is `/run` because the list is worthless after a reboot, and a reboot is the
 # one time a leftover would be replayed.
 Environment=ESTATE_CHECK_JOBS=6
