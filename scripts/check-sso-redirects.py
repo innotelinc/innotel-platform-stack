@@ -36,13 +36,25 @@ Nothing is written: no provider is patched, no host is changed. The fix for a
 finding is a human decision — add the URI, retire the app, or point the app at
 the registered name.
 
+One rule is not a name rule. A registration keyed to an address
+(`http://192.168.1.113:8000/auth/authentik/callback`) has no name to outlive, so
+it is judged by whether the address still answers — the two live Coolify panels
+sign in that way. Treating those as dead was a false finding caught on 2026-11-18,
+before anything was retired.
+
 USAGE
 -----
-It runs from `estate-checks.service` on the edge, where `docker` is the CLI *inside*
-the `proxy` container rather than on the host, so the prefix is an argument:
+It runs from `estate-checks.service` on the edge, which is *inside* the `proxy`
+container, where the Docker CLI is local and no prefix is wanted:
 
-    ./scripts/check-sso-redirects.py --docker 'incus exec proxy -- docker' \
+    ./scripts/check-sso-redirects.py --auth http://192.168.1.71:9000 \
         --prom /var/lib/node_exporter/textfile/estate-check-sso-redirects.prom
+
+`--docker` exists for a shell elsewhere in the estate; the check also works the prefix
+out for itself (`docker_prefixes`). Naming `incus exec proxy -- docker` from *inside*
+`proxy` is the mistake that left `check-edge-sso-door` dying on `FileNotFoundError` and
+publishing nothing until 2026-11-18 — the prefix describes a host, and the unit does not
+run on that host.
 
 and by hand anywhere the two APIs are reachable:
 
@@ -67,6 +79,7 @@ not run at all (no provider token, no NPM rows) — never a pass.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import re
 import shlex
@@ -203,6 +216,40 @@ def resolves(host: str) -> bool:
         return True
     except OSError:
         return False
+
+
+def is_address(host: str) -> bool:
+    """Whether a registered URI's authority is an address rather than a name."""
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+        return True
+    except ValueError:
+        return False
+
+
+def address_verdict(uri: str, timeout: int = 15) -> tuple[str, str]:
+    """Whether a registration keyed to an address still has something listening.
+
+    The name rule ("every registered URI must be served by an NPM proxy host") cannot judge
+    an address: there is no name to outlive, and a panel reached as `http://10.0.0.5:8000`
+    is doing exactly what its registration says. On 2026-11-18 this check failed three live
+    Coolify callbacks that way — the panels on `i2` and the `dev` VM sign in through
+    Authentik by address — which is the failure mode an audit must not have: it was one
+    step from pointing at three working sign-ins.
+
+    What *can* be asked of an address is whether it answers. A service that stopped is the
+    same finding the name rule reports, so it stays a failure; a live one is a pass that
+    says what answered, so the series still accounts for the registration.
+    """
+    parsed = urllib.parse.urlparse(uri)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    base = f"{parsed.scheme or 'http'}://{parsed.hostname}:{port}/"
+    status, _, _ = fetch(base, timeout=timeout)
+    if status == 0:
+        return ("FAIL", f"registered by address and nothing answers on "
+                        f"{parsed.hostname}:{port} — the service moved or stopped")
+    return ("PASS", f"registered by address, which has no NPM host by definition; "
+                     f"{parsed.hostname}:{port} answers HTTP {status}")
 
 
 def fetch(url: str, follow: bool = False, timeout: int = 15) -> tuple[int, dict, bytes]:
@@ -348,6 +395,17 @@ def main() -> int:
                 continue
             if not host:
                 record("FAIL", uri, "not a usable URI")
+                continue
+            if is_address(host):
+                # A registration keyed to an address has no name to outlive, so the rule
+                # below cannot judge it. Two live Coolify panels (i2 and the `dev` VM) sign
+                # in through Authentik by address, and on 2026-11-18 this check called all
+                # three of those registrations dead because no NPM row serves an IP — the
+                # audit was about to be pointed at three working sign-ins. What can be
+                # asked of an address is whether it answers; a listener that stopped is
+                # the same finding the name rule reports, and a live one is a note.
+                verdict, detail = address_verdict(uri, timeout=args.timeout)
+                record(verdict, uri, detail)
                 continue
             if host not in hosts:
                 record("FAIL", uri, f"{host} has no enabled NPM proxy host — the registration outlived the name")
