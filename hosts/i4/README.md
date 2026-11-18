@@ -104,26 +104,25 @@ minutes and mails on failure, and it is here because **this host must not carry
 gone. It moved here on 2026-10-09 from `i1`, where the 2026-10-09 placement change had
 just put the edge back. A future placement change checks the pair.
 
-## The units this host runs alone
+## The host-side units, and where each is enabled
 
-Four units run only here, and until 2026-11-18 none of them was in the repository: the
-scripts were in `/usr/local/sbin`, the units in `/etc/systemd/system`, and the only copy of
-the memory policy was `/root/incus-rebalance/policy.json` — a `/root` copy, which
-`docs/root-paths.md` explains the estate does not keep. They are in `systemd/` and
-`scripts/` now, so `check-unit-drift.py` holds this host's copies to the revision and a
-rebuild can produce them.
+Four units that until 2026-11-18 existed only on hosts are in `systemd/` and `scripts/` now:
+`estate-edge`, `estate-sample`, `estate-state` and `incus-rebalance`. **All four are
+installed on both `i1` and `i4`** — what differs is which timers are enabled, and that
+difference is the design, not drift:
 
-| unit | what it does | why it is here |
-|---|---|---|
-| `estate-edge.{service,timer}` | probes every upstream the edge proxies to, every five minutes, and separates `DOWN` from `down-on-purpose` by reading the instance's own `user.estate.*` note | this host carries the edge but is not the edge: a probe inside `proxy` could not report `proxy` gone — the same reason `edge-liveness` is here |
-| `estate-sample.{service,timer}` | one line per instance per minute into `/var/lib/estate-samples/i4.tsv`, trimmed to a day | "did it swap out under its own startup burst?" has to be answerable afterwards; `incus exec` into an instance fails exactly when the ramp is worth sampling, so this reads the host cgroups |
-| `estate-state.{service,timer}` | records why an instance is stopped, in the instance's own `user.estate.*` config, and reports on Monday the ones stopped over a week with no note | `incus list` shows `STOPPED` for "paused this morning" and "retired last month" alike, and `estate-edge` reads the note this writes |
-| `incus-rebalance.{service,timer}` | fits each container's memory cap to its measured use every five minutes (`--apply`) | the caps were set by hand from one day's snapshot; this is the only thing that moves them, and it writes limits on `i1`, `i2` and this host |
+| unit | i4 | i1 | what it does |
+|---|---|---|---|
+| `estate-edge.{service,timer}` | **enabled** | installed, disabled | probes every upstream the edge proxies to, every five minutes, and separates `DOWN` from `down-on-purpose` by reading the instance's own `user.estate.*` note. It belongs on a host that carries the edge without being it: a probe inside `proxy` could not report `proxy` gone — the same reason `edge-liveness` is here. On `i1` it has never run (no log, timer disabled). |
+| `estate-sample.{service,timer}` | **enabled** | **enabled** | one line per instance per minute into `/var/lib/estate-samples/<host>.tsv`, trimmed to a day. Per host by nature: it reads that host's cgroups, because `incus exec` into an instance fails exactly when the boot ramp is worth sampling. `i1.tsv` and `i4.tsv` both exist and are current. |
+| `estate-state.{service,timer}` | **enabled** | **enabled** | records why an instance is stopped, in the instance's own `user.estate.*` config, and reports on Monday the ones stopped over a week with no note. Also per host: the report is about the instances it can see, and `estate-edge` reads the notes it writes. |
+| `incus-rebalance.{service,timer}` | **enabled** | installed, disabled | fits each container's memory cap to its measured use every five minutes (`--apply`). **One writer for the estate**: this host's pass reaches `i1` and `i2` over their Incus remotes, which is why `i1` has the unit and no timer — a second enabled copy would write the same caps twice. `i1` also has no `/etc/incus-rebalance.json`, so enabling it there would refuse rather than apply. |
 
 `incus-rebalance` is the one to be careful with: the timer runs `--apply`, so the policy file
 is a live control. It reads `/etc/incus-rebalance.json`; `hosts/i4/incus-rebalance.json` is
 that file as deployed on 2026-11-18 (the `/root/incus-rebalance/policy.json` beside the old
-README carries the pre-2026-11-15 placements and must not be installed over it). Run
+README carries the pre-2026-11-15 placements and must not be installed over it — it was the
+only copy before this change, which is what `docs/root-paths.md` is about). Run
 `incus-rebalance` without `--apply` to see a pass and change nothing.
 
 ## Why `estate-checks` has no timer here
