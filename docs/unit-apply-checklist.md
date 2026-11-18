@@ -42,7 +42,8 @@ per piece that says it landed rather than that it was copied.
 
 | piece | host | installs to | proves it |
 |---|---|---|---|
-| `estate-checks.{service,timer}` | the Cerulean edge (`proxy` on `i2`) | `/etc/systemd/system`, and `scripts/install-estate-checks.sh` fills `/opt/innotel/estate-checks/` | a `.prom` per check in `TEXTFILE_DIR`, and `EstateCheckAbsent` quiet for 30 min |
+| `estate-checks.{service,timer}` | the Cerulean edge (`proxy`, on `i4` since 2026-11-15) | `/etc/systemd/system`, and `scripts/install-estate-checks.sh` fills `/opt/innotel/estate-checks/` | a `.prom` per check in `TEXTFILE_DIR`, and `EstateCheckAbsent` quiet for 30 min |
+| `proxy-memory-reserve.{service,timer}` | the host running the edge container — `i4` | `/etc/systemd/system` (no script: it writes one cgroup file) | `cat /sys/fs/cgroup/lxc.payload.proxy/memory.min` reads `2147483648`, and reads it again after `incus restart proxy` |
 | `estate-notify@.service` + `estate-notify.sh` | wherever the wired unit runs | unit in `/etc/systemd/system`, script in `/usr/local/sbin` | `systemctl start estate-notify@<unit>` exits 0 and the topic holds the message |
 | `proxy-backup.{service,timer}` | `i2` (`hosts/i2/proxy-backup/`) | script `/usr/local/sbin/backup-proxy.sh` **first** | a dated restore point, and `Result=success` |
 | `vault-replica-sync.{service,timer}` | the host that owns `/srv/vault` | `/usr/local/sbin/vault-replica-sync`, log in `/var/log/` | the replica's newest mtime moved |

@@ -15,6 +15,25 @@ evening pass moved the edge services back onto i1, right-sized i1's CPU caps, an
 put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
 
+## Changes applied 2026-11-18 — `authentik`'s memory cap raised to 1.5 GiB
+
+- **The provider was running at 66 % of its cap.** `cerulean-authentik` held 674 MiB of a
+  1 GiB limit, with 332 MiB of float, while every sign-in in the estate goes through it —
+  seven doors, the mail server's directory and the app's own SSO. One migration's worth of
+  growth away from an OOM, and an OOM here does not read as "the provider is out of memory";
+  it reads as every door being broken at once.
+- **Raised to `1536m`** (`mem_limit` and `memswap_limit`) in
+  `1-primary/cerulean/docker-compose.yml`, beside the `cpus: 0.75` that was already
+  right-sized. Backup: `docker-compose.yml.bak-authentik-cap-20261118`. The `proxy` host
+  container keeps its 6 GiB cap, so the extra half-gigabyte comes out of that container's
+  own headroom, not out of `i4`: the edge was holding 4.1 GiB of 6 GiB when this was
+  measured.
+- **Applied and verified the same day**: `docker compose --profile authentik up -d
+  authentik-server` (a restart of the provider — the only way the limit takes effect),
+  `HostConfig.Memory` `1610612736`, health `healthy`, `/api/v3/root/config/` **200**, and
+  both `app.ontrak.technology` and `its.ontrak.technology` answering `307` on
+  `/api/sso/start`.
+
 ## Changes applied 2026-11-16 (evening) — `workloads` pinned, three caps right-sized
 
 - **`workloads` (`.113`) no longer takes its address from DHCP.** It was the last

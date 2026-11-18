@@ -1,0 +1,21 @@
+[Unit]
+Description=Re-apply the edge container's memory reservation
+
+# WHY A TIMER AT ALL
+# ------------------
+# `memory.min` lives in the payload cgroup, and incus recreates that cgroup whenever the
+# `proxy` instance restarts — which is a normal thing that happens (a host reboot, a move
+# between hosts, `incus restart proxy` during a change). A oneshot at boot covers the first
+# case and nothing else, so the value is re-asserted every five minutes instead of being
+# assumed. It is a read-write of one integer, so the cost is the process start and nothing
+# else; `AccuracySec` keeps the wake-up from being a reason to wake the box.
+#
+# It is not `Persistent`: this is state about the running kernel, not about a missed job.
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,31 @@
+[Unit]
+Description=Reserve host memory for the edge container (`lxc.payload.proxy`)
+Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/container-placement.md
+# WHY THIS IS A UNIT AND NOT A CONTAINER CONFIGURATION
+# ----------------------------------------------------
+# The reservation wants to be one line in the instance's own configuration and cannot be:
+# incus 6.0.5 validates `raw.lxc` keys, and refuses `lxc.cgroup2.memory.min` outright
+# (`Error: cannot set 'lxc.cgroup2.memory.min' to '2147483648': unknown key`). Written
+# straight to the cgroup it works, and then disappears the moment the container restarts,
+# because incus recreates the payload cgroup — a reservation that is silently gone is worse
+# than none, since the reason it exists is the one moment nobody is looking.
+#
+# So it is re-asserted: once at boot, and on the timer beside this unit, which is what
+# covers a container restart in the middle of the night. `memory.min` is idempotent — it is
+# a value, not a counter — so re-writing it costs nothing.
+#
+# WHY 2 GiB
+# ---------
+# `memory.min` is a *hard* guarantee: the kernel reclaims every other slice before it touches
+# these bytes. 2 GiB is deliberately below what the edge holds on its own (4.1 GiB of its
+# 6 GiB cap when this was measured on 2026-11-18), so the reservation promises nothing the
+# container is not already using and cannot starve the other tenants of `i4`.
+After=incus.service
+ConditionPathIsDirectory=/sys/fs/cgroup/lxc.payload.proxy
+
+[Service]
+Type=oneshot
+# `memory.min` on cgroup v2: the low-water mark the reclaim path may not take from. Written
+# with a shell because there is no systemd directive for another cgroup's control files.
+ExecStart=/bin/sh -c 'echo 2147483648 > /sys/fs/cgroup/lxc.payload.proxy/memory.min'
+RemainAfterExit=yes
