@@ -52,7 +52,7 @@ per piece that says it landed rather than that it was copied.
 | `monarch-torrent-perms.{service,timer}` | **i1 only** (its own header says so) | `/usr/local/sbin/monarch-torrent-perms.sh` | ownership on the media folders after one run |
 | `agent-reaper.{service,timer}` | **i4** (its own header) | `/usr/local/sbin/reap-wedged-agents.py` | `agent-reaper.prom` in `TEXTFILE_DIR` |
 | `edge-liveness.{service,timer}` | a host that is **not** the edge | `/usr/local/sbin/check-edge-liveness.py` | its own channel, not the ntfy topic |
-| `swap-ceiling-check.{service,timer}` | an incus host | `/usr/local/sbin/swap-ceiling-check.sh` | the log line; **do not** wire `OnFailure` (see its header) |
+| `swap-ceiling-check.{service,timer}` | an incus host | `/usr/local/sbin/swap-ceiling-check` (the unit's `ExecStart=`; it has no `.sh`) | the log line; **do not** wire `OnFailure` (see its header) |
 | `memguard.service` | the host it guards | `/usr/local/sbin/memguard.py` | it is long-running: `active`, not a timer |
 | `sync-mail-identities.{service,timer}` | **inside** the `mail` container | `/usr/local/bin/sync-mail-identities.py` | `mailboxes=… missing=0`, and `check-mail-identities` clean |
 | `stalwart-watchdog.{service,timer}`, `stalwart-oidc-proxy`, `stalwart-oidc-redirect` | **inside** the `mail` container | `scripts/stalwart-oidc-discovery-setup.sh` installs all of it and refuses to run half-armed | `check-stalwart-oidc-cache` clean |
