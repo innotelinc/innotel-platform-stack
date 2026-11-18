@@ -1,0 +1,11 @@
+[Unit]
+Description=Probe the edge's upstreams every five minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=300
+AccuracySec=30s
+Unit=estate-edge.service
+
+[Install]
+WantedBy=timers.target

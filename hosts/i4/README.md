@@ -65,6 +65,8 @@ worked only because `rp_filter` is 0. Bridging removes the asymmetry entirely.
 | `netplan/60-lan-bridge.yaml` | `/etc/netplan/60-lan-bridge.yaml` (mode `0600`) |
 | `sysctl.d/90-network-tuning.conf` | `/etc/sysctl.d/90-network-tuning.conf` |
 | `sysctl.d/99-incus-routed.conf` | `/etc/sysctl.d/99-incus-routed.conf` (base forwarding/`rp_filter`; see below) |
+| `incus-rebalance.json` | `/etc/incus-rebalance.json` (the memory policy the rebalancer reads) |
+| `incus-rebalance.logrotate` | `/etc/logrotate.d/incus-rebalance` |
 | `/etc/systemd/network/10-netplan-br-lan.network.d/50-optional.conf` | created on the host (see below) |
 
 ## Install / re-apply
@@ -101,6 +103,43 @@ minutes and mails on failure, and it is here because **this host must not carry
 `proxy`**: a watcher that shares a host with the edge cannot report that host being
 gone. It moved here on 2026-10-09 from `i1`, where the 2026-10-09 placement change had
 just put the edge back. A future placement change checks the pair.
+
+## The units this host runs alone
+
+Four units run only here, and until 2026-11-18 none of them was in the repository: the
+scripts were in `/usr/local/sbin`, the units in `/etc/systemd/system`, and the only copy of
+the memory policy was `/root/incus-rebalance/policy.json` — a `/root` copy, which
+`docs/root-paths.md` explains the estate does not keep. They are in `systemd/` and
+`scripts/` now, so `check-unit-drift.py` holds this host's copies to the revision and a
+rebuild can produce them.
+
+| unit | what it does | why it is here |
+|---|---|---|
+| `estate-edge.{service,timer}` | probes every upstream the edge proxies to, every five minutes, and separates `DOWN` from `down-on-purpose` by reading the instance's own `user.estate.*` note | this host carries the edge but is not the edge: a probe inside `proxy` could not report `proxy` gone — the same reason `edge-liveness` is here |
+| `estate-sample.{service,timer}` | one line per instance per minute into `/var/lib/estate-samples/i4.tsv`, trimmed to a day | "did it swap out under its own startup burst?" has to be answerable afterwards; `incus exec` into an instance fails exactly when the ramp is worth sampling, so this reads the host cgroups |
+| `estate-state.{service,timer}` | records why an instance is stopped, in the instance's own `user.estate.*` config, and reports on Monday the ones stopped over a week with no note | `incus list` shows `STOPPED` for "paused this morning" and "retired last month" alike, and `estate-edge` reads the note this writes |
+| `incus-rebalance.{service,timer}` | fits each container's memory cap to its measured use every five minutes (`--apply`) | the caps were set by hand from one day's snapshot; this is the only thing that moves them, and it writes limits on `i1`, `i2` and this host |
+
+`incus-rebalance` is the one to be careful with: the timer runs `--apply`, so the policy file
+is a live control. It reads `/etc/incus-rebalance.json`; `hosts/i4/incus-rebalance.json` is
+that file as deployed on 2026-11-18 (the `/root/incus-rebalance/policy.json` beside the old
+README carries the pre-2026-11-15 placements and must not be installed over it). Run
+`incus-rebalance` without `--apply` to see a pass and change nothing.
+
+## Why `estate-checks` has no timer here
+
+`estate-checks.timer` was enabled here and wrote ~40 `estate-check-*.prom` files into
+`/var/lib/node_exporter/textfile` every half hour. Nothing scrapes them: this host runs no
+`node-exporter`, and the estate's metrics stack — in `monarch` on `i2` since 2026-11-15 —
+scrapes **one** publisher for those series on purpose. `docs/estate-rebalance-2026-11-15.md`
+§16 drops `innotel_estate_check_.*` from the edge's target so a failing check raises one
+alert rather than two with different `instance` labels. A third copy publishing into a
+directory with no collector is CPU spent on an answer nobody reads, so the timer is disabled
+and its stale textfiles are removed.
+
+The unit and the scripts stay installed, for two reasons: with the edge container down,
+`systemctl start estate-checks.service` here is the estate's own view of itself, and
+`check-unit-drift.py` keeps comparing those files with the revision.
 
 ## Retired
 

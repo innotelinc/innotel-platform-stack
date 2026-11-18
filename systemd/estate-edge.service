@@ -1,0 +1,14 @@
+[Unit]
+Description=Probe the edge's upstreams, and say whether a silent one is down or parked
+# Runs on the host that can reach every upstream - i4, which also carries the edge.
+# The log is the record; the unit exits 1 only when the set of failures changed
+# since the previous run, so a known park does not become a five-minute alarm.
+Documentation=file:///usr/local/sbin/estate-edge
+After=network-online.target incus.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/estate-edge
+StandardOutput=append:/var/log/estate-edge.log
+StandardError=append:/var/log/estate-edge.log

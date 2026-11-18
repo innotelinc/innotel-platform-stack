@@ -1,0 +1,454 @@
+#!/usr/bin/env python3
+"""Keep Incus container memory limits matched to measured use.
+
+Why this exists: the caps were set by hand from a snapshot in time. A container
+that was busy that day kept a generous cap forever, while one that grew later
+kept dying at a ceiling nobody revisited. The caps are the one thing that has
+to follow reality on its own.
+
+Each pass, per running container in every project on the host:
+
+  * measure ``memory.current`` and ``memory.peak`` from its cgroup;
+  * propose ``max(peak * peak_factor + 64, current * raise_factor + 64)``,
+    rounded to the step, clamped by the policy floor and ceiling;  * raise when the proposal is a full step above the cap (so a rounding
+    boundary does not ratchet the cap up), but lower only when the proposal is
+    below ``lower_factor`` times the current cap and has stayed there for
+    ``stability_runs`` consecutive passes. A single quiet sample is not
+    enough to shrink a cap;
+  * fit the proposals into the host's budget. If they do not fit, only the
+    *raises* are trimmed back toward the current caps — a container asking for
+    more is never the one that gets less, and a cap is never pushed under its
+    proposal to make the arithmetic work. Anything left over is reported;
+  * write only what changed.
+
+Deliberate sizing is expressed in the policy, not guessed here: ``pinned``
+holds a container at a fixed cap (``null`` means "leave uncapped"),
+``budget_exempt`` keeps such a pin out of the host budget arithmetic, ``min``
+is a floor the rebalancer will not go below, ``max`` a ceiling, and
+``project_defaults`` covers every container of an Incus project that has no
+more specific entry.
+
+Dry run is the default. ``--apply`` writes. The timer runs ``--apply``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+POLICY_PATH = os.environ.get("INCUS_REBALANCE_POLICY", "/etc/incus-rebalance.json")
+STATE_DIR = os.environ.get("INCUS_REBALANCE_STATE", "/var/lib/incus-rebalance")
+LOG_PATH = os.environ.get("INCUS_REBALANCE_LOG", "/var/log/incus-rebalance.log")
+LOCK_PATH = os.path.join(STATE_DIR, "lock")
+STATE_PATH = os.path.join(STATE_DIR, "state.json")
+
+DEFAULT_POLICY = {
+    "budget_pct": 90,
+    "raise_factor": 1.35,
+    "peak_factor": 1.2,
+    "lower_factor": 1.0,
+    "stability_runs": 1,
+    "step_mib": 128,
+    "min_mib": 256,
+    "max_mib": 8192,
+    "hosts": {
+        "i1": {"remote": "i1move"},
+        "i2": {"remote": "i2move"},
+        "i4": {"remote": ""},
+    },
+    "containers": {},
+    "project_defaults": {},
+}
+
+
+def log(line: str) -> None:
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    text = f"{stamp} {line}"
+    print(text, flush=True)
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as handle:
+            handle.write(text + "\n")
+    except OSError:
+        pass  # journald still has stdout; an unwritable log is not fatal
+
+
+def load_json(path: str, fallback):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        return fallback
+    except json.JSONDecodeError as error:
+        log(f"{path} is not valid JSON ({error}); refusing to run")
+        sys.exit(2)
+
+
+def parse_mib(value) -> int | None:
+    """'4GiB', '1536MiB', '4096' -> MiB; None means uncapped."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if text == "" or text.lower() == "none":
+        return None
+    units = {"kib": 1 / 1024, "mib": 1, "gib": 1024, "tib": 1024 * 1024}
+    for unit, factor in units.items():
+        if text.lower().endswith(unit):
+            return int(float(text[: -len(unit)]) * factor)
+    return int(text)
+
+
+def run(args: list[str], timeout: float = 20) -> str:
+    done = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    if done.returncode != 0:
+        raise RuntimeError(f"{' '.join(args)}: {done.stderr.strip() or done.returncode}")
+    return done.stdout
+
+
+def instance_ref(remote: str, name: str) -> str:
+    return f"{remote}:{name}" if remote else name
+
+
+def project_names(remote: str) -> list[str]:
+    """Every project the host exposes, default first.
+
+    Incus labels the client's current project as ``default (current)`` even on
+    a remote, so the annotation is stripped before it is passed back as a
+    ``--project`` value.
+    """
+    args = ["incus", "project", "list"]
+    if remote:
+        args.append(f"{remote}:")
+    args += ["--format", "csv"]
+    names = []
+    for row in run(args).splitlines():
+        name = row.split(",", 1)[0].strip()
+        if name.endswith(" (current)"):
+            name = name[: -len(" (current)")]
+        if name:
+            names.append(name)
+    return sorted(set(names), key=lambda name: (name != "default", name))
+
+
+def containers_on(remote: str) -> list[tuple[str, str]]:
+    """Every RUNNING instance on the host, as (project, name).
+
+    Listing without ``--project`` only returns the client's current project,
+    which left i2's ``ontrak`` sandboxes invisible to the pass.
+    """
+    found: list[tuple[str, str]] = []
+    for project in project_names(remote):
+        args = ["incus", "list"]
+        if remote:
+            args.append(f"{remote}:")
+        args += ["--project", project, "-c", "n,s", "--format", "csv"]
+        for row in run(args).splitlines():
+            parts = [part.strip() for part in row.split(",")]
+            if len(parts) >= 2 and parts[1] == "RUNNING":
+                found.append((project, parts[0]))
+    return found
+
+
+def host_total_mib(remote: str) -> int:
+    path = f"{remote}:/1.0/resources" if remote else "/1.0/resources"
+    payload = json.loads(run(["incus", "query", path], timeout=30))
+    return int(payload["memory"]["total"] // (1024 * 1024))
+
+
+def measure(remote: str, project: str, name: str) -> tuple[int, int]:
+    out = run(
+        [
+            "incus",
+            "exec",
+            instance_ref(remote, name),
+            "--project",
+            project,
+            "--",
+            "sh",
+            "-c",
+            "c=$(cat /sys/fs/cgroup/memory.current); "
+            "p=$(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo $c); "
+            "echo $((c/1048576)) $((p/1048576))",
+        ]
+    ).strip()
+    current, peak = out.split()
+    return int(current), int(peak)
+
+
+def current_limit_mib(remote: str, project: str, name: str) -> int | None:
+    try:
+        raw = run(
+            [
+                "incus",
+                "config",
+                "get",
+                instance_ref(remote, name),
+                "limits.memory",
+                "--project",
+                project,
+            ]
+        ).strip()
+    except RuntimeError:
+        return None
+    return parse_mib(raw) if raw else None
+
+
+def round_step(mib: int, step: int) -> int:
+    return max(step, ((mib + step - 1) // step) * step)
+
+
+def demand(policy: dict, current: int, peak: int, floor: int, ceiling: int) -> int:
+    target = max(int(peak * float(policy["peak_factor"]) + 64), int(current * float(policy["raise_factor"]) + 64))
+    return round_step(min(max(target, floor), ceiling), int(policy["step_mib"]))
+
+
+def policy_entry(policy: dict, host: str, project: str, name: str) -> tuple[dict, str]:
+    """Most specific policy entry for one container.
+
+    Precedence: ``host:project:name``, then ``host:name``, then the project
+    default (``project_defaults[host:project]``).
+    """
+    containers = policy.get("containers", {})
+    if project != "default":
+        qualified = f"{host}:{project}:{name}"
+        if qualified in containers:
+            return containers[qualified], qualified
+    key = f"{host}:{name}"
+    if key in containers:
+        return containers[key], key
+    if project != "default":
+        project_key = f"{host}:{project}"
+        return policy.get("project_defaults", {}).get(project_key, {}), project_key
+    return {}, key
+
+
+def state_key(host: str, project: str, name: str) -> str:
+    return f"{host}:{name}" if project == "default" else f"{host}:{project}:{name}"
+
+
+def choose_action(policy: dict, limit: int | None, want: int, streak: int) -> tuple[str, int]:
+    """Decide one non-pinned container; returns (action, lower_streak).
+
+    Actions: set, raise, keep, hold_deadband, hold_stability, lower. Only the
+    first two and ``lower`` write. ``hold_deadband`` means the proposal is
+    lower than the cap but not by enough to be worth a write;
+    ``hold_stability`` means it is low enough but has not been low for
+    ``stability_runs`` passes yet. A raise needs the proposal more than a full
+    step above the cap, so rounding noise alone cannot ratchet it up.
+    """
+    step = int(policy["step_mib"])
+    if limit is None:
+        return "set", 0
+    if want > limit + step:
+        return "raise", 0
+    if want >= limit:
+        return "keep", 0
+    deadband = int(limit * float(policy.get("lower_factor", 1.0)))
+    if want >= deadband:
+        return "hold_deadband", 0
+    streak += 1
+    if streak < max(1, int(policy.get("stability_runs", 1))):
+        return "hold_stability", streak
+    return "lower", 0
+
+
+def fit_budget(policy: dict, rows: list[dict], budget_mib: int) -> None:
+    """Trim raises until the proposals fit the host; report what is left over.
+
+    Only rows asking for more than they have can lose their ask, and never
+    below the cap they already hold. An idle row being lowered to its measured
+    need is the source of the room. Pinned rows are counted at their fixed cap
+    unless they are budget_exempt (lab/session sandboxes pinned at a size that
+    has nothing to do with their idle footprint).
+    """
+    step = int(policy["step_mib"])
+    exempt = sum((row["desired"] or 0) for row in rows if row["fixed"] and row.get("exempt"))
+    if exempt:
+        log(f"    note: {exempt} MiB of pinned caps is budget-exempt; not counted against this host")
+    pinned = sum((row["desired"] or 0) for row in rows if row["fixed"] and not row.get("exempt"))
+    movable = [row for row in rows if not row["fixed"]]
+    excess = pinned + sum(row["demand"] for row in movable) - budget_mib
+    for row in movable:
+        row["desired"] = row["demand"]
+    if excess <= 0:
+        return
+    raising = sorted(
+        (row for row in movable if row["limit"] is not None and row["demand"] > row["limit"]),
+        key=lambda row: row["demand"] - row["limit"],
+        reverse=True,
+    )
+    for row in raising:
+        while excess > 0 and row["desired"] - step >= row["limit"]:
+            row["desired"] -= step
+            excess -= step
+        if excess <= 0:
+            break
+    total = pinned + sum(row["desired"] for row in movable)
+    if total > budget_mib:
+        log(
+            f"    note: proposals still total {total} MiB against a {budget_mib} MiB budget; "
+            "the rest is overcommit, left as is"
+        )
+
+
+def write_limit(remote: str, project: str, name: str, mib: int | None) -> bool:
+    ref = instance_ref(remote, name)
+    try:
+        run(
+            [
+                "incus",
+                "config",
+                "set",
+                ref,
+                f"limits.memory={f'{mib}MiB' if mib is not None else ''}",
+                "--project",
+                project,
+            ]
+        )
+        return True
+    except (RuntimeError, subprocess.TimeoutExpired) as error:
+        log(f"    write failed for {ref} ({project}): {error}")
+        return False
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--apply", action="store_true", help="write the limits (default is a dry run)")
+    parser.add_argument("--host", help="limit the pass to one host key (i1, i2, i4)")
+    args = parser.parse_args()
+
+    os.makedirs(STATE_DIR, exist_ok=True)
+    lock = open(LOCK_PATH, "w", encoding="utf-8")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("another pass is running; skipping")
+        return 0
+
+    policy = {**DEFAULT_POLICY, **load_json(POLICY_PATH, {})}
+    state = load_json(STATE_PATH, {})
+    hosts = policy["hosts"]
+    if args.host:
+        if args.host not in hosts:
+            log(f"unknown host {args.host}; known: {', '.join(hosts)}")
+            return 2
+        hosts = {args.host: hosts[args.host]}
+
+    step = int(policy["step_mib"])
+    stability = max(1, int(policy.get("stability_runs", 1)))
+    changes = 0
+    held = 0
+    failures = 0
+
+    for host, spec in hosts.items():
+        remote = spec.get("remote", "")
+        try:
+            total = host_total_mib(remote)
+            running = containers_on(remote)
+        except (RuntimeError, subprocess.TimeoutExpired, KeyError) as error:
+            log(f"{host}: unavailable ({error}); skipping")
+            failures += 1
+            continue
+        budget = int(total * float(spec.get("budget_pct", policy["budget_pct"])) / 100)
+        rows = []
+        for project, name in running:
+            key = state_key(host, project, name)
+            pin_spec, _ = policy_entry(policy, host, project, name)
+            fixed = "pinned" in pin_spec
+            pinned = parse_mib(pin_spec["pinned"]) if fixed else None
+            try:
+                current, peak = measure(remote, project, name)
+                limit = current_limit_mib(remote, project, name)
+            except (RuntimeError, subprocess.TimeoutExpired, ValueError) as error:
+                log(f"{key}: cannot measure ({error}); skipping")
+                failures += 1
+                continue
+            floor = max(int(policy["min_mib"]), int(current * float(policy["raise_factor"]) + 64))
+            ceiling = int(policy["max_mib"])
+            if not fixed:
+                if "min" in pin_spec:
+                    floor_min = parse_mib(pin_spec["min"])
+                    if floor_min is not None:
+                        floor = max(floor, floor_min)
+                if "max" in pin_spec:
+                    ceiling_max = parse_mib(pin_spec["max"])
+                    if ceiling_max is not None:
+                        ceiling = min(ceiling, ceiling_max)
+            want = pinned if fixed else demand(policy, current, peak, floor, ceiling)
+            rows.append(
+                {
+                    "key": key,
+                    "label": name if project == "default" else f"{project}/{name}",
+                    "name": name,
+                    "project": project,
+                    "current": current,
+                    "peak": peak,
+                    "limit": limit,
+                    "desired": want,
+                    "demand": want,
+                    "fixed": fixed,
+                    "exempt": bool(pin_spec.get("budget_exempt", False)),
+                }
+            )
+        fit_budget(policy, rows, budget)
+
+        log(
+            f"{host}: {total} MiB host, {budget} MiB budget, {len(rows)} container(s)"
+            f"{' [dry run]' if not args.apply else ''}"
+        )
+        for row in rows:
+            limit, want = row["limit"], row["desired"]
+            entry = state.setdefault(row["key"], {})
+            if row["fixed"]:
+                shown = f"{want} MiB" if want is not None else "uncapped"
+                now = f"{limit} MiB" if limit is not None else "uncapped"
+                tag = " [budget-exempt]" if row["exempt"] else ""
+                log(f"  {row['label']:<24} pinned {shown}{tag}")
+                entry["lower_streak"] = 0
+                if limit == want:
+                    continue
+                action = "write" if args.apply else "would write"
+                log(f"    {now} -> {shown}; {action}")
+            else:
+                action, streak = choose_action(policy, limit, want, int(entry.get("lower_streak", 0)))
+                entry["lower_streak"] = streak
+                if action == "hold_deadband":
+                    shown_action = "hold (deadband)"
+                elif action == "hold_stability":
+                    shown_action = f"hold {streak}/{stability}"
+                else:
+                    shown_action = action
+                log(
+                    f"  {row['label']:<24} use {row['current']:>5} MiB  peak {row['peak']:>5}  "
+                    f"limit {str(limit):>7}  want {want:>5}  {shown_action}"
+                )
+                if action in ("hold_deadband", "hold_stability"):
+                    held += 1
+                    continue
+                if action == "keep":
+                    continue
+            if args.apply and not write_limit(remote, row["project"], row["name"], want):
+                failures += 1
+                continue
+            changes += 1
+            entry["limit_mib"] = want
+            entry["changed_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    if args.apply:
+        with open(STATE_PATH, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, indent=2, sort_keys=True)
+    log(
+        f"pass complete: {changes} change(s), {held} held, {failures} failure(s)"
+        f"{'' if args.apply else ' (dry run, nothing written)'}"
+    )
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

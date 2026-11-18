@@ -1,0 +1,12 @@
+[Unit]
+Description=Report instances stopped without a recorded reason
+# `incus list` shows STOPPED and says nothing about why, so "paused this morning"
+# and "retired last month" look identical. This exits non-zero when something has
+# been stopped longer than a week with no note, which makes the weekly failure the
+# alert. See `estate-state`.
+Documentation=file:///usr/local/sbin/estate-state
+After=incus.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/estate-state report --days 7

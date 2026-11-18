@@ -1,0 +1,14 @@
+[Unit]
+Description=Sample the estate every minute
+
+[Timer]
+# Every minute, off the wall clock by nothing in particular: AccuracySec keeps a
+# hundred instances' worth of `incus list` from landing on the same second as the
+# allocator's pass.
+OnBootSec=2min
+OnUnitActiveSec=60
+AccuracySec=5s
+Unit=estate-sample.service
+
+[Install]
+WantedBy=timers.target

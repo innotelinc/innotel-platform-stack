@@ -1,0 +1,11 @@
+[Unit]
+Description=Rebalance Incus container memory limits
+Documentation=file:/root/incus-rebalance/README.md
+After=incus.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/incus-rebalance --apply
+Nice=10
+IOSchedulingClass=idle

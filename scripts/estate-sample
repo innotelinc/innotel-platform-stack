@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# estate-sample - one line per instance per minute, kept for a day.
+#
+# Why: on 2026-11-17 the question "did atheniq swap out under its own startup burst,
+# or is the 2 GiB fossil?" could only be answered by starting a sampler by hand and
+# watching it for twenty minutes - and the 83 samples were gone as soon as the
+# session ended. The same question was asked twice: before the stop ("what is
+# holding 2 GiB of swap?") and after the restart ("what grew by 1.4 GiB?"), and both
+# times the answer had to be re-measured from scratch. One minute of resolution for
+# one day answers it after the fact.
+#
+# Reads the cgroup from the host, not through `incus exec`: the boot ramp - the
+# exact minute worth having - is when `incus exec` into the instance fails.
+#
+#   estate-sample                 # append one sample, trim to a day
+#   estate-sample --show [N]      # the last N lines (default 30)
+#
+# File: /var/lib/estate-samples/<host>.tsv, tab separated, no header:
+#   epoch  host  instance  state  pin_mib  working_mib  anon_mib  swap_mib  host_swap_mib  psi60
+# working is the check's definition (anon+slab+shmem+sock), so a `swap-ceiling-check`
+# line and a sample row can be compared directly.
+set -uo pipefail
+
+DIR=${ESTATE_SAMPLES:-/var/lib/estate-samples}
+KEEP=${ESTATE_SAMPLE_KEEP:-1440}   # 1440 minutes = 24 h
+HOST=$(hostname -s 2>/dev/null || hostname)
+
+num() { case "${1:-}" in ''|max) echo 0 ;; *) echo "$1" ;; esac; }
+mib() { echo $(( $(num "$1") / 1048576 )); }
+
+if [ "${1:-}" = "--show" ]; then
+	n=${2:-30}
+	tail -n "$n" "$DIR/$HOST.tsv" 2>/dev/null || echo "no samples yet in $DIR/$HOST.tsv" >&2
+	exit 0
+fi
+
+mkdir -p "$DIR" || exit 1
+file="$DIR/$HOST.tsv"
+
+psi60=$(awk '/^some/{for (i = 1; i <= NF; i++) if ($i ~ /^avg60=/) { sub("avg60=", "", $i); print $i }}' /proc/pressure/memory 2>/dev/null)
+psi60=${psi60:-0}
+read -r hs_total hs_used < <(awk '/^SwapTotal:/{t=$2} /^SwapFree:/{f=$2} END{printf "%d %d\n", t/1024, (t-f)/1024}' /proc/meminfo 2>/dev/null)
+hostswap=${hs_used:-0}
+
+# `local:` because the CLI's default remote on these hosts is not the local one.
+while IFS=, read -r inst st; do
+	[ -n "$inst" ] || continue
+	cg="/sys/fs/cgroup/lxc.payload.$inst"
+	pin=0 work=0 anon=0 swap=0
+	if [ -r "$cg/memory.stat" ]; then
+		pin=$(mib "$(cat "$cg/memory.max" 2>/dev/null)")
+		swap=$(mib "$(cat "$cg/memory.swap.current" 2>/dev/null)")
+		read -r anon work < <(awk '
+			$1=="anon"||$1=="slab"||$1=="shmem"||$1=="sock" {w+=$2}
+			$1=="anon" {a=$2}
+			END{printf "%d %d\n", a/1048576, w/1048576}' "$cg/memory.stat" 2>/dev/null)
+		anon=${anon:-0}; work=${work:-0}
+	fi
+	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+		"$(date +%s)" "$HOST" "$inst" "${st:-UNKNOWN}" "$pin" "$work" "$anon" "$swap" "$hostswap" "$psi60"
+done < <(incus list local: --format csv -c n,s </dev/null 2>/dev/null | tr -d '\r') >>"$file"
+
+# Keep a day. A ring buffer in a file, because a sampler that needs a database is a
+# sampler that is down when the thing it watches is down.
+lines=$(wc -l <"$file")
+if [ "$lines" -gt "$KEEP" ]; then
+	tail -n "$KEEP" "$file" >"$file.tmp" && mv "$file.tmp" "$file"
+fi

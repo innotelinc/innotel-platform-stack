@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# estate-edge - does the edge still reach each thing it proxies to, and when it does
+# not, is that upstream down or merely stopped on purpose?
+#
+# Why: on 2026-11-17 `ontrak` and `genesis` were stopped to clear i1's swap
+# emergency, which took the OnTrak family apps off the Cerulean edge. Nothing said
+# so. `check-edge-liveness` (in innotel-platform-stack) asks whether the *edge*
+# answers, from a host that is not the edge; it cannot tell a broken door from a
+# door whose application was deliberately parked, and neither can `systemctl
+# --failed`, a 502, or a user. `estate-state` records the reason in the instance;
+# this reads both facts together and reports one line per upstream:
+#
+#   ok                 the edge's target accepts a connection
+#   down-on-purpose    instance STOPPED and carrying a `user.estate.why` note
+#   STOPPED-NO-NOTE    instance stopped and nobody said why  (fails)
+#   DOWN               instance RUNNING but the target refuses  (fails)
+#   ABSENT             the instance is not on the host named here  (fails)
+#
+# Exit status is the whole point: 1 only when the set of failures *changed* since the
+# last run (kept in /var/lib/estate-edge/failing), 0 otherwise. A standing condition
+# that is already known must not notify every five minutes - that is the wallpaper
+# `swap-ceiling-check` spent a year being, and the reason a real fault hid inside it.
+#
+#   estate-edge [--config FILE] [--timeout SECONDS] [--verbose]
+#
+# Config: tab separated, blank lines and # ignored
+#   <label>            <edge target>     <remote>   <instance>
+#   ontrak-app         192.168.1.21:3000 local      ontrak
+set -uo pipefail
+
+CONFIG=${ESTATE_EDGE_TARGETS:-/etc/estate-edge-targets.tsv}
+STATE_DIR=${ESTATE_EDGE_STATE:-/var/lib/estate-edge}
+TIMEOUT=3
+VERBOSE=0
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--config) CONFIG=${2:-}; shift 2 ;;
+		--timeout) TIMEOUT=${2:-3}; shift 2 ;;
+		--verbose) VERBOSE=1; shift ;;
+		-h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		*) echo "estate-edge: unknown argument $1" >&2; exit 64 ;;
+	esac
+done
+
+[ -r "$CONFIG" ] || { echo "estate-edge: no target list at $CONFIG" >&2; exit 2; }
+
+probe() {   # $1 host, $2 port
+	timeout "$TIMEOUT" bash -c "exec 3<>/dev/tcp/$1/$2" </dev/null >/dev/null 2>&1
+}
+
+instance_state() {   # $1 remote, $2 instance
+	incus list "$1:" --format csv -c n,s </dev/null 2>/dev/null | tr -d '\r' \
+		| awk -F, -v i="$2" '$1 == i { print $2; exit }'
+}
+
+instance_note() { incus config get "$1:$2" user.estate.why </dev/null 2>/dev/null; }
+
+failing_now=""
+failing_before=$(cat "$STATE_DIR/failing" 2>/dev/null || true)
+checked=0 bad=0
+
+while IFS=$'\t' read -r label target remote inst; do
+	case "${label:-}" in ''|\#*) continue ;; esac
+	[ -n "${target:-}" ] && [ -n "${remote:-}" ] && [ -n "${inst:-}" ] || {
+		echo "estate-edge: malformed line: $label" >&2
+		bad=$((bad + 1)); failing_now="$failing_now $label"
+		continue
+	}
+	checked=$((checked + 1))
+	host=${target%:*}; port=${target##*:}
+	verdict="" fails=0
+
+	if probe "$host" "$port"; then
+		verdict="ok"
+	else
+		state=$(instance_state "$remote" "$inst")
+		case "$state" in
+			STOPPED)
+				why=$(instance_note "$remote" "$inst")
+				if [ -n "$why" ]; then
+					verdict="down-on-purpose  ${why}"
+				else
+					verdict="STOPPED-NO-NOTE  $remote:$inst is stopped and carries no reason (estate-state note ...)"
+					fails=1
+				fi
+				;;
+			RUNNING)
+				verdict="DOWN  $remote:$inst is running but $target refuses a connection"
+				fails=1
+				;;
+			"")
+				verdict="ABSENT  $remote:$inst does not exist"
+				fails=1
+				;;
+			*)
+				verdict="DOWN  $remote:$inst is $state and $target refuses a connection"
+				fails=1
+				;;
+		esac
+	fi
+
+	[ "$fails" -eq 1 ] && { bad=$((bad + 1)); failing_now="$failing_now $label"; }
+	printf '%s %-18s %-22s %s\n' "$(date -Is)" "$label" "$target" "$verdict"
+done <"$CONFIG"
+
+mkdir -p "$STATE_DIR" 2>/dev/null
+printf '%s\n' "$(printf '%s' "$failing_now" | tr ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ')" >"$STATE_DIR/failing"
+
+changed=0
+[ "$(printf '%s' "$failing_now" | tr ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ')" = "$failing_before" ] || changed=1
+
+echo "checked: $checked   failing: $bad   changed-since-last-run: $changed"
+[ "$VERBOSE" -eq 1 ] && echo "failing set:${failing_now:- (none)}"
+[ "$changed" -eq 1 ] && [ "$bad" -gt 0 ] && exit 1
+exit 0

@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# estate-state - say why an instance is stopped, and keep the answer in the instance.
+#
+# Why: on 2026-11-17 three instances were stopped to clear a swap emergency
+# (atheniq 99 % of its swap cap, host swap 86 % used) and nothing recorded that it
+# was deliberate. They then look exactly like `atlas-retired` and `nas-retired`:
+# `incus list` shows STOPPED and says nothing about why, so the next person cannot
+# tell "paused this morning" from "retired last month" without archaeology.
+# `copilotkit` cost an hour of that same archaeology - absent from every host's
+# instance list and from Docker, recorded nowhere, so nobody could say whether it
+# had been deleted on purpose.
+#
+# The record lives in the instance's own config as `user.estate.*`, so it survives
+# a `incus config show`, travels with a copy, and needs no server, database or file
+# that a rebuild would take with it.
+#
+#   estate-state stop   <instance> --why TEXT [--by WHO] [--remote R]
+#   estate-state start  <instance> [--remote R]
+#   estate-state note   <instance> --why TEXT [--by WHO] [--remote R]
+#   estate-state show   <instance> [--remote R]
+#   estate-state report [--days N] [--remote R]
+#
+# `stop` stops the instance and then records why; `note` records without touching
+# its state (for an instance already stopped, which is the common case). `report`
+# flags a stopped instance older than --days (default 7) that carries no note: a
+# stop nobody explained is a stop nobody will dare restart.
+#
+# exit: 0 ok, 1 the instance or its state could not be read, 64 usage
+set -uo pipefail
+
+ME_WHO=${ESTATE_WHO:-${SUDO_USER:-${USER:-root}}@$(hostname -s 2>/dev/null || hostname)}
+REMOTE=local
+DAYS=7
+
+usage() {
+	cat >&2 <<'EOF'
+usage: estate-state stop   <instance> --why TEXT [--by WHO] [--remote R]
+       estate-state start  <instance> [--remote R]
+       estate-state note   <instance> --why TEXT [--by WHO] [--remote R]
+       estate-state show   <instance> [--remote R]
+       estate-state report [--days N] [--remote R]
+
+Properties written: user.estate.stopped_at (epoch), user.estate.stopped_by,
+user.estate.why, user.estate.resume. `report` flags an instance stopped longer
+than --days with no note.
+EOF
+	exit 64
+}
+
+# `local:atheniq` is how a remote instance is named; the bare name would be
+# resolved against whatever remote the CLI happens to default to, which on .21 and
+# .54 is not the local one (docs/edge-host.md 0).
+target() { printf '%s:%s' "$REMOTE" "$1"; }
+
+prop() {   # $1 target, $2 key -> value or empty
+	incus config get "$1" "$2" 2>/dev/null || true
+}
+
+set_prop() { incus config set "$1" "$2=$3" >/dev/null || return 1; }
+unset_prop() { incus config unset "$1" "$2" >/dev/null 2>&1 || true; }
+
+# One instance's state, taken from the list rather than `incus list <remote>:<name>`,
+# which prints nothing for a single instance on this incus version - the same
+# mistake that made `show` claim a stopped instance had no state at all.
+state_of() {   # $1 = target (remote:instance)
+	local inst=${1#*:}
+	incus list "$REMOTE:" --format csv -c n,s </dev/null 2>/dev/null | tr -d '\r' \
+		| awk -F, -v i="$inst" '$1 == i { print $2; exit }'
+}
+
+stamp() { date -d "@$1" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$1"; }
+
+record() {   # $1 instance, $2 why, $3 by
+	local t why=$2 by=$3
+	t=$(target "$1")
+	set_prop "$t" user.estate.stopped_at "$(date +%s)" || return 1
+	set_prop "$t" user.estate.stopped_by "$by" || return 1
+	set_prop "$t" user.estate.why "$why" || return 1
+	# The exact command that undoes this, so resuming is not a guess.
+	set_prop "$t" user.estate.resume "incus start $t" || return 1
+	echo "estate-state: recorded on $t: $why (by $by)"
+}
+
+clear() {
+	local t=$1 k
+	for k in user.estate.stopped_at user.estate.stopped_by user.estate.why user.estate.resume; do
+		unset_prop "$t" "$k"
+	done
+}
+
+cmd_stop() {
+	local inst="" why="" by=$ME_WHO
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--why) why=${2:-}; shift 2 ;;
+			--by) by=${2:-}; shift 2 ;;
+			--remote) REMOTE=${2:-}; shift 2 ;;
+			-*) usage ;;
+			*) inst=${inst:-$1}; shift ;;
+		esac
+	done
+	[ -n "$inst" ] && [ -n "$why" ] || usage
+	local t; t=$(target "$inst")
+	local s; s=$(state_of "$t")
+	if [ "$s" = "RUNNING" ]; then
+		incus stop "$t" --timeout 180 </dev/null || { echo "estate-state: could not stop $t" >&2; return 1; }
+	fi
+	record "$inst" "$why" "$by"
+}
+
+cmd_start() {
+	local inst=${1:-}; [ -n "$inst" ] || usage; shift || true
+	[ "${1:-}" = "--remote" ] && { REMOTE=${2:-}; shift 2; }
+	local t; t=$(target "$inst")
+	incus start "$t" </dev/null || { echo "estate-state: could not start $t" >&2; return 1; }
+	clear "$t"
+	echo "estate-state: started $t; stop note cleared"
+}
+
+cmd_note() {
+	local inst="" why="" by=$ME_WHO
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--why) why=${2:-}; shift 2 ;;
+			--by) by=${2:-}; shift 2 ;;
+			--remote) REMOTE=${2:-}; shift 2 ;;
+			-*) usage ;;
+			*) inst=${inst:-$1}; shift ;;
+		esac
+	done
+	[ -n "$inst" ] && [ -n "$why" ] || usage
+	record "$inst" "$why" "$by"
+}
+
+cmd_show() {
+	local inst=${1:-}; [ -n "$inst" ] || usage; shift || true
+	[ "${1:-}" = "--remote" ] && { REMOTE=${2:-}; shift 2; }
+	local t; t=$(target "$inst")
+	echo "instance: $t"
+	echo "state:    $(state_of "$t")"
+	local at by why resume
+	at=$(prop "$t" user.estate.stopped_at); by=$(prop "$t" user.estate.stopped_by)
+	why=$(prop "$t" user.estate.why); resume=$(prop "$t" user.estate.resume)
+	if [ -z "$at" ]; then
+		echo "note:     (none recorded)"
+	else
+		echo "stopped:  $(stamp "$at") by ${by:-unknown}"
+		echo "why:      ${why:-unknown}"
+		echo "resume:   ${resume:-incus start $t}"
+	fi
+}
+
+cmd_report() {
+	local inst
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--days) DAYS=${2:-7}; shift 2 ;;
+			--remote) REMOTE=${2:-}; shift 2 ;;
+			-*) usage ;;
+			*) usage ;;
+		esac
+	done
+	local now; now=$(date +%s)
+	local stopped=0 noted=0 unannotated=0 flagged=0
+	printf '%-28s %-10s %-9s %s\n' instance state "stopped" note
+	while IFS=, read -r inst st; do
+		[ -n "$inst" ] || continue
+		[ "$st" = "STOPPED" ] || continue
+		local t; t=$(target "$inst")
+		local at why by age_days age
+		at=$(prop "$t" user.estate.stopped_at)
+		why=$(prop "$t" user.estate.why)
+		by=$(prop "$t" user.estate.stopped_by)
+		stopped=$((stopped + 1))
+		if [ -n "$at" ] && [ "$at" -gt 0 ] 2>/dev/null; then
+			age=$((now - at)); age_days=$((age / 86400))
+		else
+			age_days=""
+		fi
+		if [ -n "$why" ]; then
+			noted=$((noted + 1))
+			printf '%-28s %-10s %-9s %s (%s)\n' "$inst" "$st" \
+				"${age_days:+${age_days}d}" "$why" "${by:-unknown}"
+		else
+			unannotated=$((unannotated + 1))
+			if [ -n "$age_days" ]; then
+				[ "$age_days" -ge "$DAYS" ] && {
+					flagged=$((flagged + 1))
+					printf '%-28s %-10s %-9s %s\n' "$inst" "$st" "${age_days}d" \
+						"NO NOTE - stopped ${age_days}d ago, unrecorded (--days $DAYS)"
+					continue
+				}
+			fi
+			printf '%-28s %-10s %-9s %s\n' "$inst" "$st" "${age_days:+${age_days}d}" "(no note)"
+		fi
+	done < <(incus list "$REMOTE:" --format csv -c n,s </dev/null 2>/dev/null | tr -d '\r')
+	echo
+	echo "stopped: $stopped   noted: $noted   unannotated: $unannotated   flagged: $flagged"
+	[ "$flagged" -eq 0 ]
+}
+
+sub=${1:-}; shift || usage
+case "$sub" in
+	stop) cmd_stop "$@" ;;
+	start) cmd_start "$@" ;;
+	note) cmd_note "$@" ;;
+	show) cmd_show "$@" ;;
+	report) cmd_report "$@" ;;
+	*) usage ;;
+esac
