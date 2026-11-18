@@ -66,3 +66,26 @@ label namespacing is fixed upstream.
 its denials come from a path-attached `transmission-daemon` profile inside
 `monarch` rather than from `docker-default`; that is a separate profile to
 handle, and this setting does not affect it.
+
+## transmission: the profile that lives on the host
+
+`transmission` stayed `unhealthy` after the daemon-level change, and its daemon
+never started: `Error relocating /usr/lib/libstdc++.so.6: RELRO protection
+failed`. That was not the image. The same image, a pristine container from it,
+Alpine's own packaged daemon and Debian's glibc build all failed identically —
+including under `--security-opt apparmor=unconfined` and `--privileged` — because
+Docker's profile was never the one denying. The kernel audit log named the real
+one:
+
+    apparmor="DENIED" operation="file_mprotect" profile="transmission-daemon"
+    name="/var/lib/incus/.../rootfs/usr/lib/libcurl.so.4.8.0" requested_mask="r"
+
+That is the **host's** `/etc/apparmor.d/transmission`, which attaches by path to
+`/usr/bin/transmission-daemon` and therefore mediates the binary executed *inside*
+the container. Its per-container rendering was already `(complain)`; the host copy
+was `(enforce)`. Putting the host copy in complain and reloading with
+`apparmor_parser -r` let the daemon start immediately (healthy, RPC answering).
+
+Rule this adds: a service-level `security_opt` cannot see profiles that attach by
+path. Any distro profile whose path matches a binary in a container applies
+whatever the compose says, so such profiles must be relaxed on the host.
