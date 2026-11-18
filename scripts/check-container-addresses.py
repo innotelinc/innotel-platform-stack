@@ -252,10 +252,15 @@ EXPECTED: dict[str, dict[str, str]] = {
         # `auvik`, `capstone`, `monitor` and `www` above. Re-add it with the address the
         # day telno runs again.
         "telno-turn": "192.168.1.96",
-        # `terminal` (`.22`) is **not a row** while it is STOPPED: the web terminal came
-        # back off in the 2026-11-15 rebalance and its vhost is dark behind it. Removing the
-        # row is what stops the latency check from dialling an address nothing owns;
-        # re-add it with the address the day the terminal runs again.
+        # `terminal` (`.22`) is back (2026-11-18): the web terminal is `termix` on `:8080`,
+        # with `guacd` (`:4822`), `zapit` (`:5150`) and `zapit-landing` (`:8081`) in the
+        # same container. It had been STOPPED through the 2026-11-15 rebalance, so this
+        # table dropped the row and nobody re-added it when the container came back — and
+        # the vhost had gone dark with the row, so `terminal.innotel.us` resolved to the
+        # edge and answered `TLS alert, unrecognized name` while a healthy terminal ran
+        # behind it. That is the failure a row would have caught: the note that removed it
+        # said "re-add it the day the terminal runs again", and that day was not noticed.
+        "terminal": "192.168.1.22",
         "vpn": "192.168.1.43",
     },
 }
