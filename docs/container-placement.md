@@ -27,7 +27,7 @@ estate as it is, not as it was.
   `boot.autostart=true`, profiles `default` + `docker` (`security.nesting`), Docker 29.1.3 +
   compose 2.40.3, root on pool `fast`. The `fast` pool is a `dir` pool on `/`, which is the
   estate's tightest filesystem (99 G free at the time) — the panel's own footprint is
-  396 K of `/data` plus a 21 MB database, so this does not change that constraint.
+  under 400 K of `/data` plus a 21 MB database, so this does not change that constraint.
 - **State moved, not re-created**: `/data/coolify` copied over, `pg_dump -Fc` restored into
   the new `coolify-db` (90 tables), then verified row for row against the old database —
   1 project, 3 applications, 2 servers, 1 user on both sides — before the host stack was
