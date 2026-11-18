@@ -101,8 +101,11 @@ services:
     ports:
       # Host port is configurable because the obvious one can be taken: on `.56`
       # the *arr stack publishes sabnzbd on 127.0.0.1:9090 already, so that host
-      # sets PROMETHEUS_PORT=9095.
-      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"   # loopback only
+      # sets PROMETHEUS_PORT=9095. The bind address follows `1-primary.yml`: on a
+      # host that also runs the estate checks, `check-estate-flaps.py` reads check
+      # history through this port, and a loopback-only bind on a *separate*
+      # metrics host is unreachable to it (exit 2, "could not run", every run).
+      - "${PROMETHEUS_BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus/prometheus.host.yml:/etc/prometheus/prometheus.yml:ro
       # Every file here is loaded by every host that runs this stack, and one of
