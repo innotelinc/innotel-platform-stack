@@ -1,5 +1,11 @@
 # Media apps died with SIGSEGV every few seconds — AppArmor, not memory
 
+> **Partly superseded (later the same day):** the per-service
+> `security_opt: ["apparmor=unconfined"]` trade below was replaced by one
+> daemon-level setting that leaves every container on `monarch` unenforced, and
+> the overrides were removed from the compose. See
+> `apparmor-complain-monarch-2026-11-17.md`. The diagnosis here stands.
+
 2026-11-17. Sonarr on `monarch` (i2) restarted 443 times, never once logging
 `Application is shutting down`, so each incarnation was killed hard. Radarr,
 Prowlarr and Lidarr were cycling more slowly in the same way; Bazarr, which is
