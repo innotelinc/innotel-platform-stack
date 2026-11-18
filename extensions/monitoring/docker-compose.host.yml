@@ -58,7 +58,7 @@ services:
     # Deliberate exception to this stack's loopback-only posture — metrics
     # only, one peer, and the scrape needs to cross the Incus boundary.
     ports:
-      - "192.168.1.71:9100:9100"
+      - "${NODE_EXPORTER_BIND_ADDRESS:-0.0.0.0}:9100:9100"
     restart: unless-stopped
     mem_limit: 128m
     memswap_limit: 128m
