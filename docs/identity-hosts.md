@@ -192,6 +192,7 @@ name with no loaded `server_name`.
 
 Measured before the repair: none of the 215 proxy hosts named the door, no door rode a
 tunnel any more, and the only estate listeners on `:8090` were telno's `christ-telno` on
+<<<<<<< HEAD
 `192.168.1.113` and a stale docker-proxy on `i2`.
 
 **Corrected 2026-11-18: `.113` was never a VM.** This page said "host `dev`, a VM of its
@@ -208,6 +209,12 @@ the name (`https://deploy.innotel.us`, which is what `instance_settings.fqdn` ac
 was registered beside them. On 2026-11-18 the panel moved to its own container (`coolify`,
 `.85`, on `i2`) and the two name-keyed callbacks were left as the only ones — see
 `docs/container-placement.md`, §*Changes applied 2026-11-18 (evening)*.
+=======
+`192.168.1.113` and a stale docker-proxy on `i2`. The panel was on `192.168.1.113` — host
+`dev`, an Incus container named `workloads` on `i1` rather than a VM of its own (the
+"VM of its own" wording here was wrong; corrected 2026-11-18) — running `coollabsio/coolify:4.7.5`
+with `coolify-sentinel`, `coolify-db` and `coolify-redis`.
+>>>>>>> 15901c3 (Correct where the Coolify panel actually runs)
 
 Two faults stacked, which is why pointing a proxy host at it was not enough on its own:
 
@@ -218,7 +225,7 @@ Two faults stacked, which is why pointing a proxy host at it was not enough on i
   running correctly.`) and the panel began answering;
 * the edge had no vhost, so the name could not have served anything even with the panel up.
 
-Proxy host **342** now serves `deploy.innotel.us` → `http://192.168.1.113:8000` with
+Proxy host **342** now serves `deploy.innotel.us` → `http://192.168.1.85:8000` with
 websockets, HTTP/2 and forced SSL on certificate **153** (which already named the door and
 was unused; it was created while the tunnel was still the path). Verified through the
 edge, from `i2` and from inside the `proxy` container: `/` → `302
@@ -230,3 +237,28 @@ as a note — and `TUNNELS` stays empty because this door rides no tunnel. The l
 keeping: the retirement note was accurate the day it was written and became wrong the
 moment the panel was reachable again, and a check that emits a note instead of probing
 cannot notice that by itself.
+
+## The panel lives on `i2`; the `.113:8000` shim is gone (2026-11-18)
+
+Coolify no longer runs on `.113`. It runs in an Incus container named `coolify` on `i2`
+(`192.168.1.52`), address **`192.168.1.85`**, publishing `0.0.0.0:8000->8080/tcp` for
+`coollabsio/coolify:4.7.5` beside `coolify-db` and `coolify-redis`. `.113` is a different
+machine — the Incus container `workloads` (hostname `dev`) on `i1`.
+
+What made them look identical: `.113:8000` was a 992-byte TCP shim,
+`coolify-webhook-forward.mjs`, piping every connection to `.85:8000` so GitHub webhook
+deliveries kept working at the address the repository already used. Next to it,
+`coolify-npm-tunnel.service` carried `-R 172.18.0.1:8090:127.0.0.1:8000` to the edge for the
+old `deploy.innotel.us` path.
+
+Both were removed on 2026-11-18: the shim because proxy host **342** already dials
+`http://192.168.1.85:8000` directly, and the tunnel because it had been failing with
+`203/EXEC` (`/usr/bin/autossh` no longer exists) and restarting every 2 seconds, so the
+`8090` path had been dead already. Its other forward, `8091`, served only host **281**,
+which is `is_deleted=1`. Units and script are archived at `/root/removed-20261118/` on
+`workloads`.
+
+After the removal: `.113:8000` refuses, `.85:8000/login` is `200`, and through the edge
+`https://deploy.innotel.us/` → `302 /login` → `200` with the `coolify` marker. If a webhook
+sender still posts to `.113:8000`, it now fails loudly instead of silently crossing hosts;
+the panel's own URL is the `deploy.innotel.us` door.
