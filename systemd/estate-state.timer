@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly report of instances stopped without a reason
+
+[Timer]
+OnBootSec=30min
+OnCalendar=Mon 07:00
+Persistent=true
+RandomizedDelaySec=10min
+Unit=estate-state.service
+
+[Install]
+WantedBy=timers.target

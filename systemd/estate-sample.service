@@ -1,0 +1,13 @@
+[Unit]
+Description=Sample every instance's memory and swap once a minute
+# The data behind "what happened at 04:25": a day of one-minute rows per instance,
+# in a file, on the host. Reads cgroups from the host so the boot ramp - the minute
+# worth having - is captured even while `incus exec` into the instance fails.
+Documentation=file:///usr/local/sbin/estate-sample
+After=incus.service
+Wants=incus.service
+
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=/usr/local/sbin/estate-sample

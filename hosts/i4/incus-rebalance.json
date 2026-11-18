@@ -1,0 +1,92 @@
+{
+  "budget_pct": 90,
+  "raise_factor": 1.35,
+  "peak_factor": 1.2,
+  "lower_factor": 0.75,
+  "stability_runs": 3,
+  "step_mib": 128,
+  "min_mib": 256,
+  "max_mib": 8192,
+  "hosts": {
+    "i1": {
+      "remote": "i1move",
+      "budget_pct": 90
+    },
+    "i2": {
+      "remote": "i2move",
+      "budget_pct": 90
+    },
+    "i4": {
+      "remote": "",
+      "budget_pct": 93
+    }
+  },
+  "containers": {
+    "i2:atlas": {
+      "min": "512MiB"
+    },
+    "i2:blueprint": {
+      "min": "512MiB"
+    },
+    "i2:monarch": {
+      "min": "2GiB"
+    },
+    "i1:ontrak": {
+      "min": "2GiB"
+    },
+    "i4:proxy": {
+      "min": "4GiB"
+    },
+    "i1:mail": {
+      "min": "768MiB"
+    },
+    "i2:distro": {
+      "min": "512MiB"
+    },
+    "i2:magnate": {
+      "min": "512MiB"
+    },
+    "i2:onyx": {
+      "min": "768MiB"
+    },
+    "i2:pi": {
+      "min": "384MiB"
+    },
+    "i2:signara": {
+      "min": "512MiB"
+    },
+    "i2:subscribe": {
+      "min": "256MiB"
+    },
+    "i1:atheniq": {
+      "pinned": "6144MiB"
+    },
+    "i2:capstone": {
+      "pinned": "6144MiB"
+    },
+    "i2:sage": {
+      "min": "1GiB"
+    },
+    "i4:telno": {
+      "min": "512MiB"
+    },
+    "i4:telno-turn": {
+      "min": "384MiB"
+    },
+    "i4:terminal": {
+      "min": "768MiB"
+    },
+    "i4:vault": {
+      "min": "1GiB"
+    },
+    "i4:vpn": {
+      "min": "384MiB"
+    }
+  },
+  "project_defaults": {
+    "i2:ontrak": {
+      "pinned": "4GiB",
+      "budget_exempt": true
+    }
+  }
+}
