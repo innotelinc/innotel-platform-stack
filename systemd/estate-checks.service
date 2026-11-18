@@ -26,6 +26,23 @@ WorkingDirectory=/opt/innotel/estate-checks
 EnvironmentFile=-/etc/innotel/estate-checks.env
 Environment=TEXTFILE_DIR=/var/lib/node_exporter/textfile
 
+# The checks are independent and almost all of their time is a socket wait, so the
+# unit submits them here instead of running them in order; the last line drains the
+# queue. Each submit still names its check by absolute path on an `ExecStart=`, which
+# is what keeps this file the install inventory: `install-estate-checks.sh` and
+# `check-installed-checks.py` both derive the file list from those lines, and a unit
+# that named one orchestrator would install nothing but the orchestrator. The queue
+# is keyed by systemd's `INVOCATION_ID`, so two runs cannot read each other's list.
+#
+# JOBS is deliberately small: this is 2 vCPU that also carries 24 containers, and the
+# point is to overlap the waiting, not to fork the estate at once. Measured 2026-11-18,
+# 39 checks took 254 s one after another, of which 54 s was the single slowest. Raising
+# this loads the edge, which is the host every other check is measuring.
+# SPOOL is `/run` because the list is worthless after a reboot, and a reboot is the
+# one time a leftover would be replayed.
+Environment=ESTATE_CHECK_JOBS=6
+Environment=ESTATE_CHECK_SPOOL=/run/estate-checks
+
 # `-` on each ExecStart so a failing check does not stop the ones after it: all of them
 # must publish every run, or a check that is merely unhappy today would take the others'
 # metrics stale and page about the wrong thing. The finding is the textfile, not the
@@ -34,9 +51,9 @@ Environment=TEXTFILE_DIR=/var/lib/node_exporter/textfile
 # sshpass on this host). The key lives on the edge and a host is readable only when it is
 # in that host's `authorized_keys` and named in the edge's `/root/.ssh/config` — see
 # `scripts/trust-estate-hosts.py`, which installs both and whose `--check` reports drift.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-addresses.py --prom ${TEXTFILE_DIR}/estate-check-container-address.prom
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-limits.py --prom ${TEXTFILE_DIR}/estate-check-container-limits.prom
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-inventory.py --prom ${TEXTFILE_DIR}/estate-check-estate-inventory.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-container-addresses.py --prom ${TEXTFILE_DIR}/estate-check-container-address.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-container-limits.py --prom ${TEXTFILE_DIR}/estate-check-container-limits.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-estate-inventory.py --prom ${TEXTFILE_DIR}/estate-check-estate-inventory.prom
 
 # And that a container which is *running* would still be running after a reboot
 # (2026-11-17). `boot.autostart=false` is the quiet half of every move: it is right while
@@ -47,9 +64,9 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-inventory.py
 # `check-retired-instances.py` asserts the other direction (instances that must stay
 # down); this asserts that everything else comes back, with `onyx`'s USB-disk dependency
 # carried as a named exemption that is published as a note rather than passed over.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-container-autostart.py --prom ${TEXTFILE_DIR}/estate-check-container-autostart.prom
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-address-latency.py --prom ${TEXTFILE_DIR}/estate-check-address-latency.prom
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-host-disk.py --prom ${TEXTFILE_DIR}/estate-check-host-disk.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-container-autostart.py --prom ${TEXTFILE_DIR}/estate-check-container-autostart.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-address-latency.py --prom ${TEXTFILE_DIR}/estate-check-address-latency.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-host-disk.py --prom ${TEXTFILE_DIR}/estate-check-host-disk.prom
 
 # And that a container's PID 1 is actually reaping (2026-11-15). Two containers leaked
 # zombies for weeks and nothing reported it: `openmaic-mineru` on i1 and `linkwarden` on
@@ -60,7 +77,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-host-disk.py --prom
 # that fix is a file on two hosts and nothing else would notice it being reverted. The
 # warning line sits above i2's one deliberate `epmd` zombie (a k3s pod with no `kubectl`
 # to change it), so a normal host stays quiet. Reads `i3` too: it is an estate host again.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-zombie-processes.py --prom ${TEXTFILE_DIR}/estate-check-host-zombies.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-zombie-processes.py --prom ${TEXTFILE_DIR}/estate-check-host-zombies.prom
 
 # And that a mountpoint is still the thing it is named for. On 2026-11-14 the vault's USB
 # drive dropped off the bus and came back as a different device node: `srv-vault.mount`
@@ -68,13 +85,13 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-zombie-processes.py
 # nginx `:8080` door and the NFS export all kept answering from nothing. `nofail` is the
 # right fstab option and `mountpoint` cannot tell "absent" from "fine"; a sentinel file on
 # the filesystem can. This reads the mount, the sentinel and the ro view in one ssh call.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-vault-mount.py --prom ${TEXTFILE_DIR}/estate-check-vault-mount.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-vault-mount.py --prom ${TEXTFILE_DIR}/estate-check-vault-mount.prom
 # SMART on the disk that carries the vault: the mount check proves the path is the
 # vault, this one asks whether the disk under it is still trustworthy. Same host, same
 # label-addressed device (the letter changed once and would again).
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-vault-disk.py --prom ${TEXTFILE_DIR}/estate-check-vault-disk.prom
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-alert-delivery.py --prom ${TEXTFILE_DIR}/estate-check-alert-delivery.prom
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-auth.py --prom ${TEXTFILE_DIR}/estate-check-mail-auth.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-vault-disk.py --prom ${TEXTFILE_DIR}/estate-check-vault-disk.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-alert-delivery.py --prom ${TEXTFILE_DIR}/estate-check-alert-delivery.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-mail-auth.py --prom ${TEXTFILE_DIR}/estate-check-mail-auth.prom
 # The mail server is reached at its own address (`mail`, 192.168.1.15, in the container
 # address table), so the check keeps working when the container moves host — and it has:
 # it is on `i2` since 2026-11-02, having been on `i1`, then `i4`, then `i3` (retired
@@ -82,7 +99,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-auth.py --prom
 # comment. STALWART_USER/
 # STALWART_PASSWORD come from the EnvironmentFile above; the check has no default
 # credential and must never carry one.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-relay.py --base http://192.168.1.15:8080 --prom ${TEXTFILE_DIR}/estate-check-mail-relay.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-mail-relay.py --base http://192.168.1.15:8080 --prom ${TEXTFILE_DIR}/estate-check-mail-relay.prom
 
 # And that the mail server can still *sign a person in*, which is the half none of the
 # checks above asks. On 2026-11-06 the sign-in completed and every request after it 500d:
@@ -94,7 +111,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-relay.py --bas
 # 401*; 500 names the cached-directory failure and its recovery. The timer
 # `stalwart-watchdog.timer` on the mail container performs that recovery; this is what
 # says whether it is working. See docs/mail-sso-directory-2026-11-06.md.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-sso.py --webmail https://mail.innotel.us --base http://192.168.1.15:8080 --prom ${TEXTFILE_DIR}/estate-check-mail-sso.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-mail-sso.py --webmail https://mail.innotel.us --base http://192.168.1.15:8080 --prom ${TEXTFILE_DIR}/estate-check-mail-sso.prom
 
 # And that the document the mail server reads at start-up is still there, still current and
 # still servable. Since 2026-11-09 Stalwart fetches it from a copy inside its own container
@@ -105,7 +122,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-sso.py --webma
 # the server are all silent here: the mail server starts, and nobody can sign in. This check
 # reads the container through `incus exec` on the host that runs it, because the container
 # has sshd but not the key the checks hold; the same route `check-alert-delivery.py` uses.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stalwart-oidc-cache.py --prom ${TEXTFILE_DIR}/estate-check-stalwart-oidc-cache.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-stalwart-oidc-cache.py --prom ${TEXTFILE_DIR}/estate-check-stalwart-oidc-cache.prom
 
 # And the pieces that copy depends on, by the runbook's own preflight (2026-11-14). The
 # check above reads the copy; this asks the eleven facts step 1 of
@@ -120,7 +137,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stalwart-oidc-cache
 # streamed into the container and its `preflight` is run there, so the series says exactly
 # what the runbook says. That is why this unit needs `scripts/` beside it and not only
 # `check-*.py` — the check exits 2 with that reason if the script is missing.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stalwart-oidc-preflight.py --prom ${TEXTFILE_DIR}/estate-check-stalwart-oidc-preflight.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-stalwart-oidc-preflight.py --prom ${TEXTFILE_DIR}/estate-check-stalwart-oidc-preflight.prom
 
 # The one check that is about this repo rather than about a host. The files in `groups/`
 # are generated *and tracked*, so a member repo that moves on leaves the file a rebuild
@@ -130,20 +147,20 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stalwart-oidc-prefl
 # — the CI job's own step — for the member repos, so nothing here depends on a checkout
 # on this host and a version of the scripts deployed years ago still compares that
 # year's `main` against that year's repos. ~15 s a run (17 shallow clones, all small).
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-group-compose-freshness.py --prom ${TEXTFILE_DIR}/estate-check-group-compose-freshness.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-group-compose-freshness.py --prom ${TEXTFILE_DIR}/estate-check-group-compose-freshness.prom
 # It needs the provider's API, and without it exits 2 — a red series rather than a pass,
 # which is how it was found on 2026-11-16 having never actually run here: the host unit
 # carried the check but no AUTHENTIK_API_URL/AUTHENTIK_TOKEN, so the estate's strongest
 # identity rule was silently unrunnable. Both come from the EnvironmentFile above, and
 # the URL is the provider's *published* address (`http://192.168.1.71:9000`): this host
 # cannot route to the container's bridge address, and the public name 504s under load.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-authentik-privilege.py --prom ${TEXTFILE_DIR}/estate-check-authentik-privilege.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-authentik-privilege.py --prom ${TEXTFILE_DIR}/estate-check-authentik-privilege.prom
 
 # A gate's callback, not its front page: oauth2-proxy's session cookie is larger
 # than nginx's stock 4k header buffer, so a gated host answers 502 on the
 # callback after the person has already signed in (2026-10-25). This probes
 # every gated name's callback and reads each proxy block's buffer.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --prom ${TEXTFILE_DIR}/estate-check-sso-callbacks.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --prom ${TEXTFILE_DIR}/estate-check-sso-callbacks.prom
 
 # And the half the check above cannot see: whether the provider will send the browser
 # back at all (2026-11-16). `redirect_uri` is the one part of a sign-in that is not
@@ -169,7 +186,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-callbacks.py --
 # not the container's own bridge address and not the public name: the bridge is not
 # routable from this host at all, and the public name answers 504 through the edge under
 # load, which reports every registration as unreadable. Measured 2026-11-16.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-redirects.py --auth http://192.168.1.71:9000 --deadline 420 --prom ${TEXTFILE_DIR}/estate-check-sso-redirects.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-sso-redirects.py --auth http://192.168.1.71:9000 --deadline 420 --prom ${TEXTFILE_DIR}/estate-check-sso-redirects.prom
 
 # And whether a sign-in on the Orion NAS door can actually finish (2026-11-14). The proxy
 # trusts an issuer, the estate serves one authentik under two names, and each name reports
@@ -179,7 +196,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-sso-redirects.py --
 # callback proves nothing. This reads the proxy's own env file on the edge, the issuer's
 # discovery document, and the redirect the door emits, and names which of the three
 # disagrees. `docs/identity-hosts.md` says why the brand question is a warning.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-orion-signin.py --prom ${TEXTFILE_DIR}/estate-check-orion-signin.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-orion-signin.py --prom ${TEXTFILE_DIR}/estate-check-orion-signin.prom
 
 # The other half of the mail story: `check-mail-auth` proves the records are in the
 # zone, this reads the reports receivers send back and says which sending streams do
@@ -190,7 +207,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-orion-signin.py --p
 # of the `rua` being published (--wired, default 2026-10-29) there is nothing to report
 # on yet and it is a note, and after that it is a failure — the reporting path, not the
 # policy, is what breaks that way. An unreadable mailbox is exit 2 either way.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-dmarc-alignment.py --prom ${TEXTFILE_DIR}/estate-check-dmarc-alignment.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-dmarc-alignment.py --prom ${TEXTFILE_DIR}/estate-check-dmarc-alignment.prom
 
 # The edge's own two ways of losing a door without saying so (2026-10-29): a proxy
 # host left pointing at a target that stopped existing (a loopback target from
@@ -199,7 +216,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-dmarc-alignment.py 
 # host that drifted off the target `scripts/edge-vhost-targets.tsv` pins. Reads the
 # generated blocks where the edge keeps them (the `proxy` container's volume) and
 # TCP-connects every target; the discard port is reported as parked, not dead.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-targets.py --config-dir /usr/src/proxy/data/nginx --expect /opt/innotel/estate-checks/edge-vhost-targets.tsv --prom ${TEXTFILE_DIR}/estate-check-edge-vhost-targets.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-targets.py --config-dir /usr/src/proxy/data/nginx --expect /opt/innotel/estate-checks/edge-vhost-targets.tsv --prom ${TEXTFILE_DIR}/estate-check-edge-vhost-targets.prom
 
 # And the other way a door is lost without a word (2026-10-30): NPM's own record of a
 # host and the file it wrote are two copies of one fact, and neither write direction
@@ -212,7 +229,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-targets.
 # rather than `database.sqlite` because this NPM is MySQL-backed; NPM_ADMIN_EMAIL /
 # NPM_ADMIN_PASSWORD come from the EnvironmentFile above (there is no default
 # credential and it must never carry one), and a missing one is exit 2, not a pass.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-npm-config-drift.py --api http://192.168.1.71:81 --data-dir /usr/src/proxy/data --prom ${TEXTFILE_DIR}/estate-check-npm-config-drift.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-npm-config-drift.py --api http://192.168.1.71:81 --data-dir /usr/src/proxy/data --prom ${TEXTFILE_DIR}/estate-check-npm-config-drift.prom
 
 # And that a moved workload stays moved (2026-11-16). `monarch` left `i1` because one
 # spindle could not carry it, and the enforceable half of that move is the *name*: the
@@ -222,7 +239,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-npm-config-drift.py
 # and the outage it brings is on a disk no other check reads. `incus-guard` cannot cover
 # it: the lease only binds sessions that ask for it. This reads the hosts and asserts both
 # halves: the retired instance present and stopped, and the live name absent.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-retired-instances.py --prom ${TEXTFILE_DIR}/estate-check-retired-instances.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-retired-instances.py --prom ${TEXTFILE_DIR}/estate-check-retired-instances.prom
 
 # And that a pin holds in NPM's own record, not only in the file nginx reads
 # (2026-11-09). `check-edge-vhost-targets` compares the declaration to the generated
@@ -235,7 +252,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-retired-instances.p
 # same script's `--apply` puts a drifted pin back through the API, which updates the row,
 # the file and the running nginx in one write. NPM_ADMIN_EMAIL/NPM_ADMIN_PASSWORD come
 # from the EnvironmentFile above.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-pins.py --api http://192.168.1.71:81 --config-dir /usr/src/proxy/data/nginx --pins /opt/innotel/estate-checks/edge-vhost-targets.tsv --redirect-pins /opt/innotel/estate-checks/edge-redirect-targets.tsv --check-destinations --prom ${TEXTFILE_DIR}/estate-check-edge-vhost-pins.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-pins.py --api http://192.168.1.71:81 --config-dir /usr/src/proxy/data/nginx --pins /opt/innotel/estate-checks/edge-vhost-targets.tsv --redirect-pins /opt/innotel/estate-checks/edge-redirect-targets.tsv --check-destinations --prom ${TEXTFILE_DIR}/estate-check-edge-vhost-pins.prom
 
 # The media estate's doors, from the outside: `media.innotel.us` has to answer with
 # Jellyfin's own page (published, not gated, since 2026-09-18) and `iptv.innotel.us` has to
@@ -244,8 +261,8 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-vhost-pins.py 
 # else in the estate would notice it going dark, and a dead door there means a title plays
 # nowhere. `tv.innotel.us` is Sonarr as of 2026-11-11, which is why the watch assertions
 # follow `iptv` — Jellyfin's direct 14016 publish — rather than the name they used to.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-media-doors.py --prom ${TEXTFILE_DIR}/estate-check-media-doors.prom
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-media-apps.py --prom ${TEXTFILE_DIR}/estate-check-media-apps.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-media-doors.py --prom ${TEXTFILE_DIR}/estate-check-media-doors.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-media-apps.py --prom ${TEXTFILE_DIR}/estate-check-media-apps.prom
 
 # And that the door still opens for the people it is for: drives
 # `POST /api/tokens/sso` inside the edge container as the gateway's hop, where a
@@ -253,7 +270,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-media-apps.py --pro
 # one forged at the published admin port — has to be refused. The 2026-10-29
 # sign-in outage was a peer map reading `$remote_addr` after realip had rewritten
 # it; every case here still said 403, and nothing was watching.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --docker 'incus exec proxy -- docker' --prom ${TEXTFILE_DIR}/estate-check-edge-sso-door.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --docker 'incus exec proxy -- docker' --prom ${TEXTFILE_DIR}/estate-check-edge-sso-door.prom
 
 # And the learner-facing door itself (2026-11-14): `class.atheniq.courses` is where every
 # classroom link in `atheniq-work` goes, and it has to be *behind* a sign-in rather than
@@ -265,7 +282,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --
 # `classroom.` name to one of its two allowed states (gated the same way, or moved to the
 # classroom): a third state is a second application nobody registered, and the retirement
 # order is `docs/atheniq-classroom-name.md`.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-atheniq-doors.py --prom ${TEXTFILE_DIR}/estate-check-atheniq-doors.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-atheniq-doors.py --prom ${TEXTFILE_DIR}/estate-check-atheniq-doors.prom
 
 # And that no NFS share has been mounted twice or gone stale. On 2026-10-29
 # `/srv/onyx-pool` in `distro` held 32 769 entries: ganesha restarted, every handle
@@ -276,7 +293,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-atheniq-doors.py --
 # answered. It reads each host and then each running container *inside* the
 # container — a container's mountpoints are not paths on its host — and bounds every
 # probe at five seconds.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mount-stacks.py --prom ${TEXTFILE_DIR}/estate-check-mount-stacks.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-mount-stacks.py --prom ${TEXTFILE_DIR}/estate-check-mount-stacks.prom
 
 # And what the mail server actually *did* in the last day. Everything above asks
 # whether a thing is configured; this reads Stalwart's own log for the traffic —
@@ -286,7 +303,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mount-stacks.py --p
 # found by asking each host what it runs, so the mail server moving host does not
 # take this check with it. It publishes its counts as `innotel_estate_check_mail_*`
 # beside the shared contract; the panels are dashboard `mail.json`.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-traffic.py --prom ${TEXTFILE_DIR}/estate-check-mail-traffic.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-mail-traffic.py --prom ${TEXTFILE_DIR}/estate-check-mail-traffic.prom
 
 # And the one process question none of the above asks: has anything been *stuck* for
 # over an hour. On 2026-10-27 i4 sat at load 13 because a `docker exec` had been running
@@ -294,7 +311,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-traffic.py --p
 # 8 h — nothing misconfigured, so no estate check could see it. Written on the edge the
 # same day, it ran there by hand and was never brought into the repo or this unit, which
 # is why the dashboard's "Checks reporting" number was one behind the unit's own list.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stuck-processes.py --prom ${TEXTFILE_DIR}/estate-check-stuck-processes.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-stuck-processes.py --prom ${TEXTFILE_DIR}/estate-check-stuck-processes.prom
 
 # The doors onto the development guest that was 192.168.1.93, written after the Windows
 # box at .17 dropped about half the connects it proxied while the VM itself looked
@@ -302,7 +319,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-stuck-processes.py 
 # it; `deploy.innotel.us` returned on 2026-11-15 pointing at the Coolify panel's own host
 # (`192.168.1.113:8000`, no tunnel), which is what the check now probes and what the
 # series reports. See check-deploy-door.py.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-deploy-door.py --prom ${TEXTFILE_DIR}/estate-check-deploy-door.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-deploy-door.py --prom ${TEXTFILE_DIR}/estate-check-deploy-door.prom
 
 # And that the Telno node still holds the records its legacy database has (2026-11-02).
 # The console and the Asterisk-era database are two copies of one fact with no live link:
@@ -329,8 +346,8 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-deploy-door.py --pr
 # timer's own verdict inside the `mail` container — the same `incus exec` hop
 # `check-alert-delivery.py` uses — so a mailbox with no identity to sign in is a page
 # rather than a journal line the next run overwrites.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-mail-identities.py --prom ${TEXTFILE_DIR}/estate-check-mail-identities.prom
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-installed-checks.py --prom ${TEXTFILE_DIR}/estate-check-installed-checks.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-mail-identities.py --prom ${TEXTFILE_DIR}/estate-check-mail-identities.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-installed-checks.py --prom ${TEXTFILE_DIR}/estate-check-installed-checks.prom
 # The same comparison for every other unit this host carries: the ones in `systemd/`
 # that are installed here, against the revision. A unit edited on a host during an
 # incident leaves the job running and the repository wrong.
@@ -341,7 +358,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-installed-checks.py
 # compared nowhere. `i2` left the same day it was decommissioned (§19 of
 # `docs/estate-rebalance-2026-11-15.md`): a host in this list that cannot answer costs every
 # run a 25-second timeout and reports the decommission as drift.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-unit-drift.py --host i1=192.168.1.51 --host i2=192.168.1.52 --host i3=192.168.1.53 --prom ${TEXTFILE_DIR}/estate-check-unit-drift.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-unit-drift.py --host i1=192.168.1.51 --host i2=192.168.1.52 --host i3=192.168.1.53 --prom ${TEXTFILE_DIR}/estate-check-unit-drift.prom
 
 # And that a credential the estate depends on is not older than its rotation window
 # (2026-11-17). Every other check asks whether a credential still *works*; none asked how
@@ -354,7 +371,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-unit-drift.py --hos
 # `--all` ages every top-level secret the mount lists rather than a hand-kept list, so a
 # credential added tomorrow is covered without this line changing. Directories in the
 # listing are skipped; their children are named with `--path` when one of them matters.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-credential-age.py --all --mount cerulean --max-age-days 60 --prom ${TEXTFILE_DIR}/estate-check-credential-age.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-credential-age.py --all --mount cerulean --max-age-days 60 --prom ${TEXTFILE_DIR}/estate-check-credential-age.prom
 
 # And the token that check reads with, kept alive (2026-11-17). It is **periodic**
 # (`-period=720h`), and nothing else in the estate renews it, so credential_age would go
@@ -366,7 +383,7 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-credential-age.py -
 # credential_age exiting 2. Re-minting a token that has stopped renewing needs
 # `auth/token/create`, which is not a credential a check should hold — that is a person's
 # job and the message says so.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-vault-token-renewal.py --min-days 7 --prom ${TEXTFILE_DIR}/estate-check-vault-token-renewal.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-vault-token-renewal.py --min-days 7 --prom ${TEXTFILE_DIR}/estate-check-vault-token-renewal.prom
 
 # And the shape of the history rather than the moment (2026-11-17). The alerts read the
 # current value, which is right for paging and blind to a check that goes red and green
@@ -375,4 +392,10 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-vault-token-renewal
 # API for the series every check already publishes and warns when one changed status more
 # than once in the window. Prometheus is the edge's own (`:9090`); an unreachable one is
 # exit 2, because a flap report that cannot read history is not a clean bill of health.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-flaps.py --days 7 --prom ${TEXTFILE_DIR}/estate-check-estate-flaps.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-estate-flaps.py --days 7 --prom ${TEXTFILE_DIR}/estate-check-estate-flaps.prom
+
+# The one line that runs the queue. Everything above it only described work; this is
+# the run, and it is the last `ExecStart=` so systemd has the whole list before it
+# starts. It carries the same `-` as the checks: a check that is unhappy today must not
+# stop the rest of the run, or its own stale series would page about the wrong thing.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py drain --jobs ${ESTATE_CHECK_JOBS}
