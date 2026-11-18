@@ -218,7 +218,8 @@ EXPECTED: dict[str, dict[str, str]] = {
     # `copilotkit` and `subscribe` came back to `i2` on 2026-11-18, which is why they are
     # rows under `i2` and not here: filed here they reported `i3 copilotkit: not present`
     # while the running container sat in no row at all — the same false alarm in both
-    # directions this table's own notes describe for `onyx`.    "i3": {
+    # directions this table's own notes describe for `onyx`.
+    "i3": {
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
         # `onyx` is imported here and **STOPPED**: it mounts the USB block device
