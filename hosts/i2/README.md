@@ -27,6 +27,7 @@ parameter that no container can set.
 | `proxy-backup/proxy-backup.service` | `/etc/systemd/system/proxy-backup.service` on i2 (host) |
 | `proxy-backup/proxy-backup.timer` | `/etc/systemd/system/proxy-backup.timer` on i2 (host) |
 | `monarch/flaresolverr/` | inside `monarch`: the `/patch/sitecustomize.py` mount, plus the Chromium reaper and its units on the host — see [its README](monarch/flaresolverr/README.md) |
+| `apparmor/transmission` | `/etc/apparmor.d/transmission` on i2 (host), reloaded with `apparmor_parser -r` |
 
 ## Install / re-apply
 
@@ -35,6 +36,8 @@ install -m 0644 modules-load.d/br_netfilter.conf /etc/modules-load.d/br_netfilte
 install -m 0644 sysctl.d/99-bridge-nf-off.conf   /etc/sysctl.d/99-bridge-nf-off.conf
 install -m 0755 ../../scripts/backup-proxy.sh     /usr/local/sbin/backup-proxy.sh
 install -m 0755 ../../scripts/restore-proxy.sh    /usr/local/sbin/restore-proxy.sh
+install -m 0644 apparmor/transmission             /etc/apparmor.d/transmission
+apparmor_parser -r                                /etc/apparmor.d/transmission
 modprobe br_netfilter                              # no-op when already loaded
 sysctl -p /etc/sysctl.d/99-bridge-nf-off.conf
 lsmod | grep '^br_netfilter'                       # must list the module
@@ -168,6 +171,46 @@ The runner only needs the file to **exist**, and `0` leaves it present. So the
 posture is both: module loaded, host-side bridge traversal off. `systemd-sysctl`
 runs after `systemd-modules-load`, so the value is applied to the loaded module at
 boot without ordering tricks.
+
+## transmission: a distro profile that mediates a container binary
+
+`monarch`'s `transmission` service could not start its daemon at all. The binary
+died during relocation — `Error relocating /usr/lib/libstdc++.so.6: RELRO
+protection failed` on Alpine, `cannot apply additional memory protection after
+relocation: Permission denied` on glibc.
+
+Every Docker-side explanation was tried and ruled out: the same image, a pristine
+container from it, the daemons packaged by Alpine and by Debian, and even
+`--security-opt apparmor=unconfined` and `--privileged` all failed identically,
+because Docker's profile was never the one denying. The kernel audit log named
+the real one:
+
+    apparmor="DENIED" operation="file_mprotect" profile="transmission-daemon"
+    name="/var/lib/incus/.../rootfs/usr/lib/libcurl.so.4.8.0" requested_mask="r"
+
+`/etc/apparmor.d/transmission` is a **host** profile that attaches by path to
+`/usr/bin/transmission-daemon`, so it mediates the binary executed *inside* the
+container. Incus's per-container rendering of it was already `(complain)`; the
+host copy was `(enforce)`. The file here is that copy with `complain` added to the
+`transmission-daemon` and `transmission-cli` profiles; reloading it let the daemon
+start immediately, the service went healthy, and its RPC listed the real torrents.
+
+A service-level `security_opt` in a compose file cannot see a profile that
+attaches by path, so this has to be relaxed on the host. It is `complain` rather
+than `disable`: the profile is still loaded and denials are still logged, so the
+host keeps the confinement and gains only the ability to audit it.
+
+One caveat that will bite later: `/etc/apparmor.d/transmission` belongs to the
+`transmission-daemon` package, so an upgrade reinstalls the enforcing copy and
+takes the service down again with the same relocation error. Re-running the two
+install lines above is the repair; if apt asks about the conffile, keep the
+installed (complain) version.
+
+```sh
+apparmor_parser -r /etc/apparmor.d/transmission
+aa-status | grep -c 'transmission-daemon (enforce)'   # must print 0
+docker exec transmission transmission-remote -l       # must list torrents
+```
 
 ## Rollback
 

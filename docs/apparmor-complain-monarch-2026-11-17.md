@@ -89,3 +89,9 @@ was `(enforce)`. Putting the host copy in complain and reloading with
 Rule this adds: a service-level `security_opt` cannot see profiles that attach by
 path. Any distro profile whose path matches a binary in a container applies
 whatever the compose says, so such profiles must be relaxed on the host.
+
+The relaxed host copy is tracked as
+[`hosts/i2/apparmor/transmission`](../hosts/i2/apparmor/transmission) and installed
+to `/etc/apparmor.d/transmission`; [`hosts/i2/README.md`](../hosts/i2/README.md)
+carries the install lines and the note that a `transmission-daemon` package
+upgrade puts the enforcing copy back.
