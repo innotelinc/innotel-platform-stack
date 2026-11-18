@@ -35,9 +35,10 @@ Environment=TEXTFILE_DIR=/var/lib/node_exporter/textfile
 # is keyed by systemd's `INVOCATION_ID`, so two runs cannot read each other's list.
 #
 # JOBS is deliberately small: this is 2 vCPU that also carries 24 containers, and the
-# point is to overlap the waiting, not to fork the estate at once. Measured 2026-11-18,
-# 39 checks took 254 s one after another, of which 54 s was the single slowest. Raising
-# this loads the edge, which is the host every other check is measuring.
+# point is to overlap the waiting, not to fork the estate at once. Measured 2026-11-18:
+# 39 checks took 254 s one after another, of which 54 s was the single slowest, and 77 s at
+# six (three runs: 76.9, 75.8, 79 s wall). Six is 3.3x and the box stays quiet; raising it
+# would load the edge, which is the host every other check is measuring.
 # SPOOL is `/run` because the list is worthless after a reboot, and a reboot is the
 # one time a leftover would be replayed.
 Environment=ESTATE_CHECK_JOBS=6
@@ -270,7 +271,14 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # one forged at the published admin port — has to be refused. The 2026-10-29
 # sign-in outage was a peer map reading `$remote_addr` after realip had rewritten
 # it; every case here still said 403, and nothing was watching.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --docker 'incus exec proxy -- docker' --prom ${TEXTFILE_DIR}/estate-check-edge-sso-door.prom
+# No `--docker` prefix here, and that is the fix rather than a simplification: this file
+# used to pass `--docker 'incus exec proxy -- docker'`, which is a prefix for a shell on
+# `i4` — where the edge container is reached through Incus. The unit runs *inside* `proxy`,
+# where there is no `incus` at all, so the check died on `FileNotFoundError` before it
+# asserted anything and published no series: 2026-11-18, found when the run was made
+# parallel and its failure became visible. The default is plain `docker`, which is the CLI
+# in this container, and all three verdicts hold.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --prom ${TEXTFILE_DIR}/estate-check-edge-sso-door.prom
 
 # And the learner-facing door itself (2026-11-14): `class.atheniq.courses` is where every
 # classroom link in `atheniq-work` goes, and it has to be *behind* a sign-in rather than
