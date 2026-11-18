@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -51,7 +52,10 @@ from estate_check import Audit, Finding, write_prom  # noqa: E402
 
 CHECK = "estate_flaps"
 METRIC = "innotel_estate_check_last_status"
-DEFAULT_PROMETHEUS = "http://127.0.0.1:9090"
+#: The estate's Prometheus is not always on the host that runs this check: the
+#: metrics stack lives on its own host and has been loopback-only, so the address
+#: is configuration. `textfile-series-snapshot.sh` reads the same variable.
+DEFAULT_PROMETHEUS = os.environ.get("PROMETHEUS_URL", "http://127.0.0.1:9090")
 DEFAULT_DAYS = 7.0
 #: One red episode is a blip (a restart window, a transient resolver failure). A second
 #: episode inside the window is the pattern this check is for.

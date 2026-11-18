@@ -375,4 +375,4 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-vault-token-renewal
 # API for the series every check already publishes and warns when one changed status more
 # than once in the window. Prometheus is the edge's own (`:9090`); an unreachable one is
 # exit 2, because a flap report that cannot read history is not a clean bill of health.
-ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-flaps.py --days 7 --prometheus ${ESTATE_PROMETHEUS_URL:-http://127.0.0.1:9090} --prom ${TEXTFILE_DIR}/estate-check-estate-flaps.prom
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/check-estate-flaps.py --days 7 --prom ${TEXTFILE_DIR}/estate-check-estate-flaps.prom
