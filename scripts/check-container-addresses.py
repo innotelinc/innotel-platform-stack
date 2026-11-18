@@ -179,6 +179,12 @@ EXPECTED: dict[str, dict[str, str]] = {
         # netplan — so only the host key moves, as it did for `atheniq` and `mail` before.
         "atlas": "192.168.1.90",
         "blueprint": "192.168.1.76",
+        # `coolify` (`.85`) is new on 2026-11-18: the deploy panel left the host's Docker
+        # (where it published `:8000` on this host's own address) for a container of its
+        # own, so that the panel that manages other people's containers is not also the
+        # thing that shares a Docker daemon with them. Its database and `/data` were moved
+        # across, and `deploy.innotel.us` was repointed the same evening.
+        "coolify": "192.168.1.85",
         "clearpath": "192.168.1.83",
         "genie-preview": "192.168.1.24",
         "monarch": "192.168.1.56",

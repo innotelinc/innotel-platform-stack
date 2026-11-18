@@ -192,9 +192,22 @@ name with no loaded `server_name`.
 
 Measured before the repair: none of the 215 proxy hosts named the door, no door rode a
 tunnel any more, and the only estate listeners on `:8090` were telno's `christ-telno` on
-`192.168.1.113` and a stale docker-proxy on `i2`. The panel was on `192.168.1.113` — host
-`dev`, a VM of its own rather than an Incus guest — running `coollabsio/coolify:4.7.5`
-with `coolify-sentinel`, `coolify-db` and `coolify-redis`.
+`192.168.1.113` and a stale docker-proxy on `i2`.
+
+**Corrected 2026-11-18: `.113` was never a VM.** This page said "host `dev`, a VM of its
+own rather than an Incus guest", and that sentence sent a later investigation looking for a
+hypervisor that does not exist. `192.168.1.113` is the **`workloads` container on `i1`**
+(`incus list i1`), and what answered `:8000` there was not Coolify at all but
+`coolify-webhook-forward.service` — a `node` forwarder whose whole job was to relay
+webhook deliveries to the panel, then on `i2`'s **host Docker** (`192.168.1.52:8000`, with
+`coolify-sentinel`, `coolify-db` and `coolify-redis`, `coollabsio/coolify:4.7.5`).
+
+That shape was the reason three address-keyed Authentik callbacks existed for one provider:
+the panel was reached by address from two different addresses, so both were registered, and
+the name (`https://deploy.innotel.us`, which is what `instance_settings.fqdn` actually held)
+was registered beside them. On 2026-11-18 the panel moved to its own container (`coolify`,
+`.85`, on `i2`) and the two name-keyed callbacks were left as the only ones — see
+`docs/container-placement.md`, §*Changes applied 2026-11-18 (evening)*.
 
 Two faults stacked, which is why pointing a proxy host at it was not enough on its own:
 

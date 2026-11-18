@@ -15,6 +15,34 @@ evening pass moved the edge services back onto i1, right-sized i1's CPU caps, an
 put the address invariant on a schedule with an alert. The tables below are the
 estate as it is, not as it was.
 
+## Changes applied 2026-11-18 (evening) — Coolify off the host's Docker, into its own container
+
+- **The panel was the only estate workload sharing `i2`'s own Docker daemon.** It ran as the
+  `coolify` compose stack on the host (`coolify`, `coolify-db`, `coolify-redis`,
+  `coolify-sentinel`, publishing `0.0.0.0:8000→8080`), which meant the thing that deploys
+  containers was a tenant of the daemon it deploys against. `:113:8000` was never the
+  panel: that is `workloads` on `i1` running `coolify-webhook-forward.service`, a `node`
+  shim whose `FORWARD_HOST` was this host.
+- **Now `incus` instance `coolify` on `i2`**, address **`192.168.1.85`**, `2 vCPU` / `4 GiB`,
+  `boot.autostart=true`, profiles `default` + `docker` (`security.nesting`), Docker 29.1.3 +
+  compose 2.40.3, root on pool `fast`. The `fast` pool is a `dir` pool on `/`, which is the
+  estate's tightest filesystem (99 G free at the time) — the panel's own footprint is
+  396 K of `/data` plus a 21 MB database, so this does not change that constraint.
+- **State moved, not re-created**: `/data/coolify` copied over, `pg_dump -Fc` restored into
+  the new `coolify-db` (90 tables), then verified row for row against the old database —
+  1 project, 3 applications, 2 servers, 1 user on both sides — before the host stack was
+  stopped (containers and volumes kept as the rollback).
+- **Dependents updated before the cutover**, because each one would have broken silently:
+  NPM row 342 `deploy.innotel.us` `192.168.1.113:8000` → `192.168.1.85:8000`;
+  `cerulean-automation.service`'s `COOLIFY_API`/`COOLIFY_HOST` from `127.0.0.1:8000` to the
+  new address (it runs on `i2` and had been reaching the panel over loopback); and the
+  webhook forwarder's `FORWARD_HOST` (`:113:8000` still answers 200).
+- **Authentik left with the two name-keyed callbacks only.** Provider 63 carried three
+  address-keyed URIs (`192.168.1.52:8000` ×2, `192.168.1.113:8000`) beside
+  `https://deploy.innotel.us/auth/{authentik,oidc}/callback`; the panel's own `fqdn` is the
+  name, nothing answers on `.52:8000` any more, so the address ones were retired rather than
+  repointed. `check-sso-redirects` is what would have caught the opposite order.
+
 ## Changes applied 2026-11-18 — `authentik`'s memory cap raised to 1.5 GiB
 
 - **The provider was running at 66 % of its cap.** `cerulean-authentik` held 674 MiB of a
