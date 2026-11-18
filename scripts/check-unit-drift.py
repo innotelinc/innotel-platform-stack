@@ -35,12 +35,12 @@ unreachable host is the failure this check exists to remove.
 A HOST THAT ANSWERS WITH NOTHING
 --------------------------------
 `--host` says a host carries some of the revision's units, and the comparison can only find
-drift in what it can see. i3 answered every run with an empty listing: the check counted
-its neighbours' files and published `OK`, so the one host the run could not describe was the
-one it was quietest about. A listed host whose listing holds neither a unit nor a drop-in of
-the revision is a finding now — either nothing the estate keeps was installed there, or the
-listing reads a directory that is not the one systemd loads. Both are worth a page; neither
-is a host that agrees.
+drift in what it can see. i3 was the case that showed it: a live Incus host that had been
+given none of the units its neighbours carry, so every run counted the neighbours' files,
+published `OK`, and said nothing about the one host it could not describe. A listed host
+whose listing holds neither a unit nor a drop-in of the revision is a finding now — either
+nothing the estate keeps was installed there, or the listing reads a directory that is not
+the one systemd loads. Both are worth a page; neither is a host that agrees.
 
 WHY NOT EVERY UNIT INSTALLED HERE
 ---------------------------------
