@@ -16,6 +16,7 @@ a throwaway repository, and `ssh` is faked where a host has to answer.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
 import subprocess
@@ -55,10 +56,13 @@ def reader(mapping: dict[str, bytes]):
 class FakeSSH:
     """Stands in for `subprocess` while a host answers — or does not."""
 
-    def __init__(self, *, stdout: str = "", returncode: int = 0, error: Exception | None = None):
+    def __init__(self, *, stdout: str = "", returncode: int = 0,
+                 error: Exception | None = None, delegate: bool = False):
         self.stdout = stdout
         self.returncode = returncode
         self.error = error
+        #: `main` also reads the revision with git; let everything but ssh through.
+        self.delegate = delegate
         self.calls: list[list[str]] = []
 
     def __enter__(self):
@@ -74,6 +78,8 @@ class FakeSSH:
 
     def run(self, argv, **kwargs):
         self.calls.append(list(argv))
+        if self.delegate and argv and argv[0] != "ssh":
+            return self._real.run(argv, **kwargs)
         if self.error is not None:
             raise self.error
         return subprocess.CompletedProcess(argv, self.returncode, self.stdout, "no route to host")
@@ -186,6 +192,24 @@ class Verdict(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual([f.code for f in result.failures], ["unreachable"])
         self.assertIn("were not compared", result.failures[0].message)
+
+    def test_a_listed_host_that_contributed_nothing_is_a_failure(self):
+        # i3 answered every run with an empty listing and the run still said OK. A host that
+        # contributes no file is a host the comparison never reached.
+        result = check.audit([], 19, [], ["i3"])
+        self.assertFalse(result.ok)
+        self.assertEqual([f.code for f in result.failures], ["no_files"])
+        self.assertIn("i3", result.failures[0].message)
+
+    def test_an_empty_host_is_not_published_as_a_clean_match(self):
+        result = check.audit([], 19, [], ["i3"])
+        self.assertEqual([f.code for f in result.findings], ["no_files"])
+
+    def test_the_report_names_the_host_that_contributed_nothing(self):
+        body = check.report([], 19, [], "origin/main", ["i1", "i3"], ["i3"])
+        self.assertIn("EMPTY", body)
+        self.assertIn("i3 reported no unit", body)
+        self.assertIn("1 finding(s) of 19 file(s)", body)
 
     def test_a_host_that_agrees_publishes_how_many_it_compared(self):
         result = check.audit([], 3, [])
@@ -336,6 +360,22 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("LOCAL", out)
         self.assertIn("99-local.conf", out)
+
+    def test_a_listed_host_that_answers_with_no_files_fails_the_run(self):
+        # The silence this closes: the ssh succeeds, the listing holds nothing, and the run
+        # used to call that a pass over the hosts that did answer.
+        with FakeSSH(stdout="", delegate=True):
+            code, out, _ = self.run_check("--host", "i3=192.0.2.53")
+        self.assertEqual(code, 1, out)
+        self.assertIn("EMPTY", out)
+        self.assertIn("i3 reported no unit", out)
+
+    def test_a_listed_host_with_the_revision_s_copy_still_passes(self):
+        body = hashlib.sha256(SERVICE.encode()).hexdigest() + "  thing.service\n"
+        with FakeSSH(stdout=body, delegate=True):
+            code, out, _ = self.run_check("--host", "i1=192.0.2.51")
+        self.assertEqual(code, 0, out)
+        self.assertIn("2 file(s) on this host, i1 match", out)
 
     def test_a_revision_it_cannot_read_is_two_not_a_pass(self):
         out, err = io.StringIO(), io.StringIO()

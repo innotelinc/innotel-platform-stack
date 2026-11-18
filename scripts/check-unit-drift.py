@@ -32,6 +32,16 @@ compares a host's unit directory over `ssh` and reports what it finds in the sam
 with the host in the finding. A host that cannot be read is a finding too — silence from an
 unreachable host is the failure this check exists to remove.
 
+A HOST THAT ANSWERS WITH NOTHING
+--------------------------------
+`--host` says a host carries some of the revision's units, and the comparison can only find
+drift in what it can see. i3 answered every run with an empty listing: the check counted
+its neighbours' files and published `OK`, so the one host the run could not describe was the
+one it was quietest about. A listed host whose listing holds neither a unit nor a drop-in of
+the revision is a finding now — either nothing the estate keeps was installed there, or the
+listing reads a directory that is not the one systemd loads. Both are worth a page; neither
+is a host that agrees.
+
 WHY NOT EVERY UNIT INSTALLED HERE
 ---------------------------------
 A host also carries units the estate does not own (Docker's, systemd's own), and they are not
@@ -302,7 +312,8 @@ def compare_hashes(host: str, hashes: dict[str, str], read) -> list[Mismatch]:
     return found
 
 
-def audit(mismatches: list[Mismatch], compared: int, unreachable: list[str]) -> "Audit":
+def audit(mismatches: list[Mismatch], compared: int, unreachable: list[str],
+          empty: list[str] | None = None) -> "Audit":
     """The findings every scheduled check publishes."""
     out = Audit()
     for mismatch in mismatches:
@@ -321,7 +332,12 @@ def audit(mismatches: list[Mismatch], compared: int, unreachable: list[str]) -> 
         out.findings.append(Finding(
             "unreachable", "fail",
             f"{reason}: the units there were not compared with anything"))
-    if not mismatches and not unreachable:
+    for host in empty or []:
+        out.findings.append(Finding(
+            "no_files", "fail",
+            f"{host} reported no unit and no drop-in of this revision: an empty listing is "
+            "not a host that agrees, it is a host the comparison never reached"))
+    if not mismatches and not unreachable and not empty:
         out.findings.append(Finding(
             "units_match", "note",
             f"all {compared} file(s) compared are the revision's own copies"))
@@ -329,7 +345,7 @@ def audit(mismatches: list[Mismatch], compared: int, unreachable: list[str]) -> 
 
 
 def report(mismatches: list[Mismatch], compared: int, unreachable: list[str],
-           ref: str, hosts: list[str]) -> str:
+           ref: str, hosts: list[str], empty: list[str] | None = None) -> str:
     """The same verdict for a person reading the journal."""
     lines: list[str] = []
     for mismatch in mismatches:
@@ -341,11 +357,14 @@ def report(mismatches: list[Mismatch], compared: int, unreachable: list[str],
                      f"revision {mismatch.revision}")
     for reason in unreachable:
         lines.append(f"{'UNREAD':8} {reason}")
+    for host in empty or []:
+        lines.append(f"{'EMPTY':8} {host} reported no unit and no drop-in of {ref}")
     where = ", ".join(["this host", *hosts])
     if not mismatches and not unreachable:
         lines.append(f"{'OK':8} {compared} file(s) on {where} match {ref}")
     lines.append("")
-    lines.append(f"{len(mismatches)} finding(s) of {compared} file(s) compared "
+    lines.append(f"{len(mismatches) + len(empty or [])} finding(s) of {compared} file(s) "
+                 f"compared "
                  f"({where}) against {ref}")
     return "\n".join(lines)
 
@@ -367,6 +386,7 @@ def main(argv: list[str] | None = None) -> int:
 
     refresh(args.repo, args.ref)
     unreachable: list[str] = []
+    empty: list[str] = []
     try:
         hosts = parse_hosts(args.host)
         names = repository_units(args.repo, args.ref)
@@ -391,13 +411,15 @@ def main(argv: list[str] | None = None) -> int:
         except Unreadable as error:
             unreachable.append(str(error))
             continue
+        if not units and not drop_ins:
+            empty.append(host)
         compared += len(units) + len(drop_ins)
         mismatches += compare_hashes(host, units, read)
         found, _ = compare_drop_ins(drop_ins, repository_drop_ins(args.repo, args.ref, host),
                                     read, host)
         mismatches += found
 
-    result = audit(mismatches, compared, unreachable)
+    result = audit(mismatches, compared, unreachable, empty)
     if args.prom:
         if not HAVE_TELEMETRY:
             print("check-unit-drift: --prom needs estate_check.py beside this file",
@@ -407,10 +429,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps({"mismatches": [vars(mismatch) for mismatch in mismatches],
-                          "unreachable": unreachable, "compared": compared}, indent=2))
+                          "unreachable": unreachable, "empty": empty,
+                          "compared": compared}, indent=2))
     else:
         print(report(mismatches, compared, unreachable, args.ref,
-                     [host for host, _ in hosts]))
+                     [host for host, _ in hosts], empty))
     return 0 if result.ok else 1
 
 

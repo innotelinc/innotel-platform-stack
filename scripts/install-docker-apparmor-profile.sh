@@ -139,7 +139,10 @@ PY
 
 restore_daemon() { # put back the newest backup; never leave a daemon without a config
   local backup
-  backup=$(ls -1t "$DAEMON".bak-* 2>/dev/null | head -1)
+  # Newest by mtime, and a path with a space stays one: `ls | head -1` splits on whitespace,
+  # which SC2012 is right about.
+  backup=$(find "$(dirname "$DAEMON")" -maxdepth 1 -name "$(basename "$DAEMON").bak-*" \
+             -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
   if [ -n "$backup" ]; then
     cp -p "$backup" "$DAEMON" && echo "restored $DAEMON from $backup"
   else
