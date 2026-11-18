@@ -192,7 +192,6 @@ name with no loaded `server_name`.
 
 Measured before the repair: none of the 215 proxy hosts named the door, no door rode a
 tunnel any more, and the only estate listeners on `:8090` were telno's `christ-telno` on
-<<<<<<< HEAD
 `192.168.1.113` and a stale docker-proxy on `i2`.
 
 **Corrected 2026-11-18: `.113` was never a VM.** This page said "host `dev`, a VM of its
@@ -209,12 +208,6 @@ the name (`https://deploy.innotel.us`, which is what `instance_settings.fqdn` ac
 was registered beside them. On 2026-11-18 the panel moved to its own container (`coolify`,
 `.85`, on `i2`) and the two name-keyed callbacks were left as the only ones — see
 `docs/container-placement.md`, §*Changes applied 2026-11-18 (evening)*.
-=======
-`192.168.1.113` and a stale docker-proxy on `i2`. The panel was on `192.168.1.113` — host
-`dev`, an Incus container named `workloads` on `i1` rather than a VM of its own (the
-"VM of its own" wording here was wrong; corrected 2026-11-18) — running `coollabsio/coolify:4.7.5`
-with `coolify-sentinel`, `coolify-db` and `coolify-redis`.
->>>>>>> 15901c3 (Correct where the Coolify panel actually runs)
 
 Two faults stacked, which is why pointing a proxy host at it was not enough on its own:
 
