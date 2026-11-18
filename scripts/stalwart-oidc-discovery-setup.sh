@@ -55,6 +55,13 @@ probe() {
 # hosts copy is written, and `pins` applies just them, idempotently, to a container that
 # already exists.
 EDGE=192.168.1.71
+# `auth.innotel.us` is deliberately **not** in this list. It has its own edge certificate
+# (NPM row 37, cert 188, `CN=auth.innotel.us`), and pinning it sends the lookup at a LAN
+# listener that answers the Stalwart OIDC discovery certificate for
+# `auth.cerulean.innotel.us` instead: `sync-mail-identities` then dies on `Hostname
+# mismatch, certificate is not valid for \'auth.innotel.us\'` while every other client of
+# the name is fine. Pinned on 2026-11-18 that failure was live; removing the pin made the
+# mirror finish clean (65 mailboxes, 0 missing), so the pin was the defect, not the cure.
 PINNED="mail.innotel.us mailjet.innotel.us admin.mail.innotel.us admin.oasis.innotel.us resend.innotel.us auth.cerulean.innotel.us alerts.innotel.us"
 
 ensure_edge_pins() {
