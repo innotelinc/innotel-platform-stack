@@ -15,6 +15,7 @@ asks for, which is currently one file.
 |---|---|
 | `sysctl.d/60-redis-overcommit.conf` | `/etc/sysctl.d/60-redis-overcommit.conf` |
 | `systemd/swap-ceiling-check.service.d/10-notify.conf` | `/etc/systemd/system/swap-ceiling-check.service.d/10-notify.conf` |
+| `systemd/regcache-credential.service.d/10-remote.conf` | `/etc/systemd/system/regcache-credential.service.d/10-remote.conf` |
 | `systemd/vault-replica-sync.service.d/10-notify.conf` | `/etc/systemd/system/vault-replica-sync.service.d/10-notify.conf` |
 
 Existing host files that predate this directory stay where they are:
@@ -29,6 +30,8 @@ sysctl -n vm.overcommit_memory      # must print 1
 
 install -D -m 0644 systemd/swap-ceiling-check.service.d/10-notify.conf \
   /etc/systemd/system/swap-ceiling-check.service.d/10-notify.conf
+install -D -m 0644 systemd/regcache-credential.service.d/10-remote.conf \
+  /etc/systemd/system/regcache-credential.service.d/10-remote.conf
 systemctl daemon-reload
 systemctl cat swap-ceiling-check.service | grep OnFailure   # estate-notify@%n
 ```
@@ -45,6 +48,26 @@ Both drop-ins were invisible to anyone reading the repository until 2026-11-15, 
 kept here now and compared by `scripts/check-unit-drift.py`, which reads
 `hosts/<host>/systemd/` for the host it is checking. A third override added on a host without
 a copy here is a `LOCAL` finding, not a mystery.
+
+## Why regcache's credential check runs from here
+
+`regcache-credential.service` belongs to the host that runs the `regcache` container
+(`docs/unit-apply-checklist.md`), and on 2026-11-18 that is **`i2`** (`192.168.1.79`), not
+this host: i1's own instance of that name is `STOPPED`. The unit and its timer were
+installed here when `regcache` lived here and stayed, for two reasons that are still true —
+this host holds the `tls` remote to i2, so `incus exec i2:regcache` reaches the running
+container, and `estate-notify@` (the unit's `OnFailure=`) has its `/etc/innotel/ntfy.env`
+here and not on i2.
+
+So the unit needs one override, `Environment=INCUS=i2:regcache`, to ask the container that
+serves `192.168.1.79:5000` rather than the dead local copy. Without it the check exits 2 with
+`CANNOT RUN: no container registry in regcache` — a finding about the subject, not the token
+— and its `Result=` reads `success` while it proves nothing.
+
+It was written on the host on 2026-11-18 and landed here the same day, so
+`scripts/check-unit-drift.py` reports it against this directory instead of as a `LOCAL`
+override. If the unit ever moves to i2, this drop-in goes with it — and that move has to take
+`estate-notify` with it.
 
 ## Why overcommit lives here and not in the container
 
