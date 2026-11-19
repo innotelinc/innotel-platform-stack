@@ -1,0 +1,45 @@
+[Unit]
+# Turn on zswap, the compressed swap cache.
+#
+# WHY THIS EXISTS
+# ---------------
+# Every container on the estate's hosts has `memory.swap.max=0`, so the pages that
+# reach swap belong to host processes — an agent session, `incusd`, a build — and the
+# host pays for each one with a disk round trip. Measured on `i4` 2026-11-18 21:15
+# (the edge, 7.3 GiB RAM, 2 GiB of swap in use): `pswpout` was climbing at ~1 900
+# pages/s while PSI `memory full` sat at 7.6 % of wall time, and every task on the box
+# that fronts every gated name was stalling behind it. zswap was present in the kernel
+# and switched off. With it on, the same host wrote **0** pages to disk over the next
+# 20 s and swap-in dropped to nothing: the pages are compressed in RAM instead of
+# being read back from the volume.
+#
+# It is a cache, not extra memory: zswap still evicts to the swap device when the
+# compressed pool fills (`max_pool_percent` stays 20 %). Nothing about the swap
+# device, `vm.swappiness` or any container's policy is changed here.
+#
+# `lzo` rather than `lz4`: this estate's kernels advertise `lzo` in
+# `/sys/module/zswap/parameters/compressor`, and naming a compressor the kernel does
+# not have leaves zswap enabled with its default. `zsmalloc` is the only zpool that
+# has ever been non-experimental.
+#
+# Order matters — the compressor and zpool are only settable while the pool is empty,
+# so they are written before `enabled`. On a host where zswap was already enabled at
+# boot the first two writes are ignored and the third is a no-op.
+Description=Enable zswap, the compressed swap cache
+Documentation=https://github.com/innotel/platform-stack/blob/main/docs/host-memory-guard.md
+# Run before anything can swap, and before swap.target is reached.
+DefaultDependencies=no
+After=local-fs.target
+Before=swap.target sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# `test -w` rather than `|| true` on every line: a kernel without zswap should leave
+# this unit successful and silent, not red on every host that does not need it.
+ExecStart=/bin/sh -c 'test -w /sys/module/zswap/parameters/compressor && echo lzo > /sys/module/zswap/parameters/compressor || true'
+ExecStart=/bin/sh -c 'test -w /sys/module/zswap/parameters/zpool && echo zsmalloc > /sys/module/zswap/parameters/zpool || true'
+ExecStart=/bin/sh -c 'test -w /sys/module/zswap/parameters/enabled && echo Y > /sys/module/zswap/parameters/enabled || true'
+
+[Install]
+WantedBy=sysinit.target
