@@ -59,6 +59,12 @@ incus exec coolify -- systemctl is-active coolify-nginx-authfix
 incus exec coolify -- docker exec coolify grep -c HTTP_AUTHORIZATION /etc/nginx/site-opts.d/http.conf  # 1
 ```
 
+That unit lives in an instance with **no persistent disk** (`incus config show coolify` reports
+`devices: {}`), so a rebuild of the instance erases it. The host therefore carries
+`coolify-authfix-provision.service` plus a ten-minute timer: it keeps a copy of the three files
+in `/var/lib/coolify-authfix`, re-pushes them, and re-enables the unit, so a rebuilt instance
+heals itself within minutes of boot without anyone re-running the install.
+
 Coolify's proxy must stay **absent** — not started, not configured. Verified 2026-11-19:
 no `coolify-proxy`, `traefik` or `caddy` container exists in the `coolify` instance's
 dockerd or in `i2`'s host dockerd. `instance_settings.fqdn` is
@@ -95,6 +101,12 @@ ssh root@192.168.1.52 'ss -ltn | grep :<hostport>'
 Env values are encrypted at rest: `environment_variables.value` in Coolify's database reads
 back as a Laravel blob (`eyJpdiI6…`), not the setting. Read them through
 `GET /api/v1/applications/<uuid>/envs` (the API decrypts), never by `psql`.
+
+ARTEX keeps its admin password in `/root/artex.env` on `i2` (mode 0600) and its database is
+its own container on the host, so a rebuild of the `coolify` instance does not touch either.
+`/root/artex-reset-admin.sh` re-establishes access from that file: clear `auth.%`, restart the
+app, read the fresh setup token from its log, and re-init. It is the recovery path for a lost
+or drifted credential, and it verifies itself with `init=` and `login=` codes.
 
 ## Onboarding an app (the whole procedure)
 
