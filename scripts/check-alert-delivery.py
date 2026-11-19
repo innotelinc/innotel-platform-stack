@@ -42,7 +42,10 @@ THE RULES
    the receiver, the relay, or the wait, never inbound throttling; do not raise the port-25
    limit to "fix" this check.
 5. **The delivery has to be one that was not already in the log.** The probe proves itself
-   by a delivery newer than anything the log held *before* the probe existed. Comparing a
+   by a delivery newer than anything the log held *before* the probe existed. Stalwart
+   never logs a subject, so the message is identified by its own `queueId`: the queue
+   record and the ingest name the same id, and a message queued before this probe began
+   cannot be this probe's delivery, however late it arrives. Comparing a
    delivery stamp to this host's start time instead measured two different machines'
    clocks: a mail server a few seconds behind read as silence, and a delivery already in
    the log read as a pass in ~1.3 s — which is what the published `alert_delivery_seconds`
@@ -149,6 +152,11 @@ DEFAULT_WAIT_SECONDS = 360
 #: delivery. The two are different machines, so a stamp a few seconds "early" is normal;
 #: the baseline read in `run_probe` is what stops the tolerance reaching a previous run.
 SKEW_TOLERANCE_SECONDS = 300
+#: How far before this run a message may have entered the queue and still be ours. The
+#: queue record and the ingest are written by the *same* server clock, so this is not a
+#: clock-skew allowance: it exists only because the injection and the queue write are
+#: milliseconds apart. Kept tight so two checks run minutes apart cannot cross-credit.
+QUEUE_TOLERANCE_SECONDS = 60
 POLL_SECONDS = 5
 
 #: A delivery to a mailbox on this server is logged as an *ingest*, not a delivery:
@@ -167,6 +175,20 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 #: The sender and recipient of a delivery line, once the colour escapes are gone:
 #: `from = "alertmanager@innotel.us", to = ["alertmanager@innotel.us"]`.
 _FIELDS = re.compile(r'from = "([^"]*)", to = \[([^\]]*)\]')
+
+#: Every event that means "a message reached its destination", local or outbound.
+_EVENTS = (
+    "delivery.completed",
+    "delivery.dsn-success",
+    "message-ingest.ham",
+    "message-ingest.spam",
+)
+#: The events that say when a message *entered the queue*: the same queueId, earlier in
+#: the same log. This is the only per-message handle Stalwart logs — it never logs a
+#: subject, so a timestamp cannot tell this run's message from an earlier probe's delivery
+#: that sat in the queue and arrived late.
+_QUEUED = ("queue.message-queued", "queue.authenticated-message-queued")
+_QUEUE_ID = re.compile(r"queueId\s*=\s*([0-9A-Za-z_.:-]+)")
 
 
 def probe_name(nonce: str) -> str:
@@ -272,7 +294,23 @@ def delivery_times(
     it is sent from: an unfiltered match would take any delivery from the alerts account —
     including a real page to the human inbox — as proof of the probe's route.
     """
-    times: list[datetime] = []
+    return [
+        stamp
+        for stamp, event, _queue in _records(
+            log_text, from_address=from_address, to_address=to_address
+        )
+        if event in _EVENTS
+    ]
+
+
+def _records(
+    log_text: str,
+    *,
+    from_address: str | None = None,
+    to_address: str | None = None,
+) -> list[tuple[datetime, str, str | None]]:
+    """(stamp, event, queueId) for every queue/ingest/delivery line, newest last."""
+    found: list[tuple[datetime, str, str | None]] = []
     for line in log_text.splitlines():
         clean = _ANSI.sub("", line)
         match = _STAMP.match(clean)
@@ -286,11 +324,25 @@ def delivery_times(
                 continue
             if to_address and f'"{to_address}"' not in fields.group(2):
                 continue
+        event = next((name for name in _EVENTS + _QUEUED if name in clean), None)
+        if event is None:
+            continue
+        queue = _QUEUE_ID.search(clean)
         try:
-            times.append(datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc))
+            stamp = datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%S").replace(
+                tzinfo=timezone.utc
+            )
         except ValueError:
             continue
-    return times
+        found.append((stamp, event, queue.group(1) if queue else None))
+    return found
+
+
+def queued_times(
+    records: list[tuple[datetime, str, str | None]],
+) -> dict[str, datetime]:
+    """When each message was queued, by queueId — the handle that says whose message it is."""
+    return {queue: stamp for stamp, event, queue in records if event in _QUEUED and queue}
 
 
 def audit(delivered: bool, evidence: str) -> Audit:
@@ -361,12 +413,30 @@ def run_probe(
     floor = datetime.fromtimestamp(started, tz=timezone.utc) - timedelta(
         seconds=SKEW_TOLERANCE_SECONDS
     )
+    queued_floor = datetime.fromtimestamp(started, tz=timezone.utc) - timedelta(
+        seconds=QUEUE_TOLERANCE_SECONDS
+    )
 
     def is_fresh(stamp: datetime) -> bool:
         """A delivery this run can claim: recent, and newer than anything already logged."""
         if stamp < floor:
             return False
         return newest_before is None or stamp > newest_before
+
+    def is_this_run(stamp: datetime, queue_id: str | None, queued: dict[str, datetime]) -> bool:
+        """Fresh *and*, when the log says when it was queued, queued after this run started.
+
+        A stamp alone cannot separate this run's message from a previous probe's delivery
+        that sat in the queue and arrived late: both are newer than the baseline. The queue
+        record carries the same queueId as the ingest, so its stamp says when the message
+        entered the queue, and anything queued before this run's floor is not ours.
+        The fallback is deliberate: the tail read can miss the queue line, and then
+        freshness is all the log can prove.
+        """
+        if not is_fresh(stamp):
+            return False
+        submitted = queued.get(queue_id) if queue_id else None
+        return submitted is None or submitted >= queued_floor
 
     now = datetime.now(timezone.utc)
     # Start the probe a minute in the *past* on purpose. `--start=now` is measured against
@@ -399,8 +469,13 @@ def run_probe(
     deadline = started + wait
     while True:
         text = read_host(mail_host, mail_target, mail_log_command(), runner)
-        times = delivery_times(text, from_address=MAIL_FROM, to_address=MAIL_TO)
-        if any(is_fresh(stamp) for stamp in times):
+        records = _records(text, from_address=MAIL_FROM, to_address=MAIL_TO)
+        queued = queued_times(records)
+        if any(
+            is_this_run(stamp, queue_id, queued)
+            for stamp, event, queue_id in records
+            if event in _EVENTS
+        ):
             return True, "", clock() - started
         if clock() >= deadline:
             break

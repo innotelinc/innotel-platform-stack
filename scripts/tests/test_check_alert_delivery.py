@@ -62,6 +62,20 @@ LOCAL_INGEST_ELSEWHERE = (
     'to = ["admin@innotel.us"]'
 )
 
+#: The queue record and the ingest name the same queueId, so the pair says when a message
+#: was submitted. A late delivery from an *earlier* run was queued before this run began.
+QUEUED_BEFORE_THIS_RUN = (
+    '2025-10-09T08:40:00Z INFO Queued message for delivery (queue.message-queued) '
+    'queueId = 111, from = "alertmanager@innotel.us", to = ["alertmanager@innotel.us"]\n'
+)
+INGEST_LATE_BUT_FRESH = (
+    '2025-10-09T08:55:00Z INFO Message ingested (message-ingest.ham) '
+    'queueId = 111, queueName = "local", from = "alertmanager@innotel.us", '
+    'to = ["alertmanager@innotel.us"]\n'
+)
+QUEUED_THIS_RUN = QUEUED_BEFORE_THIS_RUN.replace("08:40:00", "08:54:00").replace("111", "222")
+INGEST_THIS_RUN = INGEST_LATE_BUT_FRESH.replace("111", "222")
+
 
 class CommandCase(unittest.TestCase):
     def test_the_probe_name_is_unique_per_run(self):
@@ -245,6 +259,42 @@ class RunProbeCase(unittest.TestCase):
     def test_the_window_outlasts_the_receivers_measured_retry_storm(self):
         # Every failing run measured 2026-11-19 stopped at 181.8–182.1 s: the window.
         self.assertGreaterEqual(probe.DEFAULT_WAIT_SECONDS, 300)
+
+    def test_a_delivery_queued_before_this_run_is_not_this_run(self):
+        # Measured 2026-11-19: a failing run began at 16:16:24 and the mail server logged
+        # its probe ingested at 16:20:26, after the window had already closed. A message
+        # queued by an *earlier* run lands the same way, and freshness alone would take it.
+        delivered, _, _ = probe.run_probe(
+            am_host="i2", am_target="root@192.168.1.52",
+            mail_host="i1", mail_target="root@192.168.1.51",
+            wait=0,
+            runner=self._runner(
+                QUEUED_BEFORE_THIS_RUN + INGEST_LATE_BUT_FRESH, before_text=OLD_DELIVERY
+            ),
+            clock=lambda: 1_760_000_000.0, sleeper=lambda _s: None, nonce="x",
+        )
+        self.assertFalse(delivered)
+
+    def test_a_delivery_queued_during_this_run_is_this_run(self):
+        delivered, _, _ = probe.run_probe(
+            am_host="i2", am_target="root@192.168.1.52",
+            mail_host="i1", mail_target="root@192.168.1.51",
+            wait=0,
+            runner=self._runner(QUEUED_THIS_RUN + INGEST_THIS_RUN, before_text=OLD_DELIVERY),
+            clock=lambda: 1_760_000_000.0, sleeper=lambda _s: None, nonce="x",
+        )
+        self.assertTrue(delivered)
+
+    def test_a_delivery_with_no_queue_line_falls_back_to_freshness(self):
+        # A long tail read can lose the queue record; refusing every delivery without one
+        # would turn a delivering receiver into a silent one.
+        delivered, _, _ = probe.run_probe(
+            am_host="i2", am_target="root@192.168.1.52",
+            mail_host="i1", mail_target="root@192.168.1.51",
+            wait=0, runner=self._runner(INGEST_LATE_BUT_FRESH, before_text=OLD_DELIVERY),
+            clock=lambda: 1_760_000_000.0, sleeper=lambda _s: None, nonce="x",
+        )
+        self.assertTrue(delivered)
 
     def test_an_alert_that_never_registers_is_the_injections_failure(self):
         # Measured 2026-11-18: `amtool alert add` returned without registering the alert,
