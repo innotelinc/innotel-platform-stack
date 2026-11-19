@@ -93,6 +93,10 @@ tests:
         values: '12884901888x40'
       - series: 'node_memory_SwapFree_bytes'
         values: '7194060221x40'
+      - series: 'node_vmstat_pswpout'
+        values: '0+900x40'
+      - series: 'node_vmstat_pswpin'
+        values: '0+100x40'
       - series: 'node_load1'
         values: '104x40'
       - series: 'node_procs_running'
@@ -143,9 +147,12 @@ tests:
             exp_annotations:
               summary: 'The host is thrashing: 44.17% of swap in use with memory tight'
               description: >-
-                More than 30 % of swap is in use *and* under 20 % of memory is
-                available — the two together are a host spending its I/O on paging
-                rather than on work. The 30 % line is measured, not chosen: at 20:00
+                More than 30 % of swap is in use, under 20 % of memory is available,
+                and the kernel is moving more than 5 pages a second — the three
+                together are a host spending its I/O on paging rather than on work.
+                Occupancy alone is not thrashing: `zswap` keeps compressed pages in
+                swap by design, so `i4` sat at 77 % on 2026-11-19 with 0 pages/s and
+                PSI 3 %. The 30 % line is measured, not chosen: at 20:00
                 on 2026-10-24 `i4` held 26 % of its swap with 13 % of memory and was
                 merely tight (PSI 9 %); by 21:12 it held **35 %** of swap with 11 %
                 of memory and every task was stalling (PSI 47 %, load 104). A rule
@@ -226,6 +233,10 @@ tests:
         values: '12884901888x40'
       - series: 'node_memory_SwapFree_bytes'
         values: '8325000000x40'
+      - series: 'node_vmstat_pswpout'
+        values: '0+900x40'
+      - series: 'node_vmstat_pswpin'
+        values: '0+100x40'
       - series: 'node_load1'
         values: '104x40'
       - series: 'node_procs_running'
@@ -248,9 +259,12 @@ tests:
             exp_annotations:
               summary: 'The host is thrashing: 35.39% of swap in use with memory tight'
               description: >-
-                More than 30 % of swap is in use *and* under 20 % of memory is
-                available — the two together are a host spending its I/O on paging
-                rather than on work. The 30 % line is measured, not chosen: at 20:00
+                More than 30 % of swap is in use, under 20 % of memory is available,
+                and the kernel is moving more than 5 pages a second — the three
+                together are a host spending its I/O on paging rather than on work.
+                Occupancy alone is not thrashing: `zswap` keeps compressed pages in
+                swap by design, so `i4` sat at 77 % on 2026-11-19 with 0 pages/s and
+                PSI 3 %. The 30 % line is measured, not chosen: at 20:00
                 on 2026-10-24 `i4` held 26 % of its swap with 13 % of memory and was
                 merely tight (PSI 9 %); by 21:12 it held **35 %** of swap with 11 %
                 of memory and every task was stalling (PSI 47 %, load 104). A rule
@@ -362,6 +376,47 @@ tests:
                 page cache and then out of swap. Find what grew: `ps -eo pid,rss,args
                 --sort=-rss`, and per container `docker stats`. This is the state `i4` was
                 in on 2026-10-24 an hour before it stopped answering.
+      - eval_time: 40m
+        alertname: HostSwapThrashing
+        exp_alerts: []
+
+  # 2026-11-19 on `i4`, after `zswap` was enabled: 77 % of swap in use and 14 %
+  # of memory available, but not one page moving in or out. zswap keeps
+  # compressed pages in swap by design, so occupancy alone is not thrashing —
+  # the occupancy-only rule fired here every ten minutes, which is how a critical
+  # alert teaches its reader to ignore critical alerts.
+  - name: swap held by zswap without paging is not thrashing
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemTotal_bytes'
+        values: '7728000000x40'
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '1100000000x40'
+      - series: 'node_memory_SwapTotal_bytes'
+        values: '4294967296x40'
+      - series: 'node_memory_SwapFree_bytes'
+        values: '964000000x40'
+      - series: 'node_vmstat_pswpout'
+        values: '0x40'
+      - series: 'node_vmstat_pswpin'
+        values: '0x40'
+      - series: 'node_load1'
+        values: '2x40'
+      - series: 'node_procs_running'
+        values: '3x40'
+      - series: 'node_procs_blocked'
+        values: '0x40'
+      - series: 'node_pressure_memory_waiting_seconds_total'
+        values: '0+1x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="0"}'
+        values: '0+55x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="1"}'
+        values: '0+55x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="2"}'
+        values: '0+55x40'
+      - series: 'node_cpu_seconds_total{mode="idle",cpu="3"}'
+        values: '0+55x40'
+    alert_rule_test:
       - eval_time: 40m
         alertname: HostSwapThrashing
         exp_alerts: []
