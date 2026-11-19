@@ -32,7 +32,7 @@ THE RULES
    the silence it exists to catch.
 3. The probe alert is short-lived (`--end` a few minutes out) so it resolves itself and
    does not accumulate in the estate's one Alertmanager.
-4. **The probe rides the submission listener, not the mail exchanger.** Stalwart logs the
+4. **   The probe rides the submission listener, not the mail exchanger.** Stalwart logs the
    probe's hop as `listenerId = "submission", localPort = 587` from the Alertmanager
    container's own address, so the internet-facing `MtaInboundThrottle` on port 25 — the
    per-IP anti-abuse limit a mail burst spends — has no bearing on this check. Measured
@@ -41,6 +41,13 @@ THE RULES
    was said to have starved went out authenticated on 587 in ~1 s. A probe that fails is
    the receiver, the relay, or the wait, never inbound throttling; do not raise the port-25
    limit to "fix" this check.
+5. **The delivery has to be one that was not already in the log.** The probe proves itself
+   by a delivery newer than anything the log held *before* the probe existed. Comparing a
+   delivery stamp to this host's start time instead measured two different machines'
+   clocks: a mail server a few seconds behind read as silence, and a delivery already in
+   the log read as a pass in ~1.3 s — which is what the published `alert_delivery_seconds`
+   series showed for most runs (measured 2026-11-19: 27 of 75 runs published 0, and every
+   failure stopped at 181.8–182.1 s, the old 180 s window).
 
 Usage:
     ./scripts/check-alert-delivery.py
@@ -125,14 +132,23 @@ STALWART_LOG = "/var/log/stalwart"
 #: group_wait is 30s and the mail hop takes a moment, so the probe needs to outwait the
 #: first flush. Poll rather than sleep once, so a fast delivery is reported fast.
 #:
-#: 180s rather than 90s, measured 2026-11-18: a healthy probe lands in ~35s, but the same
+#: 300s rather than 90s. Measured 2026-11-18: a healthy probe lands in ~35s, but the same
 #: probe took longer than 90s twice in one afternoon while `signara-api-1` was restarting
 #: and four other alerts were firing — Alertmanager serialises sends per integration and
 #: retries a failed SMTP attempt for 15s at a time, so a probe submitted during a storm
-#: queues behind them. The assertion is unchanged — no delivery, no pass — the check was
-#: simply giving up inside the receiver's own retry window, which reads as an intermittent
-#: failure that teaches people to ignore it.
-DEFAULT_WAIT_SECONDS = 180
+#: queues behind them. Measured again 2026-11-19 over three days of the published series:
+#: 27 of 75 runs reported 0, and every failing run stopped at 181.8–182.1 s — the 180 s
+#: window, not the receiver. The assertion is unchanged — no delivery, no pass — the check
+#: was simply giving up inside the receiver's own retry window, which reads as an
+#: intermittent failure that teaches people to ignore it.
+#: The mail log then showed a failing run's own probe ingested 242 s after it started
+#: (16:16:24 start, 16:20:26 ingest): 360 s leaves headroom over the measured queue.
+DEFAULT_WAIT_SECONDS = 360
+
+#: How far the mail server's stamp may sit behind this host's clock and still be this run's
+#: delivery. The two are different machines, so a stamp a few seconds "early" is normal;
+#: the baseline read in `run_probe` is what stops the tolerance reaching a previous run.
+SKEW_TOLERANCE_SECONDS = 300
 POLL_SECONDS = 5
 
 #: A delivery to a mailbox on this server is logged as an *ingest*, not a delivery:
@@ -238,7 +254,7 @@ def mail_log_command() -> str:
     inner = (
         f'f="{STALWART_LOG}/stalwart.$(date -u +%F)"; '
         rf'grep -aE "delivery\.(completed|dsn-success)|message-ingest\.(ham|spam)" "$f" 2>/dev/null '
-        f'| tail -n 400 || true'
+        f'| tail -n 2000 || true'
     )
     return "incus exec mail -- sh -c " + shlex.quote(inner) + " </dev/null"
 
@@ -332,6 +348,26 @@ def run_probe(
     name = probe_name(nonce)
     started = clock()
 
+    # Sample the log *before* the probe exists. Without this the check either took a
+    # delivery already sitting in the log as proof of the probe it had just injected
+    # (most runs finished in ~1.3 s, inside Alertmanager's 30 s group_wait) or, comparing
+    # the stamp to `started`, read a mail server whose clock is a little behind as silent.
+    baseline = delivery_times(
+        read_host(mail_host, mail_target, mail_log_command(), runner),
+        from_address=MAIL_FROM,
+        to_address=MAIL_TO,
+    )
+    newest_before = max(baseline) if baseline else None
+    floor = datetime.fromtimestamp(started, tz=timezone.utc) - timedelta(
+        seconds=SKEW_TOLERANCE_SECONDS
+    )
+
+    def is_fresh(stamp: datetime) -> bool:
+        """A delivery this run can claim: recent, and newer than anything already logged."""
+        if stamp < floor:
+            return False
+        return newest_before is None or stamp > newest_before
+
     now = datetime.now(timezone.utc)
     # Start the probe a minute in the *past* on purpose. `--start=now` is measured against
     # this host's clock while Alertmanager decides with its own, so a container running a
@@ -364,7 +400,7 @@ def run_probe(
     while True:
         text = read_host(mail_host, mail_target, mail_log_command(), runner)
         times = delivery_times(text, from_address=MAIL_FROM, to_address=MAIL_TO)
-        if any(stamp.timestamp() >= started for stamp in times):
+        if any(is_fresh(stamp) for stamp in times):
             return True, "", clock() - started
         if clock() >= deadline:
             break
