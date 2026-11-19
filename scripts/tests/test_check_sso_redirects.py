@@ -85,5 +85,47 @@ class Addresses(unittest.TestCase):
         self.assertEqual("https://192.168.1.5:443/", seen["url"])
 
 
+class Registrations(unittest.TestCase):
+    """A URI's type decides nothing on its own — the provider's other entries do."""
+
+    def setUp(self) -> None:
+        self.module = _load()
+
+    def test_a_logout_uri_beside_an_authorization_one_is_a_note(self) -> None:
+        """The shape both `opencompany` hosts have: `/signin` for logout, callback for auth."""
+        verdict, detail = self.module.registration_verdict(
+            "https://opencompany.innotel.site/signin",
+            "logout",
+            {"opencompany.innotel.site"},
+        )
+        self.assertEqual("NOTE", verdict)
+        self.assertIn("authorization redirect too", detail)
+
+    def test_a_logout_uri_with_nothing_authorized_is_a_warning(self) -> None:
+        """A host the provider will not send a sign-in back to is drift worth a look."""
+        verdict, detail = self.module.registration_verdict(
+            "https://gone.innotel.us/signin", "logout", {"other.innotel.us"}
+        )
+        self.assertEqual("WARN", verdict)
+        self.assertIn("cannot return", detail)
+
+    def test_the_callback_registered_as_logout_is_a_warning(self) -> None:
+        """The typo this rule exists for: the return URI typed one field wrong."""
+        verdict, detail = self.module.registration_verdict(
+            "https://app.innotel.us/api/auth/sso/callback",
+            "logout",
+            {"app.innotel.us"},
+        )
+        self.assertEqual("WARN", verdict)
+        self.assertIn("callback", detail)
+
+    def test_an_authorization_uri_is_never_judged_here(self) -> None:
+        """That half is the name rule's job; this function only sees the others."""
+        verdict, _detail = self.module.registration_verdict(
+            "https://app.innotel.us/oauth2/callback", "authorization", {"app.innotel.us"}
+        )
+        self.assertEqual("NOTE", verdict)
+
+
 if __name__ == "__main__":
     unittest.main()

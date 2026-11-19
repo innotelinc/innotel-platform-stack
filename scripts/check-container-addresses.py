@@ -163,6 +163,16 @@ EXPECTED: dict[str, dict[str, str]] = {
         # `workloads` (`.113`) runs here and no row named it, so the check warned about a
         # container that was behaving (`i1 workloads: running and not in the table`).
         "workloads": "192.168.1.113",
+        # `atheniq-next` (`.120`) is on this host and is **not a row** (2026-11-18, the day
+        # it was launched). It is a second Open edX stack
+        # (`scripts/atheniq-parallel-stack.sh`) that could not host one: `limits.memory`
+        # is 256 MiB rather than the 3584 MiB the script records, and `apt-get update`
+        # never completed inside it, so it is an empty Ubuntu container with no listener
+        # on it (`docs/atheniq-cutover-and-migration-2026-11-18.md` §9). It was stopped
+        # with `boot.autostart=false` instead of given a row, because a row here is an
+        # address `check-address-latency` dials — that check would then report a box
+        # serving nothing as an outage, which is the `auvik`/`capstone` shape above.
+        # Re-add the row with its address the day a stack actually runs there.
         # `onyx` (`.60`) runs here since the 2026-11-15 rebalance, which is why it is an
         # `i1` row rather than the `i3` row it was first written as (see the note there).
         "onyx": "192.168.1.60",

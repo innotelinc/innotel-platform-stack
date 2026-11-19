@@ -349,7 +349,10 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # of the four hosts, so the importer exits 1 with `Failed to fetch instance "telno"` on
 # every run — a permanent failure that looked like drift. The check, its tests and its
 # branch of `EstateCheckAbsent` are removed together: a series that will never exist must
-# not keep an alert armed.
+# not keep an alert armed. Its textfile was removed from the edge's `TEXTFILE_DIR` on
+# 2026-11-18 for the same reason: `estate-check-telno-legacy-import.prom` still said one
+# failure from 2026-11-17 19:02, and a file nothing rewrites keeps `EstateCheckFailing`
+# and `EstateCheckStale` armed with a verdict no run can change.
 
 # The one scheduled job that retries faster than anything here reports, and the reason it
 # gets a series instead of a notification: `sync-mail-identities` runs every fifteen

@@ -42,6 +42,13 @@ it is judged by whether the address still answers — the two live Coolify panel
 sign in that way. Treating those as dead was a false finding caught on 2026-11-18,
 before anything was retired.
 
+Nor is a type a verdict on its own. A URI Authentik keeps for *logout* is the
+normal shape here: these apps send the browser to their own `/signin` after a
+sign-out and keep that URI beside the authorization one, which is why
+`openco.innotel.tech` and `opencompany.innotel.site` each passed their
+`/api/auth/sso/callback` authorize probe and were still counted as warnings in
+every run (2026-11-18). `registration_verdict` below is the rule that replaced it.
+
 USAGE
 -----
 It runs from `estate-checks.service` on the edge, which is *inside* the `proxy`
@@ -270,6 +277,32 @@ def fetch(url: str, follow: bool = False, timeout: int = 15) -> tuple[int, dict,
         return 0, {}, str(error).encode()
 
 
+def registration_verdict(uri: str, kind: str | None, authorized: set[str]) -> tuple[str, str]:
+    """Judge a URI the provider registered for something other than authorization.
+
+    A logout registration is the normal shape, not drift: Auth.js apps and both Coolify
+    panels send the browser to their own `/signin` after a sign-out, and Authentik keeps
+    that URI beside the authorization one. Warning on the type alone (as this did until
+    2026-11-18) reports a correct registration on every run, and it cannot be cleared
+    without deleting a URI that is doing its job.
+
+    It is a finding in two shapes: the provider authorizes nothing for that hostname, so
+    the logout URI is all a sign-in could ever reach; or the URI kept for logout is
+    plainly the app's callback, which is a registration typed one field wrong.
+    """
+    parsed = urllib.parse.urlparse(uri)
+    host, path = parsed.hostname or "", parsed.path or ""
+    if host and host in authorized:
+        # A URI typed `authorization` belongs to the name rule; this only judges what
+        # Authentik keeps for something else.
+        if kind != "authorization" and "callback" in path:
+            return "WARN", (f"registered for {kind}, but it is the app's callback — "
+                             "a sign-in returning here is not authorized")
+        return "NOTE", f"registered for {kind}; {host} has an authorization redirect too"
+    return "WARN", (f"registered for {kind} and no authorization redirect for "
+                     f"{host or uri} — a sign-in cannot return here")
+
+
 def authorize_verdict(client_id: str, redirect_uri: str, issuer: str | None = None,
                       timeout: int = 15) -> tuple[str, str]:
     """Ask Authentik to accept a redirect_uri. Returns (verdict, detail).
@@ -385,13 +418,21 @@ def main() -> int:
             continue
         client = provider.get("client_id") or provider.get("name")
         registered.setdefault(client, set())
+        # What this provider will actually authorize, decided before its other entries are
+        # judged: a logout registration is only meaningful next to one.
+        authorized = {
+            urllib.parse.urlparse(entry.get("url", "")).hostname or ""
+            for entry in uris
+            if entry.get("redirect_uri_type") == "authorization"
+        }
         print(f"-- {provider.get('name')} ({client}), {len(uris)} URI(s)")
         for entry in uris:
             uri = entry.get("url", "")
             registered[client].add(uri)
             host = urllib.parse.urlparse(uri).hostname or ""
             if entry.get("redirect_uri_type") != "authorization":
-                record("WARN", uri, f"registered for {entry.get('redirect_uri_type')}, not an authorization redirect")
+                verdict, detail = registration_verdict(uri, entry.get("redirect_uri_type"), authorized)
+                record(verdict, uri, detail)
                 continue
             if not host:
                 record("FAIL", uri, "not a usable URI")
@@ -456,7 +497,8 @@ def main() -> int:
 
     # A verdict becomes a finding level here, once: PASS is not a finding, FAIL is the
     # only level that fails, and UNREACHABLE/NOT-PROBED are things to ask again about.
-    levels = {"FAIL": "fail", "WARN": "warn", "UNREACHABLE": "warn", "NOT-PROBED": "note"}
+    levels = {"FAIL": "fail", "WARN": "warn", "UNREACHABLE": "warn",
+              "NOT-PROBED": "note", "NOTE": "note"}
     result = Audit()
     for finding in findings:
         level = levels.get(finding["verdict"])
