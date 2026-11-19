@@ -32,6 +32,13 @@ A deploy that used it says so in its log — `Docker <ver> with BuildKit and Bui
 detected on deployment server (i2-local)`. If that line is absent, the build fell back to
 the legacy builder.
 
+Builds run on the **`i2-local` server record** (`root@192.168.1.52`), which Coolify reaches
+over SSH — so the plugin has to exist on `i2` itself, and it does. `docker buildx` inside
+the `coolify` container is absent by design (`docker: unknown command: docker buildx`);
+that only matters for a *localhost* destination, which would build in the panel container
+instead. All five apps here are `dockerfile` apps on `i2-local`, so one host install covers
+every one of them.
+
 ## Panel API authentication
 
 Coolify's own nginx does not forward the `Authorization` header to PHP (`fastcgi_params`
@@ -84,6 +91,10 @@ address actually holds the listener before writing the NPM upstream:
 ssh root@192.168.1.52 'docker ps --format "{{.Names}}|{{.Ports}}" | grep <uuid-prefix>'
 ssh root@192.168.1.52 'ss -ltn | grep :<hostport>'
 ```
+
+Env values are encrypted at rest: `environment_variables.value` in Coolify's database reads
+back as a Laravel blob (`eyJpdiI6…`), not the setting. Read them through
+`GET /api/v1/applications/<uuid>/envs` (the API decrypts), never by `psql`.
 
 ## Onboarding an app (the whole procedure)
 
