@@ -42,7 +42,11 @@ THE RULES
    the receiver, the relay, or the wait, never inbound throttling; do not raise the port-25
    limit to "fix" this check.
 5. **The delivery has to be one that was not already in the log.** The probe proves itself
-   by a delivery newer than anything the log held *before* the probe existed. Stalwart
+   by a delivery newer than anything the log held *before* the probe existed — a delivery
+   already in the log could otherwise be read as a pass in a couple of seconds, which the
+   published `alert_delivery_seconds` cannot distinguish from a probe that genuinely went
+   out at once because its alert joined a group whose `group_wait` had already elapsed.
+   Stalwart
    never logs a subject, so the message is identified by its own `queueId`: the queue
    record and the ingest name the same id, and a message queued before this probe began
    cannot be this probe's delivery, however late it arrives. Comparing a
