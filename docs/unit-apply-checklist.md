@@ -22,6 +22,12 @@ per piece that says it landed rather than that it was copied.
    It also installs `systemd/estate-checks.{service,timer}` into `/etc/systemd/system` and
    reloads systemd, so the unit and the scripts it names cannot be applied from different
    revisions — and `--verify` checks both halves.
+   `bash scripts/deploy-estate-checks.sh` is the deploy around that: it refuses a checkout
+   that is not `origin/main` (or has uncommitted changes), installs exactly that revision,
+   re-runs `--verify` over what is now on disk and enables the timer. It exists because the
+   installer was correct and nothing ran it: on 2026-11-18 the edge was carrying checks that
+   no longer matched `main`, and the check that compares them was publishing into a metrics
+   path nothing scraped, so both silences held at once.
 3. **The env file, before `enable --now`.** `EnvironmentFile=-` is *optional* on purpose
    in most units, so a missing credential does not stop the job — it makes it fail
    differently. `estate-notify` is the exception: with no `/etc/innotel/ntfy.env` it exits
