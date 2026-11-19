@@ -163,16 +163,20 @@ EXPECTED: dict[str, dict[str, str]] = {
         # `workloads` (`.113`) runs here and no row named it, so the check warned about a
         # container that was behaving (`i1 workloads: running and not in the table`).
         "workloads": "192.168.1.113",
-        # `atheniq-next` (`.120`) is on this host and is **not a row** (2026-11-18, the day
-        # it was launched). It is a second Open edX stack
-        # (`scripts/atheniq-parallel-stack.sh`) that could not host one: `limits.memory`
-        # is 256 MiB rather than the 3584 MiB the script records, and `apt-get update`
-        # never completed inside it, so it is an empty Ubuntu container with no listener
-        # on it (`docs/atheniq-cutover-and-migration-2026-11-18.md` §9). It was stopped
-        # with `boot.autostart=false` instead of given a row, because a row here is an
-        # address `check-address-latency` dials — that check would then report a box
-        # serving nothing as an outage, which is the `auvik`/`capstone` shape above.
-        # Re-add the row with its address the day a stack actually runs there.
+        # `atheniq-next` (`.120`) **is a row** (2026-11-18). It was launched that day as a
+        # second Open edX stack (`scripts/atheniq-parallel-stack.sh`) and came up on `.120`
+        # from DHCP; it was first left out of this table because it could not host the
+        # stack — `limits.memory` is 256 MiB rather than the 3584 MiB the script records
+        # and `apt-get update` never completed inside it
+        # (`docs/atheniq-cutover-and-migration-2026-11-18.md` §9). Leaving it out and
+        # stopping it answered the wrong question: the estate keeps an address alive, so
+        # the container is pinned in its own netplan (`dhcp4: false` in both
+        # `10-lxc.yaml` and `60-atheniq-next.yaml`) and listed here. It answers ICMP at
+        # `.120` — 0.04 ms from `i1` — and `check-address-latency` dials it every run, so
+        # "pinned" and "answers" are both watched rather than assumed. A row is a promise
+        # to keep the address serving: the day the stack is abandoned the row goes with
+        # it, the way `auvik` and `capstone` did.
+        "atheniq-next": "192.168.1.120",
         # `onyx` (`.60`) runs here since the 2026-11-15 rebalance, which is why it is an
         # `i1` row rather than the `i3` row it was first written as (see the note there).
         "onyx": "192.168.1.60",
@@ -353,6 +357,7 @@ ROLES: dict[str, str] = {
     "192.168.1.94": "sage",
     "192.168.1.95": "telno",
     "192.168.1.96": "telno-turn (TURN relay)",
+    "192.168.1.120": "atheniq-next — the second Open edX stack (pinned, dialled)",
 }
 
 
