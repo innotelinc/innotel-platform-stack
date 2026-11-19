@@ -166,9 +166,11 @@ EXPECTED: dict[str, dict[str, str]] = {
         # `atheniq-next` (`.120`) **is a row** (2026-11-18). It was launched that day as a
         # second Open edX stack (`scripts/atheniq-parallel-stack.sh`) and came up on `.120`
         # from DHCP; it was first left out of this table because it could not host the
-        # stack — `limits.memory` is 256 MiB rather than the 3584 MiB the script records
+        # stack — `limits.memory` was 256 MiB rather than the 3584 MiB the script records,
         # and `apt-get update` never completed inside it
-        # (`docs/atheniq-cutover-and-migration-2026-11-18.md` §9). Leaving it out and
+        # (`docs/atheniq-cutover-and-migration-2026-11-18.md` §9). The cap is now that
+        # 3584 MiB with `limits.memory.enforce=hard`, so what decides whether the stack runs
+        # there is `i1`'s free memory rather than the container's ceiling. Leaving it out and
         # stopping it answered the wrong question: the estate keeps an address alive, so
         # the container is pinned in its own netplan (`dhcp4: false` in both
         # `10-lxc.yaml` and `60-atheniq-next.yaml`) and listed here. It answers ICMP at

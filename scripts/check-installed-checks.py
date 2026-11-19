@@ -31,7 +31,19 @@ and a check that stops succeeding for good is what `EstateCheckStale` is for.
    be edited on the host after the install just as easily, and it is not inside the directory
    the rest of this check watches. `install-estate-checks.sh --verify` compares it; this is
    the same comparison on a timer.
-4. **Nothing else.** `*.bak*` copies are ignored deliberately — the estate keeps the copy
+4. **The prom files the unit writes.** Every `estate-check-*.prom` in the node-exporter
+   textfile directory has to be one an `ExecStart=` names. Retiring a check removes it from
+   the two lists above and leaves its last textfile behind, and node-exporter keeps serving
+   that file: a check that no longer exists reports `success 1` on every scrape, for good.
+   `telno_legacy_import` did exactly that — the check was retired in `66fc33e` and its
+   orphan textfile sat in the directory until it was found by hand on 2026-11-18, because a
+   stale series looks exactly like a passing one. The directory the checks publish into is
+   therefore the third list, and the unit is where its names come from. The other direction
+   — a file the unit names and the directory does not have — is a note rather than a
+   failure: a new check's first run creates it, and a check that has never published is
+   `EstateCheckStale`'s subject, not this one's. `agent-reaper.prom` and
+   `edge-liveness.prom` are other units' files and are not part of this list.
+5. **Nothing else.** `*.bak*` copies are ignored deliberately — the estate keeps the copy
    it replaced beside the check, and that is a record, not drift.
 
 A revision it cannot read is exit 2, never a pass: a check that compares nothing and says
@@ -42,6 +54,7 @@ Usage:
     ./scripts/check-installed-checks.py --prom /path/to/textfile
     ./scripts/check-installed-checks.py --dir /opt/innotel/estate-checks \\
         --repo /usr/src/projects/complete/ips --ref origin/main
+    ./scripts/check-installed-checks.py --textfile-dir /var/lib/node_exporter/textfile
 
 Exit codes: 0 = the install is the revision's own copies, 1 = drift, 2 = could not compare.
 """
@@ -101,12 +114,17 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:12]
 
 
-def unit_files(unit: Path) -> list[str]:
-    """Every file the unit names inside the install directory, as basenames."""
+def unit_text(unit: Path) -> str:
+    """The installed unit's own text, or `Unreadable` — never an empty string."""
     try:
-        text = unit.read_text(encoding="utf-8", errors="replace")
+        return unit.read_text(encoding="utf-8", errors="replace")
     except OSError as error:
         raise Unreadable(f"cannot read {unit}: {error}") from error
+
+
+def unit_files(unit: Path) -> list[str]:
+    """Every file the unit names inside the install directory, as basenames."""
+    text = unit_text(unit)
     names: list[str] = []
     for line in text.splitlines():
         if line.startswith("ExecStart="):
@@ -199,7 +217,65 @@ def compare_units(unit_dir: Path, read) -> list[Mismatch]:
     return found
 
 
-def audit(mismatches: list[Mismatch]) -> "Audit":
+#: A textfile argument as the unit writes it — `${TEXTFILE_DIR}/estate-check-<x>.prom`.
+#: The variable is resolved from the unit's own `Environment=` line rather than assumed, so
+#: a host that mounts the collector somewhere else is compared against its own path.
+TEXTFILE_ARG = re.compile(r"\$(?:\{TEXTFILE_DIR\}|TEXTFILE_DIR)/([A-Za-z0-9._-]+\.prom)")
+TEXTFILE_ENV = re.compile(r'^Environment="?TEXTFILE_DIR=([^\s"]+)', re.MULTILINE)
+#: Only the estate's checks. The reaper and the liveness probe publish their own files from
+#: their own units, and this check is not their list.
+ESTATE_TEXTFILE = re.compile(r"^estate-check-[A-Za-z0-9._-]+\.prom$")
+
+
+@dataclass
+class Textfiles:
+    """The prom files on the host: what the unit names, and what is actually there.
+
+    The third list after the install directory and the unit (rule 4). A retired check
+    leaves its last textfile behind, and a series whose check no longer exists is worse
+    than a missing one: it reports the last run's verdict on every scrape, forever.
+    """
+
+    directory: Path
+    named: list[str]
+    present: list[str]
+
+    @property
+    def orphans(self) -> list[str]:
+        """On the host, named by no `ExecStart=` — the retired check's leftovers."""
+        return [name for name in self.present if name not in self.named]
+
+    @property
+    def unpublished(self) -> list[str]:
+        """Named by the unit and not written yet: a first run, or a check that never ran."""
+        return [name for name in self.named if name not in self.present]
+
+
+def unit_textfiles(unit: Path) -> list[str]:
+    """The prom files the unit's `ExecStart=` lines write, as basenames."""
+    names: list[str] = []
+    for line in unit_text(unit).splitlines():
+        if line.startswith("ExecStart="):
+            names.extend(TEXTFILE_ARG.findall(line))
+    return sorted(set(names))
+
+
+def unit_textfile_dir(unit: Path) -> Path | None:
+    """Where the unit's `${TEXTFILE_DIR}` points, or None when it sets no such variable."""
+    found = TEXTFILE_ENV.search(unit_text(unit))
+    return Path(found.group(1)) if found else None
+
+
+def compare_textfiles(directory: Path, named: list[str]) -> Textfiles:
+    """What the unit names against what is in the directory. Pure but for the listing."""
+    if not directory.is_dir():
+        raise Unreadable(f"no textfile directory at {directory}")
+    present = sorted(path.name for path in directory.iterdir()
+                     if ESTATE_TEXTFILE.match(path.name))
+    return Textfiles(directory, sorted(set(named)), present)
+
+
+def audit(mismatches: list[Mismatch], textfiles: "Textfiles | None" = None) -> "Audit":
     """The findings every scheduled check publishes."""
     out = Audit()
     for mismatch in mismatches:
@@ -218,14 +294,27 @@ def audit(mismatches: list[Mismatch]) -> "Audit":
             out.findings.append(Finding(
                 "missing", "fail",
                 f"{mismatch.name} is installed as nothing and the revision has {where}"))
-    if not mismatches:
+    if textfiles is not None:
+        for name in textfiles.orphans:
+            out.findings.append(Finding(
+                "orphan_textfile", "fail",
+                f"{name} is in {textfiles.directory} and no ExecStart= writes it: the check "
+                f"that did is gone, and node-exporter keeps serving its last value as though "
+                f"it were this run's"))
+        for name in textfiles.unpublished:
+            out.findings.append(Finding(
+                "textfile_absent", "note",
+                f"{textfiles.directory} has no {name} yet: the unit names it and no run has "
+                f"written it"))
+    if not out.findings:
         out.findings.append(Finding(
             "installed_matches", "note",
             "every installed check, and both unit files, are the revision's own copies"))
     return out
 
 
-def report(mismatches: list[Mismatch], ref: str) -> str:
+def report(mismatches: list[Mismatch], ref: str,
+           textfiles: "Textfiles | None" = None) -> str:
     """The same verdict for a person reading the journal."""
     lines: list[str] = []
     for mismatch in mismatches:
@@ -237,10 +326,17 @@ def report(mismatches: list[Mismatch], ref: str) -> str:
                          f"{mismatch.installed:12} not in {ref}")
         else:
             lines.append(f"{'MISSING':8} {mismatch.name:44} named by the unit, not installed")
-    if not mismatches:
+    orphaned = 0 if textfiles is None else len(textfiles.orphans)
+    if textfiles is not None:
+        for name in textfiles.orphans:
+            lines.append(f"{'ORPHAN':8} {name:44} in {textfiles.directory}, named by no "
+                         f"ExecStart=")
+        for name in textfiles.unpublished:
+            lines.append(f"{'NOTE':8} {name:44} named by the unit, not written yet")
+    if not mismatches and not orphaned:
         lines.append(f"{'OK':8} every installed check and both unit files match {ref}")
     lines.append("")
-    lines.append(f"{len(mismatches)} finding(s) against {ref}")
+    lines.append(f"{len(mismatches) + orphaned} finding(s) against {ref}")
     return "\n".join(lines)
 
 
@@ -257,6 +353,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="the installed unit (default %(default)s)")
     parser.add_argument("--unit-dir", type=Path,
                         help="where the unit and timer are installed (default: --unit's family)")
+    parser.add_argument("--textfile-dir", type=Path,
+                        help="the node-exporter textfile directory the prom files are checked "
+                             "against (default: the unit's own TEXTFILE_DIR)")
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
@@ -264,6 +363,7 @@ def main(argv: list[str] | None = None) -> int:
     refresh(args.repo, args.ref)
 
     unit_dir = args.unit_dir or args.unit.parent
+    textfiles: Textfiles | None = None
     try:
         names = unit_files(args.unit)
         if not names:
@@ -271,13 +371,17 @@ def main(argv: list[str] | None = None) -> int:
         read = git_reader(args.repo, args.ref)
         mismatches = compare(args.dir, names, lambda name: read(f"scripts/{name}"))
         mismatches += compare_units(unit_dir, read)
+        published = unit_textfiles(args.unit)
+        textfile_dir = args.textfile_dir or unit_textfile_dir(args.unit)
+        if textfile_dir is not None and published:
+            textfiles = compare_textfiles(textfile_dir, published)
     except Unreadable as error:
         print(f"check-installed-checks: {error}", file=sys.stderr)
         if args.prom and HAVE_TELEMETRY:
             write_prom(args.prom, CHECK, None, False)
         return 2
 
-    result = audit(mismatches)
+    result = audit(mismatches, textfiles)
     if args.prom:
         if not HAVE_TELEMETRY:
             print("check-installed-checks: --prom needs estate_check.py beside this file",
@@ -288,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps([vars(mismatch) for mismatch in mismatches], indent=2))
     else:
-        print(report(mismatches, args.ref))
+        print(report(mismatches, args.ref, textfiles))
     return 0 if result.ok else 1
 
 
