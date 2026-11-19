@@ -74,8 +74,13 @@ resolved=$(git -C "$root" rev-parse --verify --quiet "$ref^{commit}") || \
   die "cannot resolve $ref in $root — nothing to deploy"
 head=$(git -C "$root" rev-parse HEAD)
 
-if [ -n "$(git -C "$root" status --porcelain)" ]; then
-  die "the checkout has uncommitted changes; a deploy must install a revision, not a working tree"
+# Tracked changes only. An untracked file is never installed — the installer copies exactly
+# the names the unit carries — and the estate deliberately keeps `*.bak` copies of the check
+# it replaced beside the live one (see the installer's own header). Refusing a deploy over
+# those would ask a person to delete a record in order to ship a fix.
+if [ -n "$(git -C "$root" status --porcelain --untracked-files=no)" ]; then
+  git -C "$root" status --porcelain --untracked-files=no >&2
+  die "the checkout has uncommitted changes to tracked files; a deploy must install a revision"
 fi
 
 if [ "$head" != "$resolved" ] && [ "$allow_drift" -eq 0 ]; then
