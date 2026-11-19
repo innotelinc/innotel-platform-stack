@@ -115,7 +115,15 @@ STALWART_LOG = "/var/log/stalwart"
 
 #: group_wait is 30s and the mail hop takes a moment, so the probe needs to outwait the
 #: first flush. Poll rather than sleep once, so a fast delivery is reported fast.
-DEFAULT_WAIT_SECONDS = 90
+#:
+#: 180s rather than 90s, measured 2026-11-18: a healthy probe lands in ~35s, but the same
+#: probe took longer than 90s twice in one afternoon while `signara-api-1` was restarting
+#: and four other alerts were firing — Alertmanager serialises sends per integration and
+#: retries a failed SMTP attempt for 15s at a time, so a probe submitted during a storm
+#: queues behind them. The assertion is unchanged — no delivery, no pass — the check was
+#: simply giving up inside the receiver's own retry window, which reads as an intermittent
+#: failure that teaches people to ignore it.
+DEFAULT_WAIT_SECONDS = 180
 POLL_SECONDS = 5
 
 #: A delivery to a mailbox on this server is logged as an *ingest*, not a delivery:

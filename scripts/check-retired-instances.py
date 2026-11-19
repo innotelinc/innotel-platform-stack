@@ -28,6 +28,8 @@ THE RULES
    A running retired instance is the workload back on the host that could not carry
    it; a missing one means the rollback that justified the move is gone. Autostart
    is separate from state because a reboot is where a stopped instance comes back.
+   The table is empty as of 2026-11-18 (the reclaim below), so today this rule has
+   no rows to assert and rule 2 carries the move on its own.
 2. **A forbidden name must not exist on that host at all.** `monarch` on `i1` is the
    concrete case: the rename is what makes stale automation fail closed, and a
    recreated instance with that name removes the protection even while stopped.
@@ -63,16 +65,14 @@ HOSTS: dict[str, str] = {
 }
 
 #: host -> instances that must stay stopped, with the reason the check is asserting it.
-#: `monarch-retired` is the 2026-11-16 move: the dataset is the rollback for the copy
-#: now running on `i2`, so it has to stay present and stopped rather than be deleted.
-RETIRED: dict[str, dict[str, str]] = {
-    "i1": {
-        "monarch-retired": (
-            "the media stack moved to i2 on 2026-11-16 because one spindle could not "
-            "carry it (PSI 94-97 %, mail/ontrak/atheniq starved); this is the rollback"
-        ),
-    },
-}
+#: Empty since 2026-11-18: `monarch-retired` was reclaimed on `i1` following
+#: `docs/incus-retired-reclaim.md` (the live copy had run on `i2` for two days, then the
+#: instance and its 25.4 GB dataset were deleted — `incus list` and `zfs list` on `i1`
+#: no longer name it). That runbook says the row goes in the same change as the reclaim,
+#: because a check asserting a rollback nobody kept reads as noise, and noise is how a
+#: real regression goes unnoticed. Recomputation is not an option here: there is nothing
+#: left to assert, so the enforceable half of the move lives in FORBIDDEN below.
+RETIRED: dict[str, dict[str, str]] = {}
 
 #: host -> names that must not exist on that host at all, stopped or not. The rename is
 #: the enforceable half of the move; a recreated `monarch` removes it.

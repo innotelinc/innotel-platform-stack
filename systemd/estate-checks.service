@@ -240,8 +240,10 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # `incus start|exec|copy monarch` fails with "Instance not found" instead of reloading the
 # spindle. Nothing would notice that being undone — a recreated instance answers perfectly,
 # and the outage it brings is on a disk no other check reads. `incus-guard` cannot cover
-# it: the lease only binds sessions that ask for it. This reads the hosts and asserts both
-# halves: the retired instance present and stopped, and the live name absent.
+# it: the lease only binds sessions that ask for it. This reads the hosts and asserts the
+# half that still exists: the live name absent. The rollback (`monarch-retired`) was
+# reclaimed on 2026-11-18 per `docs/incus-retired-reclaim.md`, which is why the check's
+# RETIRED table is now empty — the row goes in the same change as the reclaim.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-retired-instances.py --prom ${TEXTFILE_DIR}/estate-check-retired-instances.prom
 
 # And that a pin holds in NPM's own record, not only in the file nginx reads

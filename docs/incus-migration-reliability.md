@@ -106,7 +106,7 @@ Two checks the first attempt got wrong, both worth repeating:
   expansion, crosses the boundary.
 
 i1 afterwards: PSI `some avg10` 1.99 %, load 0.64, `media-sync.timer` enabled and cycling, no
-instance named `monarch` — the renamed `monarch-retired` remains stopped with its dataset intact.
+instance named `monarch` — the rollback `monarch-retired` was reclaimed on 2026-11-18 (`docs/incus-retired-reclaim.md`).
 
 ### Source layout traps on i1
 
@@ -137,7 +137,7 @@ instance named `monarch` — the renamed `monarch-retired` remains stopped with 
 
 The move step left the instance stopped with `boot.autostart=false` so the destination stayed quiet;
 it was started 70 minutes later and adopted rather than restarted, because it was already healthy.
-i1 keeps `monarch-retired` stopped with `boot.autostart=false` plus a 25.4 GB dataset as rollback, and
+i1 reclaimed `monarch-retired` on 2026-11-18 (`docs/incus-retired-reclaim.md`) and
 has no instance named `monarch`, so a stale `incus start|exec|copy monarch` fails closed instead of
 putting the workload back on the single spindle.
 

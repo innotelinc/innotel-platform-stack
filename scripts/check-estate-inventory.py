@@ -85,9 +85,11 @@ POOLS: dict[str, set[str]] = {
     # here. A pool that exists and is unnamed is exactly what this check is for — it caught
     # the move mid-flight, which is why the row is recorded rather than the pool hidden.
     "i1": {"incus", "tank"},
-    # `fast` (dir) is the only pool left on `i2`: the rebalance moved six containers to
-    # `i3`, and the pool that held them did not travel with them.
-    "i2": {"fast"},
+    # `fast` (dir) holds every container; `incus` (dir) is an empty leftover: 0 volumes,
+    # and no profile or instance names it (measured 2026-11-18). It is recorded rather than
+    # deleted because deleting a pool is the operator's call, and an unrecorded pool is
+    # exactly the drift this check exists to report — not the check's job to tidy away.
+    "i2": {"fast", "incus"},
     # `incus` (zfs, 362 G) holds the container rootfs; `tank` was created on 2026-11-15
     # because `onyx` mounts a custom volume named `tank/onyx-data` and a container's device
     # is validated against the pool's name, not its size. It is a dataset of the same
