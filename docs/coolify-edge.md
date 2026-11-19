@@ -108,6 +108,24 @@ its own container on the host, so a rebuild of the `coolify` instance does not t
 app, read the fresh setup token from its log, and re-init. It is the recovery path for a lost
 or drifted credential, and it verifies itself with `init=` and `login=` codes.
 
+## Keeping the evidence Coolify throws away
+
+A redeploy replaces the broken container with a working one, so the only thing left to
+diagnose is whatever was written down first. Two host-side timers on `i2` do that:
+
+- `ontrak-bolt-watch.timer` (every minute) logs each state transition of the app's container
+  and, the first time it stops being `running`/`healthy`, saves the exit code, OOM flag,
+  error and last 300 log lines under `/var/log/ontrak-bolt-watch/`. Polls are deduplicated,
+  so one long outage yields one capture rather than a line a minute.
+- `artex-db-backup.timer` (03:15 daily, `Persistent=true`) writes a custom-format
+  `pg_dump` to `/var/backups/artex/`, keeps 14 days, and fails loudly if the dump does not
+  parse. Restores are verified against a scratch `postgres:18-alpine` before trusting a
+  backup directory.
+
+Containers are named by Coolify UUID, not by app name, so any tooling must match on the
+UUID prefix (`qrtcbyvzl4yojtb8hflil9t5-…`) — `docker ps | grep <app-name>` finds nothing
+and reads as "no container" when one is running.
+
 ## Onboarding an app (the whole procedure)
 
 1. **Name it in the zone.** In Coolify, set the app's domain to
