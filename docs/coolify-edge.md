@@ -121,10 +121,32 @@ diagnose is whatever was written down first. Two host-side timers on `i2` do tha
   `pg_dump` to `/var/backups/artex/`, keeps 14 days, and fails loudly if the dump does not
   parse. Restores are verified against a scratch `postgres:18-alpine` before trusting a
   backup directory.
+- `artex-planner-watch.timer` (every 2 minutes) looks for a task still `created` or
+  `running` that has emitted no tool activity for 12 minutes — the shape of the stock
+  exposure scan that sat for 600s without ever starting a scanner. It writes the task row,
+  last activity, container state and 120 log lines to `/var/log/artex-planner-watch/`, then
+  restarts the app container, the only thing that un-wedged that task. One restart per poll
+  and a 30-minute per-task cooldown keep it from looping; `DRY_RUN=1` reports without acting.
 
 Containers are named by Coolify UUID, not by app name, so any tooling must match on the
 UUID prefix (`qrtcbyvzl4yojtb8hflil9t5-…`) — `docker ps | grep <app-name>` finds nothing
 and reads as "no container" when one is running.
+
+### Stock templates work; the planner does not file their matches as findings
+
+On an owned throwaway nginx exposing `/.git/config`, `/.env` and `/backup/dump.sql`, the
+stock library detects the exposures: `http/exposures/configs/git-config.yaml` returns one
+match, and the whole `http/exposures/configs/` directory returns three (`git-config`, plus
+`codeigniter-env` and `laravel-env` on `/.env`). `http/exposures/logs/` returns nothing,
+which is correct for a target with no log files.
+
+ARTEX still closes such a task with zero findings. The trace shows the command ran and the
+planner confirmed the match in its result text, but template hits are stored as exploration
+facts (`record_fact`); a row reaches `findings` only when the planner promotes one. Comparing
+templates by counting findings therefore understates the stock library — the hand-written
+template's four findings and the stock run's zero are a recording difference, not a
+detection difference. Judge a template by its own JSONL output, not by ARTEX's findings
+table.
 
 ## Onboarding an app (the whole procedure)
 
