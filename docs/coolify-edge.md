@@ -15,6 +15,43 @@ So the split is:
 | **Routing** | NPM Edge (`cerulean-npm`, `:80`/`:443` on `192.168.1.71`) | one proxy host per app name → the app's published host port. |
 | **Deploy** | Coolify (`coolify` instance on `i2`, `192.168.1.85`) | builds and runs the container, publishes the port, and knows the app only as a name. |
 
+## Deploy-host prerequisites
+
+`i2` runs Docker from the Ubuntu package (`29.1.3`). The engine has BuildKit, but Coolify
+probes for the **`buildx` CLI plugin** and refuses a Dockerfile build with *"does not
+support BuildKit"* when it is missing. Install it from the distribution rather than a
+hand-downloaded binary, so `apt` keeps it in step with the engine:
+
+```bash
+apt-get install -y docker-buildx-plugin      # older images name it: docker-buildx
+docker buildx version
+docker buildx ls                            # driver "docker", BUILDKIT column filled
+```
+
+A deploy that used it says so in its log — `Docker <ver> with BuildKit and Buildx
+detected on deployment server (i2-local)`. If that line is absent, the build fell back to
+the legacy builder.
+
+## Panel API authentication
+
+Coolify's own nginx does not forward the `Authorization` header to PHP (`fastcgi_params`
+defines no `HTTP_AUTHORIZATION`), so **every** `/api/v1` call answers 401 even with a
+token that has the right abilities. The missing piece is one line after the include in
+`/etc/nginx/site-opts.d/http.conf`:
+
+```nginx
+fastcgi_param HTTP_AUTHORIZATION $http_authorization;
+```
+
+That path sits in the container's writable layer, so the `coolify` instance carries
+`coolify-nginx-authfix.service`, which re-applies the line and reloads nginx on every
+panel container start (it watches `docker events` for `start`):
+
+```bash
+incus exec coolify -- systemctl is-active coolify-nginx-authfix
+incus exec coolify -- docker exec coolify grep -c HTTP_AUTHORIZATION /etc/nginx/site-opts.d/http.conf  # 1
+```
+
 Coolify's proxy must stay **absent** — not started, not configured. Verified 2026-11-19:
 no `coolify-proxy`, `traefik` or `caddy` container exists in the `coolify` instance's
 dockerd or in `i2`'s host dockerd. `instance_settings.fqdn` is
@@ -30,6 +67,7 @@ panel as well as to what it deploys.
 | `ontrak-bolt` | `https://bolt.innotel.site` | `3500:5173` | own cert (185) |
 | `clearpath` | `https://clearpath.innotel.site` | `8911:3000` | cert 163 (+ preview wildcard 184) |
 | `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | cert 156 |
+| `artex` | `https://artex.innotel.site` | `8790:8787` | NPM 377 → `192.168.1.52:8790` |
 
 Every row has a `*.innotel.site` name. **No application may be left on a generated
 `sslip.io` name**: that name is Coolify's fallback when `fqdn` is empty, it resolves to
@@ -55,7 +93,8 @@ ssh root@192.168.1.52 'ss -ltn | grep :<hostport>'
    The port must be free on the deploy host — `8081` for `servicedesk`, because the
    container listens on `8000`.
 3. **Redeploy.** A DB edit alone changes nothing: the container only gains the
-   publishing flag when Coolify regenerates its compose file.
+   publishing flag when Coolify regenerates its compose file. The API calls in this step
+   need the panel's `Authorization` forwarding fix (see *Panel API authentication*).
 
    ```bash
    # POST /api/v1/deploy?uuid=<app uuid>; the token needs the "deploy" ability.
