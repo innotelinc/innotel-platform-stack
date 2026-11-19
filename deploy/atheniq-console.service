@@ -1,0 +1,18 @@
+[Unit]
+Description=AthenIQ console — courses, students, billing and news
+Documentation=https://github.com/innotelinc/atheniq-console
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/atheniq-console
+EnvironmentFile=/etc/atheniq-console.env
+Environment=NODE_ENV=production
+Environment=PORT=8094
+ExecStart=/opt/node/bin/node /opt/atheniq-console/node_modules/next/dist/bin/next start -p 8094 -H 0.0.0.0
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
