@@ -214,9 +214,33 @@ class RunProbeCase(unittest.TestCase):
             clock=lambda: 1_760_000_000.0, sleeper=lambda _s: None, nonce="x",
         )
         self.assertIn("amtool alert add", seen[0][1])
-        # The second read is the mail server, and it is the mail server that is asked.
-        self.assertIn("stalwart", seen[1][1])
-        self.assertEqual(seen[1][0], "root@192.168.1.51")
+        # The mail server is asked after the injection (the read between them is the
+        # registration check, which is not about the mail path), and it is asked by target.
+        mail_reads = [entry for entry in seen if "stalwart" in entry[1]]
+        self.assertTrue(mail_reads)
+        self.assertEqual(mail_reads[0][0], "root@192.168.1.51")
+
+    def test_an_alert_that_never_registers_is_the_injections_failure(self):
+        # Measured 2026-11-18: `amtool alert add` returned without registering the alert,
+        # and the check called that a silent receiver. Those are different defects.
+        def runner(target, command):
+            if "amtool alert add" in command:
+                return ""
+            if "alert query" in command:
+                return "0\n"
+            if "Notify attempt failed" in command:
+                return ""
+            return ""
+
+        delivered, evidence, _ = probe.run_probe(
+            am_host="i3", am_target="root@192.168.1.53",
+            mail_host="i1", mail_target="root@192.168.1.51",
+            wait=0, runner=runner, clock=lambda: 1_760_000_000.0,
+            sleeper=lambda _s: None, nonce="x",
+        )
+        self.assertFalse(delivered)
+        self.assertIn("never appeared in Alertmanager", evidence)
+        self.assertIn("injection failed", evidence)
 
     def test_an_unreadable_host_is_never_a_silent_receiver(self):
         from estate_check import HostUnreadable

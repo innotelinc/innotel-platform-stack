@@ -172,6 +172,31 @@ def inject_command(name: str, start: datetime, end: datetime) -> str:
     )
 
 
+def query_command(name: str) -> str:
+    """How many alerts named `name` Alertmanager currently holds.
+
+    This exists because the injection can silently do nothing. Measured 2026-11-18: the
+    same `amtool alert add` that usually registers a probe returned without registering
+    one, and the check then waited out its whole window and reported a *silent receiver* —
+    a finding about the mail path for a failure in the probe. Counting afterwards is what
+    tells the two apart.
+    """
+    inner = (
+        f"docker exec {AM_CONTAINER} amtool alert query --alertmanager.url={AM_URL} "
+        f"--no-version-check 2>&1 | grep -c {shlex.quote(name)} || true"
+    )
+    return "incus exec signara -- sh -c " + shlex.quote(inner) + " </dev/null"
+
+
+def _count_of(text: str) -> int | None:
+    """The single integer in a `grep -c` answer, or None when the answer is not one."""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return None
+
+
 def last_error_command() -> str:
     """Alertmanager's own last notify error, for the finding that says why it is silent.
 
@@ -299,7 +324,32 @@ def run_probe(
     started = clock()
 
     now = datetime.now(timezone.utc)
-    read_host(am_host, am_target, inject_command(name, now, now + timedelta(minutes=5)), runner)
+    # Start the probe a minute in the *past* on purpose. `--start=now` is measured against
+    # this host's clock while Alertmanager decides with its own, so a container running a
+    # little behind refuses to fire the alert until the skew passes — which looked like an
+    # intermittently silent receiver (measured 2026-11-18, and a manual add with a start
+    # ahead of the container clock registered nothing at all).
+    injected_at = now - timedelta(minutes=1)
+    ends_at = now + timedelta(minutes=5)
+    read_host(am_host, am_target, inject_command(name, injected_at, ends_at), runner)
+
+    # Verify the probe landed, and re-inject once if it did not. An alert that was never
+    # registered cannot be delivered, and saying so is different from blaming the receiver.
+    registered: bool | None = None
+    for attempt in range(2):
+        registered = _count_of(read_host(am_host, am_target, query_command(name), runner))
+        registered = None if registered is None else registered > 0
+        if registered is not False:
+            break
+        if attempt == 0:
+            read_host(am_host, am_target, inject_command(name, injected_at, ends_at), runner)
+    if registered is False:
+        return (
+            False,
+            f"the probe alert {name} never appeared in Alertmanager, so nothing could be "
+            f"delivered: the injection failed, the receiver was never asked",
+            clock() - started,
+        )
 
     deadline = started + wait
     while True:
