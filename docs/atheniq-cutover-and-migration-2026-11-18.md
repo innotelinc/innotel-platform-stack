@@ -327,15 +327,24 @@ limit is fixed in `atheniq-parallel-stack.sh`.
 | runtime | `/opt/node` (Node v22.14.0, shipped; the container has no Node and its apt hangs) |
 | listener | `192.168.1.59:8094` |
 | secrets | `/etc/atheniq-console.env`, 0600, copied from `secrets/atheniq-console.env` |
-| gate | `generation-sso` upstream moved `:8090 → :8094` |
+| gate | `registrar-sso` (vault container) upstream `127.0.0.1:8090 → 192.168.1.59:8094` |
+
+Two proxy files exist, and the hostname uses the one that is **not** in
+`atheniq-sso.yml`: `registrar.atheniq.institute` terminates at `registrar-sso`
+inside the **vault** container, built from
+`/usr/src/atheniq-console-sso/docker-compose.yml` (cookie
+`_atheniq_registrar_sso`, OIDC client `atheniq-registrar`). That is where the two
+exemptions and the new upstream belong. `generation-sso` on `8091` is a different
+hostname's door and was pointed at the console only for internal probes — patching
+it first changed nothing on the public site, which is how this was found.
 
 Nothing was removed: `atheniq-portal.service` still serves the generation catalog
 on `192.168.1.59:8090` and `atheniq-student.service` still serves the learner view
-on `8092`. Only the hostname's upstream moved, and the previous compose file sits
-beside it as `atheniq-sso.yml.bak-upstream-*` for a one-line revert.
+on `8092`. The previous compose sits beside it as `docker-compose.yml.bak-*` for a
+one-line revert.
 
-Measured through the gate (`192.168.1.59:8091`, the same oauth2-proxy the hostname
-reaches):
+Measured on the hostname itself
+(`--resolve registrar.atheniq.institute:443:73.68.203.71`):
 
 | request | answer | meaning |
 |---|---|---|
