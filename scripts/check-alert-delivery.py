@@ -32,6 +32,15 @@ THE RULES
    the silence it exists to catch.
 3. The probe alert is short-lived (`--end` a few minutes out) so it resolves itself and
    does not accumulate in the estate's one Alertmanager.
+4. **The probe rides the submission listener, not the mail exchanger.** Stalwart logs the
+   probe's hop as `listenerId = "submission", localPort = 587` from the Alertmanager
+   container's own address, so the internet-facing `MtaInboundThrottle` on port 25 — the
+   per-IP anti-abuse limit a mail burst spends — has no bearing on this check. Measured
+   2026-11-19 while chasing a failure that the throttle was blamed for: the throttled
+   message was a *different* delivery from the estate's public address, and the probe it
+   was said to have starved went out authenticated on 587 in ~1 s. A probe that fails is
+   the receiver, the relay, or the wait, never inbound throttling; do not raise the port-25
+   limit to "fix" this check.
 
 Usage:
     ./scripts/check-alert-delivery.py
@@ -228,7 +237,7 @@ def mail_log_command() -> str:
     # check still called the receiver silent.
     inner = (
         f'f="{STALWART_LOG}/stalwart.$(date -u +%F)"; '
-        f'grep -aE "delivery\.(completed|dsn-success)|message-ingest\.(ham|spam)" "$f" 2>/dev/null '
+        rf'grep -aE "delivery\.(completed|dsn-success)|message-ingest\.(ham|spam)" "$f" 2>/dev/null '
         f'| tail -n 400 || true'
     )
     return "incus exec mail -- sh -c " + shlex.quote(inner) + " </dev/null"

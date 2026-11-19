@@ -113,6 +113,10 @@ The remaining platforms are **business functions** built on top:
   redirect the running proxy emits is the proof rather than the env file it was just
   written from.
 
+- [**Coolify apps on the NPM edge**](docs/coolify-edge.md) — why the panel's bundled
+  proxy stays absent, how every app name lands in `*.innotel.site` with the zone
+  wildcard certificate, and the four steps that onboard the next one.
+
 - [**Host map**](docs/host-map.md) — the addresses that actually answer, what runs
   on each, the env file every re-apply needs, and the placement errors this pass
   corrected.
