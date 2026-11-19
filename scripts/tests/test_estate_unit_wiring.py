@@ -39,6 +39,10 @@ EXTERNAL = {
     "network-online.target",
     "local-fs.target",
     "multi-user.target",
+    # The early boot ordering `zswap-enable.service` joins: it must run before anything
+    # can swap, so it hooks `sysinit.target` and orders itself ahead of `swap.target`.
+    "sysinit.target",
+    "swap.target",
     # The container runtime the estate's hosts run (`docs/incus-ceiling-check.md`).
     "incus.service",
     # Inside the `mail` container these run in front of Stalwart, which is the container
