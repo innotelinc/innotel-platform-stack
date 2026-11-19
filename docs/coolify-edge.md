@@ -125,14 +125,18 @@ diagnose is whatever was written down first. Two host-side timers on `i2` do tha
   `running` that has emitted no tool activity for 12 minutes — the shape of the stock
   exposure scan that sat for 600s without ever starting a scanner. It writes the task row,
   last activity, container state and 120 log lines to `/var/log/artex-planner-watch/`, then
-  restarts the app container, the only thing that un-wedged that task. One restart per poll
-  and a 30-minute per-task cooldown keep it from looping; `DRY_RUN=1` reports without acting.
+  pauses and resumes that one task through `POST /api/tasks/control/batch`, which cancels its
+  in-flight context and starts a fresh planning round while every other task keeps running.
+  Only if the task records no new activity within 90s does it fall back to restarting the app
+  container. A 30-minute per-task cooldown keeps it from looping; `DRY_RUN=1` reports without
+  acting. On a task stalled for 191s it recovered in ten seconds with `pause=ok resume=ok`,
+  without touching the other tasks.
 
 Containers are named by Coolify UUID, not by app name, so any tooling must match on the
 UUID prefix (`qrtcbyvzl4yojtb8hflil9t5-…`) — `docker ps | grep <app-name>` finds nothing
 and reads as "no container" when one is running.
 
-### Stock templates work; the planner does not file their matches as findings
+### Stock templates work, and a direct disclosure now reaches findings
 
 On an owned throwaway nginx exposing `/.git/config`, `/.env` and `/backup/dump.sql`, the
 stock library detects the exposures: `http/exposures/configs/git-config.yaml` returns one
@@ -140,13 +144,25 @@ match, and the whole `http/exposures/configs/` directory returns three (`git-con
 `codeigniter-env` and `laravel-env` on `/.env`). `http/exposures/logs/` returns nothing,
 which is correct for a target with no log files.
 
-ARTEX still closes such a task with zero findings. The trace shows the command ran and the
-planner confirmed the match in its result text, but template hits are stored as exploration
-facts (`record_fact`); a row reaches `findings` only when the planner promotes one. Comparing
-templates by counting findings therefore understates the stock library — the hand-written
-template's four findings and the stock run's zero are a recording difference, not a
-detection difference. Judge a template by its own JSONL output, not by ARTEX's findings
-table.
+What ARTEX does with a match is a separate question. By default it filed them as facts: the
+doctrine refuses findings built from version/CVE matching and from low-yield
+misconfigurations, so a confirmed `/.git/config` hit became an exploration conclusion
+(`record_fact`) and the findings table stayed empty. `artex-findings-rule.sh` adds one narrow
+exception to the `planner` and `worker` prompts — a match that proves the target served a
+sensitive file, with the returned content in hand, is a demonstrated disclosure and is
+registered with `report_finding`. Agent prompts are Postgres rows, so the rule survives image
+rebuilds and is covered by the database backup; `--check` reports whether it is present, and
+nothing else in the prompt is modified. `artex-planner-watch.service` runs the script as
+`ExecStartPost`, so a prompt reset is re-asserted within two minutes.
+
+Verified after applying it: the same single-template run that used to file a fact closed with
+finding `sensitive_file_disclosure` ("Unauthenticated Git configuration disclosure") at
+medium, evidence `executed-live`.
+
+Caveat from the same session: one run of that scan was refused outright — "the requested
+template set automates retrieval of potentially sensitive configuration" — and filed nothing.
+The model's willingness is not deterministic, so a zero-finding task is not evidence that the
+target is clean. Read the activity trace for a refusal before treating a scan as negative.
 
 ## Onboarding an app (the whole procedure)
 
