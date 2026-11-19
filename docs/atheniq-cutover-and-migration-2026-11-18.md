@@ -362,3 +362,78 @@ Stated plainly: the store shipped with the **development fixtures** — 4 learne
 untracked and the live institute's records never lived in this repository. Ada
 Mensah is a fixture learner, so her mailbox is a working demonstration, not a real
 student's account. The next real step is importing the actual roster.
+## 11. Live billing, four mailboxes, and what a roster actually is (2026-11-18)
+
+### Billing
+
+The live keys are in `secrets/atheniq-console.env` and `/etc/atheniq-console.env`
+(both 0600) and the console was restarted, because a key only exists for the
+process that has it in its environment. Verified with read-only calls only:
+
+| check | result |
+|---|---|
+| `GET /v1/account` | `acct_1G3vKxB2waof1AVK`, `charges_enabled: true`, `details_submitted: true`, country US |
+| key mode | live — the endpoint created under it reports `livemode: true` |
+| webhook endpoint | `we_1UdLtFB2waof1AVKUJl9w5c1`, `status: enabled`, `livemode: true` |
+| events | `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.expired` |
+| target | `https://registrar.atheniq.institute/api/portal/pay/webhook` |
+
+The endpoint's signing secret went straight into the console's env file and was
+never printed. Before this the webhook answered **400 for every request** because
+no secret existed to verify against; that is the same 400 you get from an unsigned
+POST now, which is correct but is no longer the *only* possible answer.
+
+**No card has been charged, and none can be by me.** Completing a live checkout
+needs a real payment instrument, so end-to-end proof of money moving is still the
+school's step.
+
+**Risk to state plainly:** `/pay` and `/api/portal/pay/` are exempt from the SSO
+gate, so anyone who learns the URL can open a live checkout against this account.
+With fixture learners and unreconciled prices, the account should be treated as
+open to the public until the gate decision is revisited.
+
+### Student mailboxes
+
+Four accounts now exist, each created through `x:Account/set` with `name` and
+`domainId` only — `emailAddress` is server-derived and refused as a client-set
+property (`invalidPatch: Cannot modify server set property`).
+
+| learner | address | Stalwart id | SMTP RCPT |
+|---|---|---|---|
+| `lrn-ada` | `ada.mensah@atheniq.institute` | `dd` | 250 2.1.5 OK |
+| `lrn-marcus` | `marcus.bell@atheniq.institute` | `de` | 250 2.1.5 OK |
+| `lrn-priya` | `priya.raman@atheniq.institute` | `df` | 250 2.1.5 OK |
+| `lrn-jonas` | `jonas.weber@atheniq.institute` | `dg` | 250 2.1.5 OK |
+| control | `ghost-probe@atheniq.institute` | — | 550 5.1.1 Mailbox does not exist. |
+
+The control address is the evidence that matters: the four 250s are four
+mailboxes, not a catch-all.
+
+**Passwords are refused, and that is a design fact rather than a missing step.**
+Setting a credential returns `forbidden: Cannot set credentials for accounts in an
+external directory.` The accounts are directory-backed, so Stalwart does not own
+the password and cannot mint one; authentication belongs to the identity
+provider. A student therefore cannot sign into webmail until their directory entry
+exists, which is the same dependency as the roster below.
+
+### The roster does not exist yet
+
+`scripts/import-lms-roster.mjs` reads Open edX's `auth_user` (or a registrar CSV
+with `name,email[,program]`), dry-run by default, matching by e-mail so mailboxes
+and completions survive. Run against the LMS:
+
+```
+source: Open edX auth_user
+read 5, add 0, update 0, skip 5
+```
+
+All five are refused on purpose: two are system mailboxes (`cms@openedx`,
+`login_service_user@fake.email`) and three are nameless placeholders
+(`student.one|two|three@innotel.us`). Enrolling those as students would be worse
+than the four named fixtures the store already holds, so nothing was written.
+
+**Conclusion: there is no institute roster to import.** The estate has a working
+LMS with a test course, an empty identity directory for students, and four demo
+learners. The importer is the mechanism; the registrar's data is the missing
+input, and it should arrive as a CSV or as real accounts in the identity provider
+— not as placeholder rows renamed to look real.
