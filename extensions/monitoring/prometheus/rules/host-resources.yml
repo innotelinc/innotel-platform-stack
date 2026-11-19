@@ -81,11 +81,15 @@ groups:
       # and back continuously, so every process paid a major fault to run. The
       # conjunction is the point — swap in use on an idle host is fine, and low
       # available memory with no swapping is merely tight.
-      # The third term is what makes this a measurement of *paging* rather than of
-      # occupancy: `zswap` keeps compressed pages in swap by design, so enabling it
-      # raises swap-in-use permanently on a healthy host (`i4`, 2026-11-19: 77 % of
-      # swap, 0 pages/s, PSI 3 %). Without the term this rule fires forever, which is
-      # how a critical alert teaches its reader to ignore critical alerts.
+      # Occupancy and paging rate are both necessary and neither is sufficient.
+      # `zswap` keeps compressed pages in swap by design, so enabling it raises
+      # swap-in-use permanently on a healthy host; and a host under steady (but
+      # comfortable) pressure pages continuously without stalling — measured on
+      # `i4` 2026-11-19: 74 % of swap, ~50 pages/s, PSI 4 %, every task making
+      # progress. Thrashing is the *stall*, so the rule asks PSI for it, the same
+      # signal `HostMemoryStalled` uses at the 25 % line. Without these two terms
+      # the rule fires forever, which is how a critical alert teaches its reader
+      # to ignore critical alerts.
       - alert: HostSwapThrashing
         expr: |
           (1 - (node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes)) > 0.30
@@ -95,6 +99,8 @@ groups:
           (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.20
           and on ()
           (rate(node_vmstat_pswpout[5m]) + rate(node_vmstat_pswpin[5m])) > 5
+          and on ()
+          (rate(node_pressure_memory_waiting_seconds_total[5m]) > 0.10)
         for: 10m
         labels:
           severity: critical
@@ -103,11 +109,12 @@ groups:
           summary: 'The host is thrashing: {{ $value | humanizePercentage }} of swap in use with memory tight'
           description: >-
             More than 30 % of swap is in use, under 20 % of memory is available,
-            and the kernel is moving more than 5 pages a second — the three
-            together are a host spending its I/O on paging rather than on work.
-            Occupancy alone is not thrashing: `zswap` keeps compressed pages in
-            swap by design, so `i4` sat at 77 % on 2026-11-19 with 0 pages/s and
-            PSI 3 %. The 30 % line is measured, not chosen: at 20:00
+            pages are moving, and at least a tenth of wall time is stalled on
+            memory — those four together are the thrashing this rule exists for.
+            Neither occupancy nor paging is enough on its own: `zswap` keeps
+            compressed pages in swap by design, and `i4` paged steadily while
+            stalling 4 % of the time on 2026-11-19 (74 % of swap, ~50 pages/s).
+            The 30 % line is measured, not chosen: at 20:00
             on 2026-10-24 `i4` held 26 % of its swap with 13 % of memory and was
             merely tight (PSI 9 %); by 21:12 it held **35 %** of swap with 11 %
             of memory and every task was stalling (PSI 47 %, load 104). A rule

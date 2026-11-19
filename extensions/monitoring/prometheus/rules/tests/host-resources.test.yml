@@ -148,11 +148,12 @@ tests:
               summary: 'The host is thrashing: 44.17% of swap in use with memory tight'
               description: >-
                 More than 30 % of swap is in use, under 20 % of memory is available,
-                and the kernel is moving more than 5 pages a second — the three
-                together are a host spending its I/O on paging rather than on work.
-                Occupancy alone is not thrashing: `zswap` keeps compressed pages in
-                swap by design, so `i4` sat at 77 % on 2026-11-19 with 0 pages/s and
-                PSI 3 %. The 30 % line is measured, not chosen: at 20:00
+                pages are moving, and at least a tenth of wall time is stalled on
+                memory — those four together are the thrashing this rule exists for.
+                Neither occupancy nor paging is enough on its own: `zswap` keeps
+                compressed pages in swap by design, and `i4` paged steadily while
+                stalling 4 % of the time on 2026-11-19 (74 % of swap, ~50 pages/s).
+                The 30 % line is measured, not chosen: at 20:00
                 on 2026-10-24 `i4` held 26 % of its swap with 13 % of memory and was
                 merely tight (PSI 9 %); by 21:12 it held **35 %** of swap with 11 %
                 of memory and every task was stalling (PSI 47 %, load 104). A rule
@@ -260,11 +261,12 @@ tests:
               summary: 'The host is thrashing: 35.39% of swap in use with memory tight'
               description: >-
                 More than 30 % of swap is in use, under 20 % of memory is available,
-                and the kernel is moving more than 5 pages a second — the three
-                together are a host spending its I/O on paging rather than on work.
-                Occupancy alone is not thrashing: `zswap` keeps compressed pages in
-                swap by design, so `i4` sat at 77 % on 2026-11-19 with 0 pages/s and
-                PSI 3 %. The 30 % line is measured, not chosen: at 20:00
+                pages are moving, and at least a tenth of wall time is stalled on
+                memory — those four together are the thrashing this rule exists for.
+                Neither occupancy nor paging is enough on its own: `zswap` keeps
+                compressed pages in swap by design, and `i4` paged steadily while
+                stalling 4 % of the time on 2026-11-19 (74 % of swap, ~50 pages/s).
+                The 30 % line is measured, not chosen: at 20:00
                 on 2026-10-24 `i4` held 26 % of its swap with 13 % of memory and was
                 merely tight (PSI 9 %); by 21:12 it held **35 %** of swap with 11 %
                 of memory and every task was stalling (PSI 47 %, load 104). A rule
