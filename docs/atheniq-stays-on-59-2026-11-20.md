@@ -15,7 +15,7 @@ before any public name moved.
 | `apps.atheniq.courses` | `192.168.1.59:18080` |
 
 `.59` runs Tutor 22.0.2 on `docker.io/overhangio/openedx:22.0.2-indigo` with
-`ENABLE_HTTPS: true` on `18080`/`18081` behind the edge, and it owns the mail relay,
+`ENABLE_HTTPS: true` on `18080`/`18081` behind the edge, and it owns the mail submission path,
 the Cerulean OIDC client, the shared session cookie domain and the theme that the
 public names depend on. None of that moves.
 
@@ -48,29 +48,45 @@ its data was never authoritative.
 3. **`check-edge-front-door.py` keeps failing when a public name answers from a
    container instead of the edge.** It was written while `.120` was being rehearsed
    and it is a plain front-door check now: the names above must resolve to the edge.
+4. **The LMS's mail settings are rendered file settings, not container env.** They come
+   from `SMTP_*` in `config.yml` via `lms.env.yml`; changing them and running
+   `tutor local restart` changes nothing, because `restart` keeps the container's old
+   files-within-mounts and environment. Recreate (`docker compose … up -d
+   --force-recreate lms cms lms-worker cms-worker`) and then prove delivery, not config.
 
-## The mail submission credential (rotated 2026-11-20)
+## The mail submission path (fixed 2026-11-20)
 
-The LMS does not talk to Stalwart directly: `EMAIL_HOST=smtp`, `EMAIL_PORT=8025`,
-`EMAIL_HOST_USER` empty — it hands mail to the local relay container
-(`tutor_local-smtp-1`, `devture/exim-relay`). The `atheniq@innotel.us` Stalwart **app
-password** lives in `EMAIL_HOST_PASSWORD` in
-`/home/tutor/.local/share/tutor/config.yml`; `lms.env.yml` renders that empty, so
-looking there for the password finds nothing and proves nothing.
+The LMS used to hand its mail to a local relay container (`tutor_local-smtp-1`,
+`devture/exim-relay`) whose `SMARTHOST`, `SMTP_USERNAME`, `SMTP_PASSWORD` and
+`SMTP_USERDOMAIN` were all empty. With no smarthost and no credential it had nowhere to
+send, so it accepted mail and queued it: nothing was delivered and nothing looked wrong.
+Tutor 22 exposes no hook that renders a smarthost into that service's environment, so the
+fix uses Tutor's own `SMTP_*` keys — which every submitting service already reads — and
+retires the relay hop:
 
-It was rotated on 2026-11-20 because the value had been exposed: a new app password was
-minted on that account and written into the config, and the old app password was
-**deleted** on the server — so the exposed value stops authenticating rather than being
-merely superseded.
+    SMTP_HOST=mail.innotel.us   SMTP_PORT=587   SMTP_USE_TLS=true
+    SMTP_USERNAME=atheniq@innotel.us   SMTP_PASSWORD=<Stalwart app password>
+    RUN_SMTP=false
 
-**The relay is not currently forwarding, and the rotation did not cause that.** Measured
-while rotating: `tutor_local-smtp-1` has `SMARTHOST` and all three of
-`SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_USERDOMAIN` empty, so it has no relay to
-authenticate against and queues instead of sending — a submission test sat in `exim -bp`
-while Stalwart's own outbound queue was empty and nothing arrived in the mailbox. The fix
-is to give that container the estate's submission host plus this app password, which is a
-change to how the stack renders its mail service, not a credential rotation. Until then
-the LMS's mail is queued, not delivered, and no credential on this page changes that.
+`lms.env.yml` now renders `EMAIL_HOST=mail.innotel.us`, `EMAIL_PORT=587`,
+`EMAIL_USE_TLS=true` and the account as `EMAIL_HOST_USER`, so the LMS submits
+authenticated over STARTTLS straight to Stalwart. These are **file** settings, not
+container environment: `docker inspect tutor_local-lms-1` shows no `EMAIL_*`, and a change
+takes effect only after `docker compose … up -d --force-recreate`, never via `restart`.
+
+The credential is the Stalwart app password in `EMAIL_HOST_PASSWORD` **and**
+`SMTP_PASSWORD` in `/home/tutor/.local/share/tutor/config.yml`. It was rotated twice on
+2026-11-20 — first because the value had been exposed, then again because a verification
+command echoed the rendered `lms.env.yml` line into the session transcript. App passwords
+`b`, `c` and `d` are deleted; `e` (40 characters, "AthenIQ LMS submission to Stalwart
+(2026-11-20 final)") is the only one left on the account and the only value in either key.
+
+**Proof, 2026-11-20.** With lms/cms/workers recreated from the new render, a message sent
+through the LMS's own Django mail path (`send_mail` inside `tutor_local-lms-1`) arrived in
+the `atheniq@innotel.us` mailbox — JMAP `Email/query` matched its unique subject at
+`2026-11-20T19:46:53Z`. `tutor_local-smtp-1` no longer exists; its queue was empty when it
+was removed. The public names were checked afterwards: `atheniq.courses/heartbeat`,
+`catalog…/api/courses/v1/courses/` and `learn…/` all answer 200 (`apps…/` 302, unchanged).
 
 The `atheniq-next` client in Authentik (`AthenIQ Next (test)`, `client_id`
 `atheniq-next`) had its client secret rotated the same day. Its only consumer was the lab,

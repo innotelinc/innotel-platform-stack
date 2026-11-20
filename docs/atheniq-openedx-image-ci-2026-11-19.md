@@ -92,3 +92,35 @@ the same layer from a local `contrib/` checkout, for an image built before this 
 
 The page-size trap that used to be listed here is closed: `SEARCH_MAX_PAGE_SIZE` lives in the
 `atheniq_search` plugin now, so it survives `tutor config save` on either stack.
+
+## Verification, 2026-11-20
+
+The workflow was **not** run through GitHub Actions: a dispatch is refused with
+`HTTP 422: Actions has been disabled for this repository` — for this workflow and for an
+unrelated control workflow on `master` alike — while
+`GET /repos/innotelinc/openedx-platform/actions/permissions` reports
+`{"enabled": true, "allowed_actions": "all"}`, and both
+`PUT .../actions/permissions` and `PUT .../actions/workflows/<id>/enable` return success
+without changing the outcome. That combination is the fork-level switch, which only the
+repository owner can flip in the repository's Actions tab; no API call clears it. Once it
+is enabled, `gh workflow run build-openedx.yml --repo innotelinc/openedx-platform --ref
+atheniq/verawood` is the dispatch this file describes.
+
+What *was* verified on 2026-11-20 is the part the pipeline exists for — the theme layer
+and its assertion — built as a real image against the same release line
+(`overhangio/openedx:22.0.2-indigo`), using the workflow's own inline Dockerfile and a
+theme context built exactly as its "Fetch the AthenIQ theme" step builds it:
+
+| Path inside the image | Files |
+|---|---|
+| `/openedx/themes/unity/lms` | 111 (matches the theme source) |
+| `/openedx/themes/unity/cms` | 19 (matches the theme source) |
+| `/openedx/staticfiles/atheniq` | 227 |
+| `/openedx/staticfiles/atheniq/images/courses` | 198 (matches the theme source) |
+| `/openedx/staticfiles/studio/unity/atheniq` | 6 |
+
+`test -d /openedx/themes/unity/lms && test -d /openedx/staticfiles/atheniq` printed
+`theme-present`, so the "Assert the theme is in the image" step passes for this context.
+That does **not** cover `tutor images build openedx` or the GHCR push, which this pass did
+not change; they were last proven by run `44429631686` (2026-11-19, 15m26s, success),
+which predates the theme steps in this file.
