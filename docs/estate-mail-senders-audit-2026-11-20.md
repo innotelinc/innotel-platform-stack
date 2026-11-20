@@ -179,3 +179,8 @@ Re-verify by hand — it is the same read the check does, and it prints no value
 
     python3 scripts/check-smtp-credentials.py            # 0 = clean, 1 = a leak, 2 = unreadable host
     cat /var/lib/node_exporter/textfile/estate-check-smtp-credentials.prom
+
+Installed on the edge the same day: the unit names it, `systemctl start
+estate-checks.service` came back `Result=success` / `ExecMainStatus=0` (a failing check is
+a textfile, not a failed unit), and the series published `last_status 0`, `failures 2`,
+`notes 2` — the two `vault` containers above, plus Authentik's two deliberate notes.

@@ -133,3 +133,37 @@ theme context built exactly as its "Fetch the AthenIQ theme" step builds it:
 That does **not** cover `tutor images build openedx` or the GHCR push, which this pass did
 not change; they were last proven by run `44429631686` (2026-11-19, 15m26s, success),
 which predates the theme steps in this file.
+
+## Pinned and booted: `eac3207` (2026-11-20)
+
+The tag run `44810632400` pushed was pinned on the lab stack and started — the first time
+a tag this pipeline built has served a page:
+
+    export TUTOR_ROOT=/home/tutor/tutor-next            # the lab's own root
+    tutor config save --set DOCKER_IMAGE_OPENEDX=ghcr.io/innotelinc/openedx-platform:eac3207
+    tutor images pull openedx                            # sha256:879e652c9883…
+    tutor local start -d
+
+What the running stack reported:
+
+| Check | Result |
+|---|---|
+| `tutor_local-lms-1` `Config.Image` | `ghcr.io/innotelinc/openedx-platform:eac3207` |
+| `/heartbeat` (Host `next.atheniq.courses`) | 200 |
+| `/search/unstable/v0/course_list_search/` | 200 |
+| `/openedx/themes/unity/{lms,cms}` in the running image | present |
+| `django.conf.settings.DEFAULT_SITE_THEME` | `'unity'` |
+| `/openedx/staticfiles/atheniq` | `atheniq-lms.css`, `unity-{light,dark,theme}.css`, `unity-theme.js`, `images/` |
+| `/static/atheniq/unity-light.css` over HTTP | 200 |
+
+**What this does not prove.** No learner-facing HTML page I could reach named a theme
+asset: `/` 301s to the `/catalog/` MFE, `/login` 302s to the authn MFE, and the MFE shell
+does not link the LMS theme's CSS. So the evidence is that the image carries the theme,
+the LMS is configured to use it, and it serves the theme's files — a visual confirmation
+still needs the MFE branding pass, not another pull. The theme directory inventory itself
+was verified earlier in this file against the image build.
+
+The pin stays in the lab's `config.yml`, and the instance was stopped again afterwards:
+the estate stays on `.59` (`atheniq-stays-on-59-2026-11-20.md`), and the lab's 5 GiB cap
+left i1 with ~2.2 GiB available while it ran. Starting it is a verification step, not a
+cutover.
