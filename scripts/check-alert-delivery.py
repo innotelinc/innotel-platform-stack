@@ -49,8 +49,11 @@ THE RULES
    Stalwart
    never logs a subject, so the message is identified by its own `queueId`: the queue
    record and the ingest name the same id, and a message queued before this probe began
-   cannot be this probe's delivery, however late it arrives. Comparing a
-   delivery stamp to this host's start time instead measured two different machines'
+   cannot be this probe's delivery, however late it arrives. A message ingested inside the
+   submission transaction is the exception: it carries no sender, recipient or queueId at
+   all (see `INLINE_INGEST_TOLERANCE_SECONDS`), so it is attributed by the submission
+   record written within seconds of it, and that record is fetched for this reason.
+   Comparing a delivery stamp to this host's start time instead measured two different machines'
    clocks: a mail server a few seconds behind read as silence, and a delivery already in
    the log read as a pass in ~1.3 s — which is what the published `alert_delivery_seconds`
    series showed for most runs (measured 2026-11-19: 27 of 75 runs published 0, and every
@@ -156,6 +159,19 @@ DEFAULT_WAIT_SECONDS = 360
 #: delivery. The two are different machines, so a stamp a few seconds "early" is normal;
 #: the baseline read in `run_probe` is what stops the tolerance reaching a previous run.
 SKEW_TOLERANCE_SECONDS = 300
+#: The *other* shape Stalwart writes when a message reaches a mailbox here:
+#:   2026-11-19T21:01:09Z INFO Message ingested (message-ingest.ham) accountId = 2, documentId = 2216, mailboxId = [0], blobId = "…", changeId = 2221, messageId = "…", size = 10757, elapsed = 0ms
+#: No sender, no recipient, no queueId: the ingest happens *inside the submission
+#: transaction*, and the queue record for the same message is written beside it. Measured
+#: 2026-11-19 on the 16:01 EST run this check failed on — the probe's own ingest was there
+#: at the same second as its `queue.authenticated-message-queued`, so the receiver had
+#: delivered it and the check called it silent. Attribution for this shape can only come
+#: from the submission record, which is therefore fetched too, and only an ingest within a
+#: few seconds of it counts: an inline ingest is immediate by construction (`elapsed =
+#: 0ms`), so a wider allowance would let a *different* message that happened to arrive
+#: during the run's window be read as this probe's delivery.
+INLINE_INGEST_TOLERANCE_SECONDS = 5
+
 #: How far before this run a message may have entered the queue and still be ours. The
 #: queue record and the ingest are written by the *same* server clock, so this is not a
 #: clock-skew allowance: it exists only because the injection and the queue write are
@@ -180,13 +196,14 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 #: `from = "alertmanager@innotel.us", to = ["alertmanager@innotel.us"]`.
 _FIELDS = re.compile(r'from = "([^"]*)", to = \[([^\]]*)\]')
 
+#: The events that say a message reached a mailbox on this server.
+_INGEST_EVENTS = ("message-ingest.ham", "message-ingest.spam")
+
 #: Every event that means "a message reached its destination", local or outbound.
 _EVENTS = (
     "delivery.completed",
     "delivery.dsn-success",
-    "message-ingest.ham",
-    "message-ingest.spam",
-)
+) + _INGEST_EVENTS
 #: The events that say when a message *entered the queue*: the same queueId, earlier in
 #: the same log. This is the only per-message handle Stalwart logs — it never logs a
 #: subject, so a timestamp cannot tell this run's message from an earlier probe's delivery
@@ -277,10 +294,14 @@ def mail_log_command() -> str:
     # field names — the line reads `\x1b[36mfrom\x1b[0m = "…"`, so `grep -F 'from = "'`
     # matches nothing at all. Measured 2026-10-24, after a probe was delivered and this
     # check still called the receiver silent.
+    # The queue records are fetched as well: an ingest logged without sender/recipient
+    # can only be attributed through the submission written beside it, and the tail is
+    # longer because those records now share it.
     inner = (
         f'f="{STALWART_LOG}/stalwart.$(date -u +%F)"; '
-        rf'grep -aE "delivery\.(completed|dsn-success)|message-ingest\.(ham|spam)" "$f" 2>/dev/null '
-        f'| tail -n 2000 || true'
+        rf'grep -aE "delivery\.(completed|dsn-success)|message-ingest\.(ham|spam)'
+        rf'|queue\.(message-queued|authenticated-message-queued)" "$f" 2>/dev/null '
+        f'| tail -n 4000 || true'
     )
     return "incus exec mail -- sh -c " + shlex.quote(inner) + " </dev/null"
 
@@ -347,6 +368,33 @@ def queued_times(
 ) -> dict[str, datetime]:
     """When each message was queued, by queueId — the handle that says whose message it is."""
     return {queue: stamp for stamp, event, queue in records if event in _QUEUED and queue}
+
+
+def inline_ingest_times(log_text: str) -> list[datetime]:
+    """Ingest stamps for messages logged without a sender, a recipient or a queueId.
+
+    See `INLINE_INGEST_TOLERANCE_SECONDS`: this shape carries only `accountId`,
+    `documentId` and the blob, so it says nothing about whose message it was and cannot be
+    filtered against the probe's addresses. `run_probe` attributes it by the submission
+    record written at the same moment; this function only finds the candidates.
+    """
+    found: list[datetime] = []
+    for line in log_text.splitlines():
+        clean = _ANSI.sub("", line)
+        match = _STAMP.match(clean)
+        if not match or not any(event in clean for event in _INGEST_EVENTS):
+            continue
+        if _FIELDS.search(clean):
+            continue
+        try:
+            found.append(
+                datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%S").replace(
+                    tzinfo=timezone.utc
+                )
+            )
+        except ValueError:
+            continue
+    return found
 
 
 def audit(delivered: bool, evidence: str) -> Audit:
@@ -475,11 +523,25 @@ def run_probe(
         text = read_host(mail_host, mail_target, mail_log_command(), runner)
         records = _records(text, from_address=MAIL_FROM, to_address=MAIL_TO)
         queued = queued_times(records)
+        # The receiver"s own submissions in this log, as stamps: the only handle an ingest
+        # logged without a sender can be tied to (see `inline_ingest_times`).
+        submissions = [stamp for stamp, event, _queue in records if event in _QUEUED]
+
+        def is_this_run_inline(stamp: datetime) -> bool:
+            """Fresh, and beside a submission this run made — the probe's own transaction."""
+            if not is_fresh(stamp):
+                return False
+            return any(
+                submitted >= queued_floor
+                and abs((stamp - submitted).total_seconds()) <= INLINE_INGEST_TOLERANCE_SECONDS
+                for submitted in submissions
+            )
+
         if any(
             is_this_run(stamp, queue_id, queued)
             for stamp, event, queue_id in records
             if event in _EVENTS
-        ):
+        ) or any(is_this_run_inline(stamp) for stamp in inline_ingest_times(text)):
             return True, "", clock() - started
         if clock() >= deadline:
             break

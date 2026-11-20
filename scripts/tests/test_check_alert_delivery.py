@@ -76,6 +76,23 @@ INGEST_LATE_BUT_FRESH = (
 QUEUED_THIS_RUN = QUEUED_BEFORE_THIS_RUN.replace("08:40:00", "08:54:00").replace("111", "222")
 INGEST_THIS_RUN = INGEST_LATE_BUT_FRESH.replace("111", "222")
 
+#: The second shape Stalwart writes for a message reaching a mailbox here, taken from the
+#: run this check failed on (2026-11-19 21:01:09Z): the ingest happens inside the
+#: submission transaction, so it names no sender, recipient or queueId.
+INLINE_SUBMISSION = (
+    '2026-11-19T21:01:09Z INFO Queued message submission for delivery '
+    '(queue.authenticated-message-queued) listenerId = "submission", localPort = 587, '
+    'remoteIp = 192.168.1.44, remotePort = 55128, queueId = 341504572684272128, '
+    'from = "alertmanager@innotel.us", to = ["alertmanager@innotel.us"], size = 9902\n'
+)
+INLINE_INGEST = (
+    '2026-11-19T21:01:09Z INFO Message ingested (message-ingest.ham) accountId = 2, '
+    'documentId = 2216, mailboxId = [0], blobId = "2ea29ba9", changeId = 2221, '
+    'messageId = "1795122069952768866.1234@41594547654d", size = 10757, elapsed = 0ms\n'
+)
+#: The probe that run submitted, as this clock sees it (one second later).
+INLINE_START = datetime(2026, 11, 19, 21, 1, 10, tzinfo=timezone.utc).timestamp()
+
 
 class CommandCase(unittest.TestCase):
     def test_the_probe_name_is_unique_per_run(self):
@@ -152,6 +169,21 @@ class ParseCase(unittest.TestCase):
         command = probe.mail_log_command()
         self.assertIn("message-ingest", command)
         self.assertIn("dsn-success", command)
+
+    def test_the_log_read_asks_for_submission_records_too(self):
+        # An ingest logged without a sender is attributed through the submission written
+        # beside it, so the queue records have to be in the read at all.
+        command = probe.mail_log_command()
+        # The pattern is a grep alternation, so it reaches the shell escaped.
+        self.assertIn(r"queue\.(message-queued|authenticated-message-queued)", command)
+
+    def test_an_ingest_logged_without_a_sender_is_found(self):
+        self.assertEqual(len(probe.inline_ingest_times(INLINE_INGEST)), 1)
+
+    def test_a_structured_ingest_is_not_read_as_an_inline_one(self):
+        # The sender/recipient shape is already attributed by address; counting it twice
+        # would let a delivery to someone else ride in as this probe's.
+        self.assertEqual(probe.inline_ingest_times(LOCAL_INGEST), [])
 
 
 class AuditCase(unittest.TestCase):
@@ -317,6 +349,42 @@ class RunProbeCase(unittest.TestCase):
         self.assertFalse(delivered)
         self.assertIn("never appeared in Alertmanager", evidence)
         self.assertIn("injection failed", evidence)
+
+    #: The inline shape, measured 2026-11-19 on the run this check failed on: the message
+    #: was in the mailbox at the same second as its submission, and the check called the
+    #: receiver silent because the ingest named neither address nor queueId.
+    def _inline_runner(self, mail_text: str):
+        return self._runner(mail_text, before_text=OLD_DELIVERY)
+
+    def test_an_ingest_logged_without_a_sender_beside_its_submission_is_delivered(self):
+        delivered, evidence, _ = probe.run_probe(
+            am_host="i3", am_target="root@192.168.1.53",
+            mail_host="i1", mail_target="root@192.168.1.51",
+            wait=0, runner=self._inline_runner(INLINE_SUBMISSION + INLINE_INGEST),
+            clock=lambda: INLINE_START, sleeper=lambda _s: None, nonce="x",
+        )
+        self.assertTrue(delivered, evidence)
+
+    def test_an_ingest_logged_without_a_sender_and_no_submission_does_not_count(self):
+        delivered, _, _ = probe.run_probe(
+            am_host="i3", am_target="root@192.168.1.53",
+            mail_host="i1", mail_target="root@192.168.1.51",
+            wait=0, runner=self._inline_runner(INLINE_INGEST),
+            clock=lambda: INLINE_START, sleeper=lambda _s: None, nonce="x",
+        )
+        self.assertFalse(delivered)
+
+    def test_an_ingest_logged_without_a_sender_must_sit_beside_that_submission(self):
+        # A different message arriving half a minute into the window must not be read as
+        # this probe's: the inline ingest is immediate by construction.
+        late = INLINE_INGEST.replace("21:01:09", "21:01:39")
+        delivered, _, _ = probe.run_probe(
+            am_host="i3", am_target="root@192.168.1.53",
+            mail_host="i1", mail_target="root@192.168.1.51",
+            wait=0, runner=self._inline_runner(INLINE_SUBMISSION + late),
+            clock=lambda: INLINE_START, sleeper=lambda _s: None, nonce="x",
+        )
+        self.assertFalse(delivered)
 
     def test_an_unreadable_host_is_never_a_silent_receiver(self):
         from estate_check import HostUnreadable
