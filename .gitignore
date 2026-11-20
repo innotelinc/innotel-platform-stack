@@ -9,3 +9,4 @@ mesh/registry/data/
 groups/*/consul/data/
 extensions/*/bind/
 extensions/*/acme/
+secrets/
