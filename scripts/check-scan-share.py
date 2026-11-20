@@ -99,7 +99,6 @@ RW={shlex.quote(reader_password)}
 SHARE={shlex.quote(SHARE_PATH)}
 SMB={shlex.quote(f"//127.0.0.1/{SHARE}")}
 PROBE={shlex.quote(PROBE)}
-cat > /dev/null 2>&1 || true
 
 smb() {{
   printf '%s\\n' "$2" | smbclient "$SMB" -U "$1" -c "$3" 2>&1 | grep -v '^Password for '
