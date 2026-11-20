@@ -120,6 +120,24 @@ class AuditCase(unittest.TestCase):
         result = scan.audit(self.reading(cfg_valid_users="scans dhunter"), writer="scans", readers=["household"])
         self.assertIn("account_not_valid", self.codes(result))
 
+    def test_a_group_in_valid_users_admits_the_accounts_it_holds(self):
+        # Orion's generator writes `valid users = @orion-nas`; read literally that
+        # would fail the estate for a stanza smbd enforces perfectly well.
+        result = scan.audit(
+            self.reading(cfg_valid_users="@orion-nas", cfg_group_members="scans household dhunter scan-reader"),
+            writer="scans",
+            readers=["household", "scan-reader"],
+        )
+        self.assertTrue(result.ok, [finding.message for finding in result.findings])
+
+    def test_a_group_that_does_not_hold_the_reader_is_still_a_failure(self):
+        result = scan.audit(
+            self.reading(cfg_valid_users="@orion-nas", cfg_group_members="scans household"),
+            writer="scans",
+            readers=["scan-reader"],
+        )
+        self.assertIn("account_not_valid", self.codes(result))
+
     def test_a_reader_that_can_write_is_the_regression_this_exists_for(self):
         result = scan.audit(
             self.reading(reader_put_rc="0", reader_put="putting file … as \\estate-reader-write-attempt.txt"),

@@ -117,6 +117,15 @@ echo "@@cfg_write_list"
 testparm -s --section-name={SHARE} --parameter-name="write list" 2>/dev/null
 echo "@@cfg_valid_users"
 testparm -s --section-name={SHARE} --parameter-name="valid users" 2>/dev/null
+echo "@@cfg_group_members"
+# `@group` is how Orion's generator names a share's audience, and smbd expands it.
+# Read literally it would fail every account the group admits, so the group is
+# resolved here, where the accounts actually live.
+for token in $(testparm -s --section-name={SHARE} --parameter-name="valid users" 2>/dev/null | tr ',' ' '); do
+  case "$token" in
+    @*) getent group "${{token#@}}" 2>/dev/null | cut -d: -f4 | tr ',' ' ' ;;
+  esac
+done
 echo "@@cfg_force_group"
 testparm -s --section-name={SHARE} --parameter-name="force group" 2>/dev/null
 echo "@@cfg_path"
@@ -227,8 +236,11 @@ def audit(
         )
 
     valid = _names(reading.get("cfg_valid_users", ""))
+    # A group in `valid users` admits everyone smbd says is in it; expanding it here
+    # is what lets the generated `@orion-nas` pass without weakening the rule.
+    admitted = set(valid) | set(_names(reading.get("cfg_group_members", "")))
     for account in [writer, *readers]:
-        if account and valid and account not in valid:
+        if account and admitted and account not in admitted:
             out.findings.append(
                 Finding(
                     "account_not_valid",
