@@ -162,6 +162,9 @@ EXPECTED: dict[str, dict[str, str]] = {
         "vault": "192.168.1.73",
         # `workloads` (`.113`) runs here and no row named it, so the check warned about a
         # container that was behaving (`i1 workloads: running and not in the table`).
+        # The Coolify panel that used to live in it moved to its own `coolify` instance
+        # on `i2` (`.85`) on 2026-11-20, and the `.113:8000` forward was retired; the row
+        # stays because the container still runs here (`mintmark-web`), not the panel.
         "workloads": "192.168.1.113",
         # `atheniq-next` (`.120`) **is a row** (2026-11-18). It was launched that day as a
         # second Open edX stack (`scripts/atheniq-parallel-stack.sh`) and came up on `.120`

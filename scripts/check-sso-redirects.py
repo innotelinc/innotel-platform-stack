@@ -37,10 +37,12 @@ finding is a human decision — add the URI, retire the app, or point the app at
 the registered name.
 
 One rule is not a name rule. A registration keyed to an address
-(`http://192.168.1.113:8000/auth/authentik/callback`) has no name to outlive, so
-it is judged by whether the address still answers — the two live Coolify panels
-sign in that way. Treating those as dead was a false finding caught on 2026-11-18,
-before anything was retired.
+(`http://192.168.1.85:8000/auth/authentik/callback`) has no name to outlive, so
+it is judged by whether the address still answers — the surviving Coolify panel
+signs in that way. Treating those as dead was a false finding caught on 2026-11-18,
+before anything was retired. The panel that published on `.113` was retired on
+2026-11-20, so a registration still naming that address is now dead rather than a
+judgement call: the forward it relied on no longer exists.
 
 Nor is a type a verdict on its own. A URI Authentik keeps for *logout* is the
 normal shape here: these apps send the browser to their own `/signin` after a
