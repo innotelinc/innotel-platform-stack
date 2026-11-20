@@ -1,15 +1,22 @@
 # AthenIQ Open edX image — CI build and cutover (2026-11-19)
 
-Status: pipeline created and dispatched; **not yet cut over**. Production still runs the stock image.
+Status (corrected 2026-11-20): the image is cut over on the **rehearsal stack only**.
+`atheniq-next` (`.120`, `next.atheniq.courses`) runs
+`ghcr.io/innotelinc/openedx-platform:de1f9f5-unity`; the public stack `atheniq` (`.59`,
+`atheniq.courses` and the three subdomains) still runs the stock
+`docker.io/overhangio/openedx:22.0.2-indigo`. No public name has been moved to `.120`, so
+"cut over" is true of the image and false of the cutover — see
+`atheniq-cutover-decision-2026-11-20.md` for what still blocks it.
 
 ## Why this shape
 
 Tutor is the deployer, not the LMS. The LMS code is `edx-platform`, which Tutor builds into
 `DOCKER_IMAGE_OPENEDX`. So "run our fork" = build an image from the fork in CI, then pin it.
 
-The deployed image is `docker.io/overhangio/openedx:22.0.2-indigo` (Tutor 22 = **Verawood**),
-running `edx-platform` commit `9e67d1429d` (2026-07-29). Tutor's build recipe clones
-`EDX_PLATFORM_REPOSITORY` at `EDX_PLATFORM_VERSION` (default `release/verawood.1`).
+The public stack's image was `docker.io/overhangio/openedx:22.0.2-indigo` (Tutor 22 =
+**Verawood**), running `edx-platform` commit `9e67d1429d` (2026-07-29). Tutor's build recipe
+clones `EDX_PLATFORM_REPOSITORY` at `EDX_PLATFORM_VERSION` (default `release/verawood.1`).
+That is still what `.59` runs; `.120` has been repinned (below).
 
 `innotelinc/openedx-platform` was forked at `master`, which is ~4 months ahead of the deployed
 line. Building `master` would be a platform upgrade, not a swap. So:
@@ -34,16 +41,26 @@ Carry AthenIQ patches on `atheniq/verawood`. Do not ship `master` until an upgra
 Trigger: Actions → *Build Open edX image* → Run workflow (`edx_ref`, `tutor_version`).
 Expect 40–90 minutes. The tag is the baked commit, so an image always names its own code.
 
-## Cutover (not yet performed)
+## Cutover
+
+Performed on `atheniq-next` on 2026-11-20; **not** performed on the public stack. The two
+hosts keep their config in different roots, which is the thing to get right before running
+any of this:
+
+| host | tutor root | LMS host |
+|---|---|---|
+| `atheniq-next` (`.120`) | `/home/tutor/tutor-next` | `next.atheniq.courses` |
+| `atheniq` (`.59`) | `/home/tutor/.local/share/tutor` | `atheniq.courses` |
 
 `ghcr.io/innotelinc/openedx-platform` is a **private** package until made public. On the estate
 box, log in once with a token that has `read:packages`:
 
     docker login ghcr.io -u <user> --password-stdin <<< "$GHCR_TOKEN"
 
-Then:
+Then, on the host whose stack you are repinning (`TUTOR_ROOT` is not optional — a bare
+`tutor` run as root targets `/root/.local/share/tutor`, which no container reads):
 
-    cd /home/tutor/.local/share/tutor
+    export TUTOR_ROOT=/home/tutor/tutor-next        # .120; .59 uses /home/tutor/.local/share/tutor
     tutor config save --set DOCKER_IMAGE_OPENEDX=ghcr.io/innotelinc/openedx-platform:<sha>
     tutor images pull openedx
     tutor local restart lms cms lms-worker cms-worker

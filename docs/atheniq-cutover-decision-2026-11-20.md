@@ -1,7 +1,7 @@
 # AthenIQ: what the cutover needs, 2026-11-20
 
 **Decision: the public cutover has not happened and should not be scheduled until
-the four items below are closed.** `atheniq-next` (`.120`) is a healthy parallel
+the three open items below are closed** (item 2 was closed on 2026-11-20).** `atheniq-next` (`.120`) is a healthy parallel
 stack, now reachable at `next.atheniq.courses` over TLS, and it is the right place
 to rehearse on. It is not yet a replacement for the stack answering
 `atheniq.courses`, `catalog.atheniq.courses`, `learn.atheniq.courses` and
@@ -28,12 +28,19 @@ been up in parallel. Both are full tutor stacks, and both answer the same paths.
    writers on `.59`, dump Mongo + MySQL + the media volume, restore into `.120`,
    then move names. `docs/atheniq-cutover-and-migration-2026-11-18.md` records the
    addresses and the restore shape used for the first rehearsal.
-2. **Search is empty on the rehearsal stack.** `tutor_course_info` in
-   `atheniq-next` reports 0 documents, so the catalog page lists courses from the
-   courses API but its search box returns nothing. The index is populated by CMS
-   (`reindex_studio` → Celery `rebuild_index_incremental`); the first run has to
-   complete before the stack is a fair rehearsal. This is a data step, not a code
-   defect, and it does not affect the page-level fix made on 2026-11-20.
+2. ~~**Search is empty on the rehearsal stack.**~~ **Closed 2026-11-20, later the
+   same day.** The index caught up on its own: Meilisearch reports 120 documents in
+   `tutor_course_info` (last updated 17:10), and both halves of the search path now
+   answer from it — `POST /indexes/tutor_course_info/search` returns hits for
+   `ECON101 — Microeconomics`, and the LMS endpoint the catalog calls,
+   `/search/unstable/v0/course_list_search/`, returns `{"total": 120, "results": […]}`.
+   The statement above was true when written and stale within hours, which is why it is
+   recorded as closed rather than deleted: the blocker was a backfill completing, not a
+   defect, and nothing had to be reindexed by hand. One thing it exposes for the
+   cutover: `?search=` on `/api/courses/v1/courses/` returns the whole catalogue (120 for
+   `Financial` and for `Nursing` alike), so the search box is the Meilisearch path only.
+   Verify a cutover against `course_list_search`, not against the courses API's `search`
+   parameter, which looks like it works and does not filter.
 3. **The certificate and the redirect are per name.** `next.atheniq.courses` now
    has both (`npm-next-atheniq-courses`, valid to 2027-02-18, HTTP forced to
    HTTPS). The four public names already have theirs. A cutover should reuse those
