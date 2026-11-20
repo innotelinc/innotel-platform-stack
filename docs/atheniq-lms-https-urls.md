@@ -51,9 +51,22 @@ Both are template sources, so a regeneration reproduces them; that is the point,
 verified by running `tutor config save` and re-reading the rendered
 `env/apps/openedx/settings/lms/production.py`.
 
-A tutor **upgrade** replaces the package and takes both edits with it. The check that would
-notice is `check-edge-front-door.py` only for the name; the scheme is visible in
-`/api/mfe_config/v1?app=catalog`, so that endpoint is the one to read after an upgrade:
+Both edits are carried by `scripts/atheniq-lms-https.py`, which is idempotent and takes a
+`--dry-run`. It is the whole fix in one command, and the thing to run after an upgrade:
+
+```sh
+sudo python3 /usr/local/bin/atheniq-lms-https.py --dry-run   # what would change
+sudo python3 /usr/local/bin/atheniq-lms-https.py            # templates
+TUTOR_ROOT=/home/tutor/tutor-next /opt/tutor/bin/tutor config save
+sudo python3 /usr/local/bin/atheniq-lms-https.py --check \
+    /home/tutor/tutor-next/env/apps/openedx/settings/lms/production.py
+```
+
+A tutor **upgrade** replaces the package and takes both edits with it, which is why the
+edit is a script rather than a memory. `--check` reads the rendered file and fails on any
+`http://` platform URL, so the upgrade is visible before a learner finds it; the live
+answer is still in `/api/mfe_config/v1?app=catalog`, so that endpoint is the other one to
+read after an upgrade:
 
 ```sh
 curl -s https://next.atheniq.courses/api/mfe_config/v1?app=catalog | grep -o 'http[^"]*atheniq.courses' | sort -u
