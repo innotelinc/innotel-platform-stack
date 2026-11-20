@@ -185,6 +185,22 @@ also shadowed, since `config.json` still wins. The compose line was deleted inst
 value stays where the app actually reads it, and rotating it is an `/admin` action. The
 previous file is kept as `docker-compose.yml.bak-smtpenv-20261120`.
 
+The same shadowing hid one more setting, and this one changed behaviour: compose declares
+`SIGNUPS_VERIFY: "false"` — with the comment that the registrar confirms a staff address, so
+sign-up must not wait for an emailed token — while `config.json` held `signups_verify: true`.
+The environment line was inert, and what the app did was the opposite of what the file said.
+`config.json` was changed to `false` (backup `config.json.bak-signupsverify-20261120`) — the
+same file the panel writes — the container restarted healthy, its startup log still shows it
+loading `data/config.json`, that file now reads `signups_verify: false` with the unchanged
+40-character `smtp_password`, and the site answers 200. (The panel's JSON endpoints,
+`GET /admin/config` and `POST /admin/diagnostics`, return 404 on this build, so the readback
+is the store the app loads at startup rather than a live panel assertion.) Stated plainly, because it follows: with
+`signups_allowed: true` and no `signups_domains_whitelist`, registration is now open and
+immediate, which is the registrar's intent as written but is a policy the owner should confirm
+— closing sign-ups and creating accounts from the panel, or whitelisting a domain, are the two
+ways out. The lesson for the rest of this document is that a `config.json`-backed service has
+*two* writable surfaces, and only one of them is the compose file.
+
 **`atheniq-console` — mounted, read by the entrypoint.** The console prefers SMTP over its
 API fallback whenever `MAIL_SMTP_HOST`/`USER`/`PASS` are all set (`smtp.ready` in
 `.next/server/chunks/1410.js`, via nodemailer), so this password was live. The image is a
