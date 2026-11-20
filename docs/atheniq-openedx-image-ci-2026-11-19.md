@@ -95,19 +95,28 @@ The page-size trap that used to be listed here is closed: `SEARCH_MAX_PAGE_SIZE`
 
 ## Verification, 2026-11-20
 
-The workflow was **not** run through GitHub Actions: a dispatch is refused with
-`HTTP 422: Actions has been disabled for this repository` — for this workflow and for an
-unrelated control workflow on `master` alike — while
-`GET /repos/innotelinc/openedx-platform/actions/permissions` reports
-`{"enabled": true, "allowed_actions": "all"}`, and both
-`PUT .../actions/permissions` and `PUT .../actions/workflows/<id>/enable` return success
-without changing the outcome. That combination is the fork-level switch, which only the
-repository owner can flip in the repository's Actions tab; no API call clears it. Once it
-is enabled, `gh workflow run build-openedx.yml --repo innotelinc/openedx-platform --ref
-atheniq/verawood` is the dispatch this file describes.
+**The pipeline ran.** `gh workflow run build-openedx.yml --repo
+innotelinc/openedx-platform --ref atheniq/verawood -f edx_ref=atheniq/verawood -f
+tutor_version=22.0.2 -f theme_ref=main` produced run **44810632400**, which concluded
+`success` in 11m48s (`20:21:34Z` → `20:33:22Z`) with all twelve steps green — including
+**Fetch the AthenIQ theme**, **Layer the Unity theme onto it**, **Assert the theme is in
+the image** and **Push**.
 
-What *was* verified on 2026-11-20 is the part the pipeline exists for — the theme layer
-and its assertion — built as a real image against the same release line
+That run exists because the fork-level block cleared: until 2026-11-20 the same dispatch
+was refused with `HTTP 422: Actions has been disabled for this repository` (for this
+workflow and for an unrelated control workflow on `master` alike), while
+`GET /repos/.../actions/permissions` reported `{"enabled": true, "allowed_actions":
+"all"}` and both `PUT .../actions/permissions` and
+`PUT .../actions/workflows/<id>/enable` returned success without changing it. That
+combination is the owner-only switch in the fork's Actions tab, and no API call clears
+it — which is why the earlier pass verified the theme layer locally instead of claiming
+the workflow ran.
+
+A duplicate dispatch queued by a retry was cancelled (`44810670443`), so only the run
+above consumed a runner.
+
+What *was* also verified, independently of GitHub, is the part the pipeline exists for —
+the theme layer and its assertion — built as a real image against the same release line
 (`overhangio/openedx:22.0.2-indigo`), using the workflow's own inline Dockerfile and a
 theme context built exactly as its "Fetch the AthenIQ theme" step builds it:
 
