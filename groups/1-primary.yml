@@ -988,8 +988,11 @@ services:
       OIDC_JWKS_URL: ${OIDC_JWKS_URL:-https://auth.signara.innotel.us/application/o/signara/jwks/}
       OIDC_TOKEN_URL: ${OIDC_TOKEN_URL:-https://auth.signara.innotel.us/application/o/token/}
       OIDC_USERINFO_URL: ${OIDC_USERINFO_URL:-https://auth.signara.innotel.us/application/o/userinfo/}
+      SMTP_PASS_FILE: /run/secrets/smtp_password
     ports:
       - '${API_BIND_ADDRESS:-127.0.0.1}:${API_BIND_PORT:-8000}:8000'
+    volumes:
+      - ../../1-primary/signara/infra/secrets/smtp_password:/run/secrets/smtp_password:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -1270,13 +1273,12 @@ services:
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
       # The FQDN Alertmanager says EHLO with. Left unset it renders as
       # `localhost`, which a strict relay (Stalwart) refuses with
       # `550 5.5.0 Invalid EHLO domain`; the entrypoint defaults it to a dotted
       # name when empty.
-      SMTP_HELLO: ${SMTP_HELLO:-signara.innotel.us}
+      SMTP_HELLO: ${SMTP_HELLO:-innotel.us}
       # The name the relay's certificate is verified against. Set it when the
       # relay is dialled by an address its certificate does not name; that keeps
       # verification on instead of reaching for the switch below.
@@ -1289,6 +1291,13 @@ services:
       - ../../1-primary/signara/infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ../../1-primary/signara/infra/monitoring/alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
       - ../../1-primary/signara/infra/monitoring/alertmanager/email.tmpl:/etc/alertmanager/email.tmpl:ro
+      # 0444 on the host, mounted read-only: the submission password never appears
+      # in `docker inspect`. Alertmanager reads it via smtp_auth_password_file; the
+      # API via SMTP_PASS_FILE. Not 0600 — both consumers are unprivileged
+      # (alertmanager as `nobody`, the api as `signara`) and were refused the file
+      # at 0600, which read as an empty password rather than as a permission problem.
+      # infra/secrets/README.md carries the detail.
+      - ../../1-primary/signara/infra/secrets/smtp_password:/run/secrets/smtp_password:ro
       - alertdata:/alertmanager
     ports:
       - '${ALERTMANAGER_BIND_ADDRESS:-127.0.0.1}:${ALERTMANAGER_BIND_PORT:-9093}:9093'
