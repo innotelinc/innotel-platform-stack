@@ -237,3 +237,28 @@ estate-checks.service` came back `Result=success` / `ExecMainStatus=0` (a failin
 a textfile, not a failed unit), and the series published `last_status 0`, `failures 2`,
 `notes 2` — the two `vault` containers above (both closed later that evening), plus Authentik's two
 deliberate notes.
+
+## The two follow-ups, closed the same night
+
+**Registration is closed.** `signups_allowed` is now `false` in `config.json` (backup
+`config.json.bak-signupsallowed-20261120`), so the vault takes no self-service accounts;
+`invitations_allowed` stays `true`, so the registrar creates them from the panel. That is the
+policy the compose comment described, made explicit instead of left as the side effect of a
+shadowed flag. `SIGNUPS_VERIFY` stays `false`: with sign-ups closed it no longer decides
+anything for invited users, and leaving it equal to the compose line keeps the two surfaces
+honest for the next reader.
+
+**Nothing else in the estate keeps settings this way.** A sweep of every running container on
+all four hosts (165 containers, 21 Docker instances) looked for a `config.json` in the usual
+data locations and compared its keys with that container's environment: `vaultwarden` is the
+only service that has one — 65 settings, 10 of them also in the environment, and after the two
+fixes above **0 disagreements**. The other shapes a service might keep (`/config/config.json`,
+`/app/config.json`, `/config.json`, `/data/config/config.json`) exist in none of them, so this
+is currently a one-service trap.
+
+**And it is watched now.** `scripts/check-vaultwarden-config-drift.py` reads the compose
+file's `environment:` block and the `config.json` the container loads, compares only the keys
+both carry, and fails on any disagreement — credentials by length, never by value. An
+unreadable host is exit 2, and a run that finds *no* shared key is a failure rather than a
+pass, because that means it read the wrong file, container or instance. First run:
+`0 failure(s) — 10 shared key(s) between the compose file and config.json`.

@@ -114,6 +114,16 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # watches — the estate's most common shape of regression.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-smtp-credentials.py --prom ${TEXTFILE_DIR}/estate-check-smtp-credentials.prom
 
+# And that the two writable surfaces of a `config.json`-backed service agree (2026-11-20).
+# Vaultwarden loads `/data/config.json` (written by its own admin panel) and that store
+# **overrides the environment**, so a compose key the store also holds is advisory — both
+# files read correctly on their own and the app implements neither. Measured that evening:
+# `SMTP_PASSWORD` was inert in the environment (one more readable credential, which the check
+# above saw but could not tell was unused), and `SIGNUPS_VERIFY` said `"false"` in compose with
+# a comment explaining why sign-up must not wait for mail, while the store said `true` — so
+# registration waited anyway. This compares the overlap and fails on any disagreement.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-vaultwarden-config-drift.py --prom ${TEXTFILE_DIR}/estate-check-vaultwarden-config-drift.prom
+
 # And that the mail server can still *sign a person in*, which is the half none of the
 # checks above asks. On 2026-11-06 the sign-in completed and every request after it 500d:
 # Stalwart's only directory speaks OIDC, it initialises that directory once, and a failed
