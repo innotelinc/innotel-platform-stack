@@ -5,6 +5,11 @@ Date: 2026-11-18 (evening) · Host: `atheniq` incus container on i1 (192.168.1.5
 This records what was actually done and verified, and the two things that will
 bite the next person.
 
+**Superseded in part (2026-11-20):** the second-stack and image-migration plans in
+§5 and §9 were scrapped — the estate stays on `.59`, and both helper scripts named
+below have been deleted. Sections 1–4 and 6–11 are the record of work that was done
+and remain accurate; see `atheniq-stays-on-59-2026-11-20.md`.
+
 ---
 
 ## 1. The catalog 500 is fixed, and the fix now survives `tutor config save`
@@ -93,6 +98,9 @@ stream reaches the host.
 
 ## 5. Parallel stack: why it cannot run today
 
+*(Plan only, and scrapped 2026-11-20. The memory measurement below is still the reason a
+second full stack never fit on `atheniq`.)*
+
 | | value |
 |---|---|
 | container memory limit | **8192 MiB** (raised from 6144 on 2026-11-18) |
@@ -114,16 +122,15 @@ So there are two honest paths:
 fit. A **slim** one can: no Meilisearch of its own, one CMS, one worker, a small
 gunicorn pool — about 3.5 GiB, which is what the host has free. It needs its own
 container rather than room inside `atheniq`, since `atheniq`'s 8 GiB is already
-2/3 spoken for. Script:
-`platform-stack/scripts/atheniq-parallel-stack.sh` (`--plan` refuses to launch
-when host memory is short). No downtime for students; DNS flips last.
+2/3 spoken for. Script: `platform-stack/scripts/atheniq-parallel-stack.sh` — deleted on
+2026-11-20 with the rest of the plan. No downtime for students; DNS flips last.
 
 **B — snapshot cutover (possible today, ~45–60 min downtime).** Reinstall the
 stack from the CI image, restore the snapshot, verify, flip. Reversible: the
 snapshot above restores either side.
 
-Helper: `platform-stack/scripts/atheniq-migrate-to-image.sh`
-(`--plan` default, `--snapshot`, `--verify`, `--apply`, `--restore`).
+Helper: `platform-stack/scripts/atheniq-migrate-to-image.sh` (`--plan` default,
+`--snapshot`, `--verify`, `--apply`, `--restore`) — also deleted on 2026-11-20.
 
 ## 6. Student portal — first slice shipped
 
@@ -302,10 +309,14 @@ the console and created the same way — one `x:Account/set` each.
 
 ## 9. Second stack: launched, and it cannot host the console
 
+*(2026-11-20: `.120` now runs a full Tutor stack on the fork image and answers
+`next.atheniq.courses` through the edge. It is a lab box, not a cutover target; the
+cutover was scrapped — `atheniq-stays-on-59-2026-11-20.md`.)*
+
 `atheniq-next` is up on i1 at `192.168.1.120` — 2 vCPU, 46 MiB in use, host still
 at 5134 MiB available. It is an **empty Ubuntu container**: the Docker/Tutor
-install and the snapshot restore are §5's next steps, not done, and it is
-reversible with `atheniq-parallel-stack.sh --destroy`.
+install and the snapshot restore were §5's next steps, and both it and the script
+that created it were scrapped on 2026-11-20 (§9's note above).
 
 Two measurements rule it out as the console's home:
 
@@ -315,8 +326,8 @@ Two measurements rule it out as the console's home:
   from the network it does have.
 
 The LMS container is therefore where the console runs (§10). Leaving `atheniq-next`
-alive is harmless but it is not the parallel stack §5 describes until its memory
-limit is fixed in `atheniq-parallel-stack.sh`.
+alive is harmless, and the memory cap that made it unusable was raised later; it is
+still not the parallel stack §5 describes — and §5 is scrapped, so that is moot.
 
 ## 10. The console is deployed, and the gate points at it
 

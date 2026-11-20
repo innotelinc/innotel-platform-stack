@@ -167,7 +167,8 @@ EXPECTED: dict[str, dict[str, str]] = {
         # stays because the container still runs here (`mintmark-web`), not the panel.
         "workloads": "192.168.1.113",
         # `atheniq-next` (`.120`) **is a row** (2026-11-18). It was launched that day as a
-        # second Open edX stack (`scripts/atheniq-parallel-stack.sh`) and came up on `.120`
+        # second Open edX stack — the parallel-stack script and the cutover it served were
+        # scrapped on 2026-11-20, and the container is a lab box now — and came up on `.120`
         # from DHCP; it was first left out of this table because it could not host the
         # stack — `limits.memory` was 256 MiB rather than the 3584 MiB the script records,
         # and `apt-get update` never completed inside it

@@ -23,13 +23,16 @@ Two integration assets already in place, both worth building on:
   `lib/mobile-commerce.ts`, `lib/mobile-push.ts`, `lib/passkey-client.ts`. The student app is
   mostly a re-skin of these, not a new codebase.
 
-## The one decision that blocks everything
+## The decision that was blocking everything (settled 2026-11-20)
 
-"Recreate all courses and everything from scratch" means deleting 120 courses, their enrolments,
-student accounts and progress — irreversible, and it takes the site down while it happens.
-Recommendation: **build the new stack in parallel** on new hostnames (`next.atheniq.courses`,
-`portal.atheniq.institute`), import content and users, then flip DNS. Same destination, no
-data loss window. Awaiting a decision; nothing destructive has been done.
+"Recreate all courses and everything from scratch" would mean deleting 120 courses, their
+enrolments, student accounts and progress — irreversible, and it takes the site down while it
+happens.
+
+The answer, decided 2026-11-20: **the LMS stays where it is, on `.59`.** The courses, users and
+progress are not recreated, and the parallel stack built on `next.atheniq.courses` is a lab, not
+a replacement (`atheniq-stays-on-59-2026-11-20.md`). The phases below therefore add surfaces
+around the live LMS rather than behind a new one, and nothing in them needs a cutover.
 
 ## Phases
 
