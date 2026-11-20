@@ -160,15 +160,51 @@ both carry a 40-character Stalwart app password as plain environment:
 
 | Container | Variable | State |
 |---|---|---|
-| `vaultwarden` | `SMTP_PASSWORD` | **fails** the check — not exempted |
-| `atheniq-console` | `MAIL_SMTP_PASS` | **fails** the check — not exempted |
+| `vaultwarden` | `SMTP_PASSWORD` | **closed** — the env copy never reached the app |
+| `atheniq-console` | `MAIL_SMTP_PASS` | **closed** — mounted, read by the entrypoint |
 
-They are deliberately left failing rather than added to the exemption list: an exemption
-is for a case the product makes impossible (Authentik), and these two have options —
-mount the value and read a `*_FILE` name where the app supports one, or, where it does
-not, a per-service app password rotated on a schedule instead of the shared one. Until
-then the new textfile says so and `EstateCheckFailing` names the containment, which is a
-page with an owner rather than a quiet `docker inspect`.
+Both were left failing rather than exempted on the first pass, because an exemption is
+for a case the product makes impossible (Authentik) and these two had options. Both were
+closed the same evening.
+
+### The two vault senders, closed
+
+**`vaultwarden` — the environment copy was dead weight.** The stack keeps its mail
+settings in Vaultwarden's own store, `/usr/src/vaultwarden/vw-data/config.json` (written by
+the `/admin` panel), and that store overrides every environment variable. The daemon says
+so on every start:
+
+    [INFO] Using saved config from `data/config.json` for configuration.
+    [WARNING] The following environment variables are being overridden by the config.json file.
+    [WARNING] DOMAIN, SIGNUPS_VERIFY, SMTP_HOST, SMTP_SECURITY, SMTP_PORT, SMTP_FROM, ...
+
+`SMTP_PASSWORD` was therefore a 40-character credential in `docker inspect` that the app
+never read, next to a byte-identical copy in `config.json` that no rotation would keep in
+step. A `SMTP_PASSWORD_FILE` pointing at a mounted file would have added a *third* copy —
+also shadowed, since `config.json` still wins. The compose line was deleted instead: the
+value stays where the app actually reads it, and rotating it is an `/admin` action. The
+previous file is kept as `docker-compose.yml.bak-smtpenv-20261120`.
+
+**`atheniq-console` — mounted, read by the entrypoint.** The console prefers SMTP over its
+API fallback whenever `MAIL_SMTP_HOST`/`USER`/`PASS` are all set (`smtp.ready` in
+`.next/server/chunks/1410.js`, via nodemailer), so this password was live. The image is a
+Next.js build with no `*_FILE` support of its own, so the value moved out of `console.env`
+into `/usr/src/atheniq-console/secrets/mail_smtp_pass` (mode 0444, mounted read-only), and
+`entrypoint-mail-secret.sh` — mounted at `/usr/local/bin/atheniq-mail-secret.sh` and named
+as the service `entrypoint` — reads it into `MAIL_SMTP_PASS` before `exec`ing the image's
+own `docker-entrypoint.sh`. Overriding `entrypoint` in Compose also drops the image `CMD`,
+so `command: ["npm", "run", "start"]` is restated beside it — without that the container
+exited 0 on start and restarted in a silent loop. When the image is rebuilt,
+`MAIL_SMTP_PASS_FILE` should replace the wrapper.
+
+Proven rather than assumed: `docker inspect` reports no password variable on either
+container (`vaultwarden`: none; `console`: `[]`), the console's PID 1 does carry the
+exported value (`/proc/1/environ`), and both apps then sent real mail — the console's
+`POST /api/health/digest` answered `Sent to dhunter@innotel.us through mail.innotel.us.`,
+and Vaultwarden's `POST /api/accounts/password-hint` logged `200 OK` with no SMTP error
+after it. The check now reads **0 failure(s), 0 warning(s)** over the 165 containers in 21
+Docker instances the estate runs with the lab stopped — Authentik's two notes are the only
+lines left.
 
 Authentik is the one named exemption, keyed by host, instance **and** variable
 (`i4`, `proxy`, `AUTHENTIK_EMAIL__PASSWORD`) so it cannot cover a different container
@@ -183,4 +219,5 @@ Re-verify by hand — it is the same read the check does, and it prints no value
 Installed on the edge the same day: the unit names it, `systemctl start
 estate-checks.service` came back `Result=success` / `ExecMainStatus=0` (a failing check is
 a textfile, not a failed unit), and the series published `last_status 0`, `failures 2`,
-`notes 2` — the two `vault` containers above, plus Authentik's two deliberate notes.
+`notes 2` — the two `vault` containers above (both closed later that evening), plus Authentik's two
+deliberate notes.

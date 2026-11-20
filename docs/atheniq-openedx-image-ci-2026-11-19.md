@@ -93,6 +93,41 @@ the same layer from a local `contrib/` checkout, for an image built before this 
 The page-size trap that used to be listed here is closed: `SEARCH_MAX_PAGE_SIZE` lives in the
 `atheniq_search` plugin now, so it survives `tutor config save` on either stack.
 
+## What the theme reaches in the MFE catalog (lab, 2026-11-20)
+
+`/` on the lab redirects to `/catalog/`, so the catalog MFE is where a visitor meets the
+theme. Measured on `atheniq-next` (`next.atheniq.courses`, `DOCKER_IMAGE_OPENEDX=…:eac3207`)
+with the stack booted:
+
+| Thing | Result |
+|---|---|
+| `GET /catalog/` | 200, the MFE shell, 1,007 bytes |
+| `GET /api/mfe_config/v1?mfe=catalog` | `SITE_NAME: AthenIQ`, `LOGO_URL: https://next.atheniq.courses/theming/asset/images/logo.png` |
+| that logo | 302 → `/static/images/logo.b6c374d66d57.png`, 570 bytes, `image/png` |
+| `PARAGON_THEME` in the shell | `brand: {version: "1.2.3", themeUrls: {core: {}, variants: {}}}` |
+| `/catalog/app.*.css` | 6,655 bytes, no `atheniq`/`unity` string, stock Paragon `#0a3055` |
+| `/static/atheniq/unity-light.css` (LMS-served) | 200, 10,405 bytes, `--pgn-color-body-bg: #f7f6fb` among the overrides |
+
+The theme reaches the catalog as **identity only**. The name and the themed logo arrive
+because they are LMS settings rendered into `MFE_CONFIG`; the colour work does not, because
+it ships as a comprehensive-theme stylesheet the LMS loads (`unity-light.css`, overriding
+`--pgn-*` tokens) while the catalog build carries an empty brand package — so the MFE keeps
+Paragon's stock palette. Both halves are visible in the same page: an AthenIQ name and logo
+on a stock-blue catalog.
+
+That is a build-time gap rather than a configuration one: closing it means building the MFE
+images with `@edx/brand` overrides (or injecting the theme's tokens through
+`MFE_CONFIG.theme`), which is an `innotelinc/openedx-platform` change and not something
+`tutor config save` reaches. It is recorded here so "the theme is in the image" is not read
+as "the catalog is themed".
+
+**What this section does not claim.** The catalog is a client-rendered SPA and it never
+mounted under headless Chromium on the admin host — `--dump-dom` returned the 1,008-byte
+shell after 45 s with no console error, both in the lab's `http://` shape and behind a local
+TLS shim for `https://next.atheniq.courses` (the lab publishes no `:443`; its Caddy listens
+on `:80` only, while `LMS_BASE_URL` is `https://`). So the table above is served-bytes
+evidence, not a screenshot, and no claim is made about what a browser paints.
+
 ## Verification, 2026-11-20
 
 **The pipeline ran.** `gh workflow run build-openedx.yml --repo
