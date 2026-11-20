@@ -34,8 +34,16 @@
 #
 #     tutor config save --set DOCKER_IMAGE_OPENEDX=ghcr.io/innotelinc/openedx-platform:<tag>-unity
 #
-# The durable fix is to run these COPY steps inside the CI image build so the
-# registry tag itself carries Unity; until then this layer is the bridge.
+# THE CI BUILD CARRIES THE THEME NOW (2026-11-20)
+# ----------------------------------------------
+# `.github/workflows/build-openedx.yml` on the fork's `atheniq/verawood` branch does
+# these same steps inside the image build, so `ghcr.io/innotelinc/openedx-platform:<sha>`
+# already has `/openedx/themes/unity` and a stack pins the plain tag. The `-unity`
+# suffix this file used to produce is gone with the lab stack it served.
+#
+# This file stays for the one job CI cannot do: layering the theme onto an image that
+# was built before that change, or rebuilding the layer on a host with no network to
+# fetch the theme sources. It is the bridge, not the path.
 FROM ghcr.io/innotelinc/openedx-platform:de1f9f5
 
 USER root

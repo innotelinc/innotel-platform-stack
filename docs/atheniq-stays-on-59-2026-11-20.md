@@ -27,10 +27,14 @@ public names depend on. None of that moves.
   still-true findings folded into this file;
 - the plan to build the institute platform on `next.atheniq.courses` and flip DNS.
 
-`atheniq-next` (`.120`) is still running and still answers `next.atheniq.courses`
-through the edge. It is a lab box: nothing production-facing points at it, and
-nothing in this repository now treats it as a target. Removing it is a separate
-decision, and its data was never authoritative.
+`atheniq-next` (`.120`) was **stopped on 2026-11-20**, so the lab is not merely
+unreferenced — it is off. The container is `STOPPED` with `boot.autostart` false (so a
+host reboot does not bring it back), the edge's vhost for `next.atheniq.courses` is
+disabled, the name now answers nothing, and its row is out of
+`scripts/check-container-addresses.py` so `check-address-latency.py` stops dialling an
+address nobody expects to serve. The container and its stack are still there, a start
+away, because deleting data nobody asked to delete is not part of staying on `.59`;
+its data was never authoritative.
 
 ## What has to stay true on `.59`
 
@@ -44,6 +48,34 @@ decision, and its data was never authoritative.
 3. **`check-edge-front-door.py` keeps failing when a public name answers from a
    container instead of the edge.** It was written while `.120` was being rehearsed
    and it is a plain front-door check now: the names above must resolve to the edge.
+
+## The mail submission credential (rotated 2026-11-20)
+
+The LMS does not talk to Stalwart directly: `EMAIL_HOST=smtp`, `EMAIL_PORT=8025`,
+`EMAIL_HOST_USER` empty — it hands mail to the local relay container
+(`tutor_local-smtp-1`, `devture/exim-relay`). The `atheniq@innotel.us` Stalwart **app
+password** lives in `EMAIL_HOST_PASSWORD` in
+`/home/tutor/.local/share/tutor/config.yml`; `lms.env.yml` renders that empty, so
+looking there for the password finds nothing and proves nothing.
+
+It was rotated on 2026-11-20 because the value had been exposed: a new app password was
+minted on that account and written into the config, and the old app password was
+**deleted** on the server — so the exposed value stops authenticating rather than being
+merely superseded.
+
+**The relay is not currently forwarding, and the rotation did not cause that.** Measured
+while rotating: `tutor_local-smtp-1` has `SMARTHOST` and all three of
+`SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_USERDOMAIN` empty, so it has no relay to
+authenticate against and queues instead of sending — a submission test sat in `exim -bp`
+while Stalwart's own outbound queue was empty and nothing arrived in the mailbox. The fix
+is to give that container the estate's submission host plus this app password, which is a
+change to how the stack renders its mail service, not a credential rotation. Until then
+the LMS's mail is queued, not delivered, and no credential on this page changes that.
+
+The `atheniq-next` client in Authentik (`AthenIQ Next (test)`, `client_id`
+`atheniq-next`) had its client secret rotated the same day. Its only consumer was the lab,
+which is stopped; the stopped lab's `config.yml` now holds the new value, so a later
+start is not broken by a dead secret, and nothing else in the estate used it.
 
 ## If this is ever revisited
 

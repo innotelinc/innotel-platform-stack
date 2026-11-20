@@ -166,23 +166,16 @@ EXPECTED: dict[str, dict[str, str]] = {
         # on `i2` (`.85`) on 2026-11-20, and the `.113:8000` forward was retired; the row
         # stays because the container still runs here (`mintmark-web`), not the panel.
         "workloads": "192.168.1.113",
-        # `atheniq-next` (`.120`) **is a row** (2026-11-18). It was launched that day as a
-        # second Open edX stack — the parallel-stack script and the cutover it served were
-        # scrapped on 2026-11-20, and the container is a lab box now — and came up on `.120`
-        # from DHCP; it was first left out of this table because it could not host the
-        # stack — `limits.memory` was 256 MiB rather than the 3584 MiB the script records,
-        # and `apt-get update` never completed inside it
-        # (`docs/atheniq-cutover-and-migration-2026-11-18.md` §9). The cap is now that
-        # 3584 MiB with `limits.memory.enforce=hard`, so what decides whether the stack runs
-        # there is `i1`'s free memory rather than the container's ceiling. Leaving it out and
-        # stopping it answered the wrong question: the estate keeps an address alive, so
-        # the container is pinned in its own netplan (`dhcp4: false` in both
-        # `10-lxc.yaml` and `60-atheniq-next.yaml`) and listed here. It answers ICMP at
-        # `.120` — 0.04 ms from `i1` — and `check-address-latency` dials it every run, so
-        # "pinned" and "answers" are both watched rather than assumed. A row is a promise
-        # to keep the address serving: the day the stack is abandoned the row goes with
-        # it, the way `auvik` and `capstone` did.
-        "atheniq-next": "192.168.1.120",
+        # `atheniq-next` (`.120`) is **not a row** any more (2026-11-20). The cutover it was
+        # built for was scrapped, and the lab went with it: the container is STOPPED, its
+        # `boot.autostart` is false, and the edge's vhost for `next.atheniq.courses` is
+        # disabled — so `.120` answers nothing and nothing dials it. A row is a promise that
+        # the address still serves, which stopped being true the moment the box was stopped;
+        # keeping it would have made `check-address-latency` fail every run on an address
+        # nobody expects to answer, the false alarm the notes above describe for `auvik`,
+        # `capstone`, `monitor` and `www`. The row comes back with the address the day the
+        # container is started again; `docs/atheniq-stays-on-59-2026-11-20.md` has the
+        # decision, and the address itself stays pinned in the container's own netplan.
         # `onyx` (`.60`) runs here since the 2026-11-15 rebalance, which is why it is an
         # `i1` row rather than the `i3` row it was first written as (see the note there).
         "onyx": "192.168.1.60",
@@ -363,7 +356,6 @@ ROLES: dict[str, str] = {
     "192.168.1.94": "sage",
     "192.168.1.95": "telno",
     "192.168.1.96": "telno-turn (TURN relay)",
-    "192.168.1.120": "atheniq-next — the second Open edX stack (pinned, dialled)",
 }
 
 

@@ -1,5 +1,10 @@
 # The platform's own URLs are https, behind an edge that terminates TLS
 
+*(2026-11-20: the stack this was written on, `next.atheniq.courses`, is stopped and its
+vhost disabled — `atheniq-stays-on-59-2026-11-20.md`. The method below is kept: it is
+what any Tutor stack behind the edge needs, and it is what `scripts/atheniq-lms-https.py`
+checks.)*
+
 `next.atheniq.courses` is served by the estate edge, which terminates TLS and forwards
 plain HTTP to the Open edX container. Django therefore has to be told two things it cannot
 work out for itself: that its public URLs are `https://`, and that a request arriving over

@@ -309,9 +309,11 @@ the console and created the same way — one `x:Account/set` each.
 
 ## 9. Second stack: launched, and it cannot host the console
 
-*(2026-11-20: `.120` now runs a full Tutor stack on the fork image and answers
-`next.atheniq.courses` through the edge. It is a lab box, not a cutover target; the
-cutover was scrapped — `atheniq-stays-on-59-2026-11-20.md`.)*
+*(2026-11-20: `.120` ran a full Tutor stack on the fork image and answered
+`next.atheniq.courses` through the edge. It was a lab box, not a cutover target, and the
+cutover was scrapped — `atheniq-stays-on-59-2026-11-20.md`. The lab itself was stopped the
+same day: `STOPPED`, `boot.autostart` false, its vhost disabled, its row out of
+`check-container-addresses.py`.)*
 
 `atheniq-next` is up on i1 at `192.168.1.120` — 2 vCPU, 46 MiB in use, host still
 at 5134 MiB available. It is an **empty Ubuntu container**: the Docker/Tutor
