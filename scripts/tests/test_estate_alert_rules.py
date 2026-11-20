@@ -35,6 +35,10 @@ CHECK_SCRIPTS = [
     # otherwise invisible: the checks keep running and keep publishing, asserting an older
     # revision of themselves.
     "check-installed-checks",
+    # The scanner's folder, exercised over real SMB rather than only on the filesystem
+    # (2026-11-19): the write bit on `Scans` is granted by a Samba stanza, and a stanza is
+    # a file — `read only` dropped hands every reader the write bit with no other symptom.
+    "check-scan-share",
     # Every other unit this host carries, against `systemd/<name>` at the revision
     # (2026-11-15). The estate keeps its units in the repository and installs them by
     # hand; nothing compared the two until this.

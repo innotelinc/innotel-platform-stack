@@ -145,6 +145,11 @@ groups:
           # being invisible, so a textfile that stopped arriving must not be the thing that
           # hides it.
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="container_autostart"}), "check", "container_autostart", "check", ".*")
+          # The household's read-only door onto the scanner's folder (2026-11-19). A textfile
+          # that stopped arriving here would leave `read only`/`write list` asserted by
+          # nothing, and the only symptom of that rule widening is a file somebody did not
+          # mean to overwrite.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="scan_share"}), "check", "scan_share", "check", ".*")
           # The mail container's own preflight, published (2026-11-14). `stalwart_oidc_cache`
           # above asks whether the local copy is current; this asks the eleven facts step 1
           # of docs/mail-discovery-canonical.md asks a person — the units, the leaf's SAN

@@ -362,6 +362,21 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # `check-alert-delivery.py` uses — so a mailbox with no identity to sign in is a page
 # rather than a journal line the next run overwrites.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-mail-identities.py --prom ${TEXTFILE_DIR}/estate-check-mail-identities.prom
+# And that the household's read-only door onto the scanner's folder is still that, over
+# real SMB rather than only on the filesystem (2026-11-19). The share is `read only = yes`
+# with `write list = scans`; the filesystem half — modes, the forced group — was verified by
+# hand, and a stanza is a file. `read only` dropped, `write list` widened, or an account
+# missing from `valid users` leaves every one of those facts true and hands a reader the
+# write bit, whose only symptom is a file nobody meant to overwrite. It signs in as the
+# writer, writes a probe and checks the bytes on disk are `-rw-rw----` in the forced group,
+# then (when `SCAN_SHARE_READ_USER`/`_PASSWORD` are set) reads that probe back and requires
+# a write to be *refused*. With no reader credential it publishes what is unproven as a note
+# rather than failing for a credential it cannot mint — the same choice `check-retired-
+# instances` makes for its exempt instance. SCAN_SHARE_USER (default `scans`) and
+# SCAN_SHARE_PASSWORD come from the EnvironmentFile above; the check has no default
+# credential and must never carry one. It runs `smbclient` inside `nas` through `incus exec`
+# on `i2`, because the edge has no `incus` and the container is where smbd is 127.0.0.1.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-scan-share.py --prom ${TEXTFILE_DIR}/estate-check-scan-share.prom
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-installed-checks.py --prom ${TEXTFILE_DIR}/estate-check-installed-checks.prom
 # The same comparison for every other unit this host carries: the ones in `systemd/`
 # that are installed here, against the revision. A unit edited on a host during an

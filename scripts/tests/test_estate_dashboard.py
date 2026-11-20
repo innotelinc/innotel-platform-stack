@@ -119,6 +119,9 @@ class DashboardCase(unittest.TestCase):
         # them asserting an older revision of itself. `check-unit-drift` took it to 32
         # the same day: the estate's own units installed on a host by hand, against the
         # repository's copies, so a unit edited during an incident is a failing check.
+        # `check-scan-share` took it to 40 on 2026-11-19: the household's read-only door
+        # onto the scanner's folder is granted by a Samba stanza, so the writer probe and
+        # the refused second writer are the only things that assert it.
         # `check-zombie-processes` took it to 33 later that day, counting unreaped
         # children on all four hosts: a container that leaks them holds the PID space it
         # was given, `docker exec` fails against it, and nothing else here looks at the
