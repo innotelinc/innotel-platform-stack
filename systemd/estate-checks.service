@@ -427,6 +427,17 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # exit 2, because a flap report that cannot read history is not a clean bill of health.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-estate-flaps.py --days 7 --prom ${TEXTFILE_DIR}/estate-check-estate-flaps.prom
 
+# And who answers the name (2026-11-20). `next.atheniq.courses` was pointed at
+# `192.168.1.120` instead of the edge, so browsers reached the catalog over plain HTTP:
+# Django never treated the request as secure, the Secure CSRF cookie was never set, and
+# the page said "An unexpected error occurred" while every container answered. Every
+# check above asks whether a service is healthy; none asked who answers the name, which
+# is the one thing that was wrong. A name at an estate address is a bypass even when the
+# container behind it is up, so the verdict is a failure rather than a warning.
+# The names come from `edge-vhost-targets.tsv`, the same pin file the two checks above
+# read, so a door added tomorrow is covered without this line changing.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-edge-front-door.py --targets /opt/innotel/estate-checks/edge-vhost-targets.tsv --prom ${TEXTFILE_DIR}/estate-check-edge-front-door.prom
+
 # The one line that runs the queue. Everything above it only described work; this is
 # the run, and it is the last `ExecStart=` so systemd has the whole list before it
 # starts. It carries the same `-` as the checks: a check that is unhappy today must not

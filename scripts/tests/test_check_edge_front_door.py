@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -62,6 +63,32 @@ class PublicAddressTest(unittest.TestCase):
 
     def test_the_edge_is_public(self) -> None:
         self.assertTrue(check.is_public(EDGE))
+
+
+class TargetsFileTest(unittest.TestCase):
+    """The pin file is `name<TAB>host<TAB>port<TAB>why`, not one name per line.
+
+    Reading whole lines as names produced eight invented failures the first time this
+    was wired to `edge-vhost-targets.tsv`, and one line then died inside `idna` — a
+    crash that, in a unit whose every other check publishes a textfile, would have
+    taken this series quiet rather than red.
+    """
+
+    def test_only_the_first_column_is_a_name(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pins.tsv"
+            path.write_text(
+                "# name\thost\tport\twhy\n"
+                "next.example\t192.168.1.120\t80\tthe catalog\n"
+                "\n"
+                "bot.example\t192.168.1.52\t8801\topenmausbot\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(check.read_targets(str(path)), ["next.example", "bot.example"])
+
+    def test_a_malformed_name_is_a_finding_not_a_crash(self) -> None:
+        self.assertEqual(check.resolve("a..b"), [])
+        self.assertEqual(check.resolve("x" * 80), [])
 
 
 class MainTest(unittest.TestCase):

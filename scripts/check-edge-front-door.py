@@ -29,10 +29,12 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import os
 import socket
 import sys
 
 DEFAULT_EDGE = "73.68.203.71"
+CHECK = "edge_front_door"
 
 
 def is_public(address: str) -> bool:
@@ -61,13 +63,36 @@ def classify(addresses: list[str], edge: str) -> str:
 
 
 def resolve(name: str, port: int = 443) -> list[str]:
-    """Every address a browser could get for the name, in a stable order."""
+    """Every address a browser could get for the name, in a stable order.
+
+    A name that cannot be looked up at all is a finding, not a crash: the pin file is
+    hand-edited, and one malformed line (an empty label, a name over 63 bytes) must
+    not take the other nine hundred with it. `idna` raises `UnicodeError` for those
+    rather than the resolver's own `gaierror`, which is why both are caught here.
+    """
     try:
         infos = socket.getaddrinfo(name, port, proto=socket.IPPROTO_TCP)
-    except socket.gaierror:
+    except (socket.gaierror, UnicodeError, OSError):
         return []
     addresses = {info[4][0] for info in infos}
     return sorted(addresses)
+
+
+def read_targets(path: str) -> list[str]:
+    """The names a pin file declares, one per line, first column.
+
+    `edge-vhost-targets.tsv` is `name<TAB>host<TAB>port<TAB>why`. Reading whole lines
+    as names looked harmless and was not: a port reads as part of a label, a comment
+    reads as a name, and the run either invents eight failures or dies in `idna` —
+    which is exactly what happened the first time this was wired to that file.
+    """
+    names: list[str] = []
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            entry = line.split("\t", 1)[0].split("#", 1)[0].strip()
+            if entry:
+                names.append(entry)
+    return names
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -75,21 +100,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("names", nargs="*", help="names to check")
     parser.add_argument("--targets", help="file with one name per line (blank lines and # comments ignored)")
     parser.add_argument("--edge", default=DEFAULT_EDGE, help=f"the edge's public address (default {DEFAULT_EDGE})")
+    parser.add_argument(
+        "--prom",
+        metavar="PATH",
+        help="also write a Prometheus textfile here, for node-exporter's textfile collector",
+    )
     args = parser.parse_args(argv)
 
     names = list(args.names)
     if args.targets:
-        with open(args.targets, encoding="utf-8") as handle:
-            names.extend(
-                line.split("#", 1)[0].strip()
-                for line in handle
-                if line.split("#", 1)[0].strip()
-            )
+        names.extend(read_targets(args.targets))
     names = [name for name in dict.fromkeys(names) if name]
     if not names:
         print("check-edge-front-door: nothing to check", file=sys.stderr)
         return 2
 
+    findings: list[tuple[str, str]] = []
     failures = 0
     for name in names:
         addresses = resolve(name)
@@ -101,12 +127,37 @@ def main(argv: list[str] | None = None) -> int:
         failures += 1
         if verdict == "unresolved":
             print(f"FAIL     {name} -> does not resolve; nothing serves it")
+            findings.append((f"{name}_unresolved", f"{name} does not resolve; nothing serves it"))
         else:
             internal = [address for address in addresses if not is_public(address)]
             hint = f" (container address: {', '.join(internal)})" if internal else ""
             print(f"FAIL     {name} -> {shown}{hint}; expected the edge {args.edge}")
+            findings.append((f"{name}_off_edge", f"{name} -> {shown}; expected the edge {args.edge}"))
     print(f"check-edge-front-door: {len(names) - failures} on the edge, {failures} not")
+
+    if args.prom:
+        write_textfile(args.prom, findings)
     return 0 if failures == 0 else 1
+
+
+def write_textfile(path: str, findings: list[tuple[str, str]]) -> None:
+    """Publish the verdict the way every other estate check does.
+
+    `estate_check` sits beside this file where the checks are installed, not in the
+    repository's `scripts/`; a checkout that runs this by hand has no textfile
+    collector to serve, so an absent module is reported rather than fatal.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(path)) if False else os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from estate_check import Audit, Finding, write_prom  # noqa: PLC0415
+    except ImportError as error:
+        print(f"check-edge-front-door: could not write {path}: {error}", file=sys.stderr)
+        return
+    audit = Audit(findings=[Finding(code=code, level="fail", message=message) for code, message in findings])
+    try:
+        write_prom(path, CHECK, audit, ran_ok=True)
+    except OSError as error:
+        print(f"check-edge-front-door: could not write {path}: {error}", file=sys.stderr)
 
 
 if __name__ == "__main__":
