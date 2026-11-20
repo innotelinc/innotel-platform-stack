@@ -30,7 +30,9 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import os
+import shutil
 import socket
+import subprocess
 import sys
 
 DEFAULT_EDGE = "73.68.203.71"
@@ -62,6 +64,44 @@ def classify(addresses: list[str], edge: str) -> str:
     return "mixed" if on_edge else "bypass"
 
 
+def resolve_with_dig(name: str) -> list[str] | None:
+    """A records for `name` from a resolver, or None when `dig` is not installed.
+
+    Asking DNS rather than `getaddrinfo` is the difference between the question this
+    check means and a different one: inside the edge container, the host's own
+    `/etc/hosts` answers `proxy.innotel.us` with `127.0.1.1`, which reads as a bypass
+    for the one name the estate serves from the edge itself. A browser asks a
+    resolver, so this does too. `dig` is present on the hosts and in the edge
+    container; where it is not, the caller falls back to the system resolver and the
+    hosts-file answers come with it.
+    """
+    dig = shutil.which("dig")
+    if dig is None:
+        return None
+    try:
+        result = subprocess.run(
+            [dig, "+short", "+time=3", "+tries=1", "A", name],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    # `+short` prints a CNAME chain's names as well as its addresses, so only the
+    # answers that parse as addresses are answers to this question.
+    addresses = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return sorted({address for address in addresses if _is_address(address)})
+
+
+def _is_address(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
 def resolve(name: str, port: int = 443) -> list[str]:
     """Every address a browser could get for the name, in a stable order.
 
@@ -70,6 +110,9 @@ def resolve(name: str, port: int = 443) -> list[str]:
     not take the other nine hundred with it. `idna` raises `UnicodeError` for those
     rather than the resolver's own `gaierror`, which is why both are caught here.
     """
+    from_dig = resolve_with_dig(name)
+    if from_dig is not None:
+        return from_dig
     try:
         infos = socket.getaddrinfo(name, port, proto=socket.IPPROTO_TCP)
     except (socket.gaierror, UnicodeError, OSError):
