@@ -29,7 +29,10 @@ THE RULES
 3. **The reader** — with `SCAN_SHARE_READ_USER`/`SCAN_SHARE_READ_PASSWORD` configured,
    signs in over SMB, lists, reads the writer's probe back byte for byte, and is **refused**
    a write. A reader who can write is the regression this exists for, and the series says
-   which account.
+   which account. The estate's reader is `scan-reader` (created 2026-11-19): a real Unix and
+   Samba account in `orion-nas`, in `[Scans]`'s `valid users` and deliberately *not* in its
+   `write list`. It is the account the household's own access is exercised through, because
+   no check can mint a household password and a refused write is the same rule either way.
 4. **Unproven, said out loud** — without those two variables the reader half is published
    as a *note* naming exactly what is unasserted. Making it a failure would leave the
    estate permanently red for a credential no check can mint, which is how a check gets
@@ -102,7 +105,10 @@ PROBE={shlex.quote(PROBE)}
 
 smb() {{
   printf '%s\\n' "$2" | smbclient "$SMB" -U "$1" -c "$3" 2>&1 | grep -v '^Password for '
-  return "${{PIPESTATUS[0]}}"
+  # Index 1, not 0: `PIPESTATUS[0]` is the `printf` that feeds the password, which
+  # succeeds whenever there is a password to write — measured, it reported the reader's
+  # refused write as a success and the check failed the estate for doing the right thing.
+  return "${{PIPESTATUS[1]}}"
 }}
 
 echo "@@cfg_read_only"

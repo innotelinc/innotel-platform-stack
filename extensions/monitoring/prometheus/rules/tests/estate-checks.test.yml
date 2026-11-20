@@ -455,3 +455,37 @@ tests:
             exp_annotations:
               summary: 'The mail_identities check has not run in two hours'
               description: 'The last `mail_identities` run reported 4h 0m 0s ago, so its textfile is still being scraped but has not moved since. The timer that runs it is stopped, or every run since died before writing: nothing is watching this invariant now, whatever the last reading said. Check `systemctl list-timers estate-checks.timer` and the unit''s journal on the edge.'
+
+  # A note is the check's honest way of saying "this half was not exercised" and the wrong
+  # place for it to stay: the writer and the stanza keep passing, so nothing else in the
+  # estate ever mentions that a reader's refusal is unproven. Five hours is quiet, seven is
+  # not — the boundary is the `for: 6h` in the rule.
+  - name: an unexercised reader half alerts after six hours
+    interval: 1m
+    input_series:
+      - series: 'innotel_estate_check_note{check="scan_share",code="reader_unproven",detail="no reader"}'
+        values: '1x420'
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: EstateScanShareReaderUnproven
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: EstateScanShareReaderUnproven
+        exp_alerts:
+          - exp_labels: {severity: warning, team: platform, check: scan_share, code: reader_unproven, detail: 'no reader'}
+            exp_annotations:
+              summary: 'The Scans share has no configured reader, so its refusal is unproven'
+              description: '`check-scan-share.py` has published `reader_unproven` for six hours: no `SCAN_SHARE_READ_USER`/`SCAN_SHARE_READ_PASSWORD` is set in `/etc/innotel/estate-checks.env`, so the half of the rule that keeps the household from overwriting scans is not being exercised — the writer and the stanza still pass, which is why the check reads green while this is true. Set both to an account in `[Scans]`''s `valid users` that is not in its `write list` (`scan-reader`, added for exactly this), and the note disappears.'
+
+  # The note is *absent* once a reader is configured, not zero: the check only publishes
+  # it on the branch that could not exercise the reader. A rule keyed on `== 1` must be
+  # silent then, or every estate with the credential set alarms forever.
+  - name: a configured reader leaves the note absent and the alert silent
+    interval: 1m
+    input_series:
+      - series: 'innotel_estate_check_last_status{check="scan_share"}'
+        values: '1x420'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: EstateScanShareReaderUnproven
+        exp_alerts: []

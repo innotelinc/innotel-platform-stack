@@ -10,6 +10,8 @@ that leaked a password into a process table would be worse than the silence it r
 from __future__ import annotations
 
 import importlib.util
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -53,6 +55,37 @@ CLEAN = {
     "reader_put_rc": "1",
     "reader_put_left": "absent",
 }
+
+
+class ProbeTransportCase(unittest.TestCase):
+    def test_a_refused_smb_command_is_reported_as_a_failure(self):
+        """`smb()` must return smbclient's status, not the `printf` that feeds it.
+
+        Measured 2026-11-19, on the estate: `${PIPESTATUS[0]}` is the password-writing
+        `printf`, which succeeds whenever there is a password to write — so the reader's
+        refused write (`NT_STATUS_ACCESS_DENIED`, no file on disk) came back as exit 0 and
+        the check failed a share that was doing exactly the right thing. A stub
+        `smbclient` on PATH leaves the status as the only thing under test.
+        """
+        script = scan.build_probe("pw", "reader", "reader-pw")
+        function = re.search(r"^smb\(\) \{.*?^\}", script, re.S | re.M)
+        self.assertIsNotNone(function, "build_probe no longer defines a readable `smb()`")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "smbclient"
+            stub.write_text(
+                "#!/bin/sh\necho 'NT_STATUS_ACCESS_DENIED opening remote file'\nexit 1\n"
+            )
+            stub.chmod(0o755)
+            harness = (
+                f"PATH={tmp}:$PATH\n"
+                + function.group(0)
+                + "\nsmb user pw ls\necho rc=$?\n"
+            )
+            done = subprocess.run(["bash", "-c", harness], capture_output=True, text=True)
+
+        self.assertIn("NT_STATUS_ACCESS_DENIED", done.stdout)
+        self.assertIn("rc=1", done.stdout, f"smbclient's refusal was reported as success:\n{done.stdout}")
 
 
 class AuditCase(unittest.TestCase):

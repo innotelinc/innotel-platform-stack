@@ -280,6 +280,32 @@ groups:
             systemd/wifi-powersave-off.service; for `host_disk`, reclaim before a write
             fails.
 
+      # The one rule here about a *note* rather than a verdict, and it exists because a
+      # correct note can still be the wrong resting place. `scan_share` publishes
+      # `reader_unproven` while `SCAN_SHARE_READ_USER`/`SCAN_SHARE_READ_PASSWORD` are unset
+      # (2026-11-19): the writer and the stanza are still exercised, so the check reads
+      # green, and nothing in it can mint the credential a refusal needs. The stanza rules
+      # catch `read only` or `write list` being dropped; they cannot catch *whether a
+      # reader is refused at all* having stopped being asked. Six hours is twelve runs of
+      # the 30-minute timer — long enough for a credential rotation, short enough that the
+      # half nobody is exercising cannot be forgotten for a season.
+      - alert: EstateScanShareReaderUnproven
+        expr: innotel_estate_check_note{check="scan_share",code="reader_unproven"} == 1
+        for: 6h
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'The Scans share has no configured reader, so its refusal is unproven'
+          description: >-
+            `check-scan-share.py` has published `reader_unproven` for six hours: no
+            `SCAN_SHARE_READ_USER`/`SCAN_SHARE_READ_PASSWORD` is set in
+            `/etc/innotel/estate-checks.env`, so the half of the rule that keeps the
+            household from overwriting scans is not being exercised — the writer and the
+            stanza still pass, which is why the check reads green while this is true. Set
+            both to an account in `[Scans]`'s `valid users` that is not in its `write list`
+            (`scan-reader`, added for exactly this), and the note disappears.
+
   # The media estate's apps, and the solver behind them (2026-11-17). These key on the
   # series `check-media-apps.py` publishes rather than on the shared family, because the
   # state they name is not "a check found something" — it is one specific file being zero
