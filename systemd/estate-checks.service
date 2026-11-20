@@ -104,6 +104,16 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # credential and must never carry one.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-mail-relay.py --base http://192.168.1.15:8080 --prom ${TEXTFILE_DIR}/estate-check-mail-relay.prom
 
+# And that no container is handed the submission password as an environment variable. The
+# checks above all pass on a stack that mails perfectly and leaks its credential: they
+# read SPF, the relay and the delivery, and none of them looks at the container's own env.
+# On 2026-11-20 two senders did exactly that, and an audit command printing
+# `docker inspect` put a live app password in a transcript; Signara was moved to a mounted
+# file and Authentik cannot be (2026.8.6 has no file-backed secret, so it is the one named
+# exemption and publishes as a note). Without this, the fix is a compose edit nothing
+# watches — the estate's most common shape of regression.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-smtp-credentials.py --prom ${TEXTFILE_DIR}/estate-check-smtp-credentials.prom
+
 # And that the mail server can still *sign a person in*, which is the half none of the
 # checks above asks. On 2026-11-06 the sign-in completed and every request after it 500d:
 # Stalwart's only directory speaks OIDC, it initialises that directory once, and a failed

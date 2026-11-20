@@ -142,3 +142,40 @@ done
 Treat a hit with `=<EMPTY>` in a relay's `SMARTHOST`, or an `EMAIL_HOST` of `localhost`,
 as the failure this document was written for. Values are deliberately printed in full
 only for non-secret keys — never paste a `*PASS*`/`*SECRET*` hit into a ticket or a doc.
+
+## The check that keeps them fixed
+
+A sweep is a moment, and the fix it proves is a compose edit nothing watched: the mail
+checks all pass on a stack that mails perfectly and hands its password to `docker
+inspect`. So `scripts/check-smtp-credentials.py` is now in the `estate-checks` unit and
+reads the one thing none of the others look at — the environment of every running
+container on all four hosts. Measured on its first run: **165 containers in 21 Docker
+instances**. A key naming a mail transport (`SMTP`, `MAIL`, `EMAIL`) and a credential
+(`PASS`, `PASSWORD`, `SECRET`) with a non-empty value is a failure; a name ending
+`_FILE`/`_PATH`/`_DIR` is the fix and is skipped; a host that cannot be read is exit 2,
+never a pass.
+
+**It found two senders the table above did not have.** Both are inside `vault` on `i1`,
+both carry a 40-character Stalwart app password as plain environment:
+
+| Container | Variable | State |
+|---|---|---|
+| `vaultwarden` | `SMTP_PASSWORD` | **fails** the check — not exempted |
+| `atheniq-console` | `MAIL_SMTP_PASS` | **fails** the check — not exempted |
+
+They are deliberately left failing rather than added to the exemption list: an exemption
+is for a case the product makes impossible (Authentik), and these two have options —
+mount the value and read a `*_FILE` name where the app supports one, or, where it does
+not, a per-service app password rotated on a schedule instead of the shared one. Until
+then the new textfile says so and `EstateCheckFailing` names the containment, which is a
+page with an owner rather than a quiet `docker inspect`.
+
+Authentik is the one named exemption, keyed by host, instance **and** variable
+(`i4`, `proxy`, `AUTHENTIK_EMAIL__PASSWORD`) so it cannot cover a different container
+that starts carrying the same name; it publishes as a note, so the deliberate case still
+reaches the dashboard instead of reading as a missing row.
+
+Re-verify by hand — it is the same read the check does, and it prints no values:
+
+    python3 scripts/check-smtp-credentials.py            # 0 = clean, 1 = a leak, 2 = unreadable host
+    cat /var/lib/node_exporter/textfile/estate-check-smtp-credentials.prom
