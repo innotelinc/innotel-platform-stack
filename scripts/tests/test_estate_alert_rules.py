@@ -135,6 +135,11 @@ CHECK_SCRIPTS = [
     # that goes red and green every few runs costs the same attention as an
     # outage and looks like neither.
     "check-estate-flaps",
+    # Who answers a name (2026-11-20): the catalog was served from a container over plain
+    # HTTP while the stack itself was healthy, so every check above reported the estate
+    # fine and the page still failed. A series that stopped arriving would leave the one
+    # question nobody else asks unwatched.
+    "check-edge-front-door",
     # retired_instances publishes into the family from the unit already, and had no line
     # here — which is the silent-absence this list exists to catch.
     "check-retired-instances",

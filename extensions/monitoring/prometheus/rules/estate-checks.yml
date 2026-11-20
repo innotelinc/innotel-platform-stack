@@ -182,6 +182,11 @@ groups:
           # period on the token `check-credential-age` reads is what runs out, and an
           # expiry looks exactly like a renewal that was never attempted.
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="vault_token_renewal"}), "check", "vault_token_renewal", "check", ".*")
+          # Who answers the name (2026-11-20). `next.atheniq.courses` answered from a
+          # container, the browser reached the catalog over plain HTTP, and the page said
+          # "An unexpected error occurred" while every other check was green. A textfile
+          # that stopped arriving here would be that same silence one layer up.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="edge_front_door"}), "check", "edge_front_door", "check", ".*")
         for: 30m
         labels:
           severity: critical
