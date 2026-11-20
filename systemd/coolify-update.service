@@ -1,0 +1,12 @@
+[Unit]
+Description=Upgrade the Coolify control plane to the newest published release
+Documentation=file:///var/lib/coolify-update/README
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/coolify-update
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1800

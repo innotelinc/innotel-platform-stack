@@ -1,0 +1,90 @@
+#!/bin/bash
+# Keep the Coolify control plane on the newest published release.
+#
+# The console behind deploy.innotel.us runs inside the `coolify` Incus instance,
+# which has no persistent disk (devices: {}), so anything installed inside it dies
+# with a rebuild. This job lives on the i2 host, next to the authfix provisioner,
+# and reaches the instance through incus.
+#
+# It only ever moves forward: the published tag is compared with the running one,
+# and a lower tag is left alone instead of being installed over a newer panel. It
+# dumps the control-plane database first, keeps five dumps, and rolls back to the
+# running tag if the panel does not answer after the upgrade.
+#
+#   coolify-update --dry-run    # say what would change
+#   coolify-update             # do it (timer: weekly)
+set -uo pipefail
+
+INSTANCE=${COOLIFY_INSTANCE:-coolify}
+HEALTH=${COOLIFY_HEALTH_URL:-http://192.168.1.85:8000/api/health}
+BACKUP_DIR=${COOLIFY_BACKUP_DIR:-/var/lib/coolify-update/backups}
+LOG=${COOLIFY_UPDATE_LOG:-/var/log/coolify-update.log}
+KEEP=5
+DRY=0
+[ "${1:-}" = "--dry-run" ] && DRY=1
+
+log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$LOG"; }
+
+latest() {
+  curl -fsS --max-time 20 \
+    'https://hub.docker.com/v2/repositories/coollabsio/coolify/tags?page_size=100&ordering=last_updated' \
+    | grep -oE '"name":"[0-9]+\.[0-9]+\.[0-9]+"' | cut -d'"' -f4 | sort -V | tail -1
+}
+
+running() {
+  incus exec "$INSTANCE" -- docker inspect coolify --format '{{.Config.Image}}' 2>/dev/null | sed 's/.*://'
+}
+
+healthy() {
+  for _ in $(seq 1 60); do
+    curl -fsS -o /dev/null --max-time 3 "$HEALTH" && return 0
+    sleep 3
+  done
+  return 1
+}
+
+cur=$(running)
+[ -n "$cur" ] || { log "cannot read the running tag"; exit 1; }
+new=$(latest)
+[ -n "$new" ] || { log "cannot resolve the latest release"; exit 1; }
+
+if [ "$cur" = "$new" ]; then
+  log "already at $new"
+  exit 0
+fi
+if [ "$(printf '%s\n%s\n' "$cur" "$new" | sort -V | tail -1)" != "$new" ]; then
+  log "published latest is $new, running $cur; not downgrading"
+  exit 0
+fi
+if [ "$DRY" = 1 ]; then
+  log "would upgrade $cur -> $new"
+  exit 0
+fi
+
+mkdir -p "$BACKUP_DIR"
+dump="$BACKUP_DIR/coolify-db-$new-$(date +%Y%m%dT%H%M%SZ).sql.gz"
+log "upgrading $cur -> $new (database dump: $dump)"
+if ! incus exec "$INSTANCE" -- docker exec coolify-db pg_dump -U coolify coolify 2>/dev/null | gzip > "$dump"; then
+  log "database dump failed; refusing to upgrade"
+  rm -f "$dump"
+  exit 1
+fi
+ls -1t "$BACKUP_DIR"/*.sql.gz 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+
+if ! incus exec "$INSTANCE" -- /data/coolify/source/upgrade.sh "$new" latest; then
+  log "upgrade.sh failed; the console was left as it was"
+  exit 1
+fi
+if healthy; then
+  log "now at $new, panel healthy"
+  exit 0
+fi
+
+log "panel unhealthy after $new; rolling back to $cur"
+incus exec "$INSTANCE" -- /data/coolify/source/upgrade.sh "$cur" latest || log "rollback command failed"
+if healthy; then
+  log "rolled back to $cur, panel healthy"
+else
+  log "still unhealthy after rollback -- needs a person"
+fi
+exit 1
