@@ -52,6 +52,14 @@ services:
   node-exporter:
     image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.9.1}
     container_name: metrics-node-exporter
+    # node-exporter's textfile collector is where the estate's checks publish;
+    # scraping /metrics is the same request Prometheus makes.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9100/metrics || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     # Published on the instance address for the host Prometheus on the same
     # metal: it scrapes this endpoint so the containers inside `proxy` stay
     # visible now that the second Prometheus there is retired (2026-11-16).
@@ -88,6 +96,13 @@ services:
   prometheus:
     image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.13.3}
     container_name: metrics-prometheus
+    # prometheus answers /-/healthy; the image carries busybox wget.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
     restart: unless-stopped
     mem_limit: ${PROMETHEUS_MEM_LIMIT:-1g}
     memswap_limit: ${PROMETHEUS_MEM_LIMIT:-1g}
@@ -129,6 +144,13 @@ services:
   grafana:
     image: ${GRAFANA_IMAGE:-grafana/grafana:13.2.2}
     container_name: metrics-grafana
+    # grafana answers /api/health; the image carries wget.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
     restart: unless-stopped
     mem_limit: ${GRAFANA_MEM_LIMIT:-512m}
     memswap_limit: ${GRAFANA_MEM_LIMIT:-512m}

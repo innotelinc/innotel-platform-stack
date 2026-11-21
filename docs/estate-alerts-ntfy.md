@@ -107,3 +107,7 @@ printf 'user = "%s:%s"\n' "$NTFY_USER" "$NTFY_PASSWORD" |
   LAN that has the credential, and to nothing outside it.
 - **It is a nudge, not a log.** ntfy expires cached messages after its default 12 h.
   The journal is the record; the topic is the tap on the shoulder.
+
+## The terminal host
+
+The Termix timers and the free-standing public probe on the terminal container are wired the same way; see docs/terminal-alerting.md (added 2026-11-21).

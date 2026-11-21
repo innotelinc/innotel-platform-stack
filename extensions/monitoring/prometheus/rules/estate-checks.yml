@@ -111,6 +111,8 @@ groups:
         expr: |
           label_replace(absent(innotel_estate_check_last_run_timestamp{check="container_address"}), "check", "container_address", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="container_limits"}), "check", "container_limits", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="probe_audit"}), "check", "probe_audit", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="sso_ping"}), "check", "sso_ping", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="estate_inventory"}), "check", "estate_inventory", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="address_latency"}), "check", "address_latency", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="host_disk"}), "check", "host_disk", "check", ".*")
@@ -363,3 +365,27 @@ groups:
             front of the media estate shows it: the app reads `running` and its page loads.
             Size the cap to measured use plus headroom (`mem_limit: 3g` since 2026-11-17) and
             keep `shm_size: 1g` — the 64 MB `/dev/shm` is what started this.
+
+  # A healthcheck whose command the image does not ship is invisible from the
+  # outside: docker reports the container unhealthy, or the probe simply never
+  # passes, and nothing distinguishes that from a service that is down. On
+  # 2026-11-21 Termix 26.11.3 dropped wget and both its compose healthcheck and
+  # its cold-start gate stopped working; visitors got 503 and no rule fired.
+  # `probe_audit` runs each container's own healthcheck inside the container and
+  # reports `missing:<cmd>` separately, which is the drift this catches.
+  - name: innotel-probe-audit
+    rules:
+      - alert: EstateProbeCannotRun
+        expr: innotel_estate_check_probe_audit_ok{probe_state=~"missing:.*|fail"} == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "healthcheck probe broken on {{ $labels.host }}: {{ $labels.container }} ({{ $labels.probe_state }})"
+          description: >-
+            The container's own healthcheck does not pass when run inside the
+            container ({{ $labels.probe_state }}). `missing:` means the image no
+            longer ships the command the probe calls - the release changed the
+            base image, and the probe has to be rewritten in terms of something
+            the image does have (see docs/terminal-alerting.md for the wget
+            case). Run `probe-audit.sh` on the host for the whole table.
