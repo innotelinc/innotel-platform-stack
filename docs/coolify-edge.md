@@ -13,7 +13,7 @@ So the split is:
 | **DNS** | Cerulean → Technitium | `*.innotel.site` is a wildcard record in zone `innotel.site`, A → `73.68.203.71`. A new app needs **no DNS work at all**. |
 | **TLS** | Cerulean (ACME DNS-01) → NPM | one wildcard certificate, NPM id **186** `wildcard-innotel-site` for `*.innotel.site`, attached to every proxy host in the zone. |
 | **Routing** | NPM Edge (`cerulean-npm`, `:80`/`:443` on `192.168.1.71`) | one proxy host per app name → the app's published host port. |
-| **Deploy** | Coolify (`coolify` instance on `i2`, `192.168.1.85`) | builds and runs the container, publishes the port, and knows the app only as a name. |
+| **Deploy** | Coolify (`coolify` instance on `i3`, `192.168.1.85`) | builds and runs the container, publishes the port, and knows the app only as a name. |
 
 ## Deploy-host prerequisites
 
@@ -33,7 +33,13 @@ detected on deployment server (i2-local)`. If that line is absent, the build fel
 the legacy builder.
 
 Builds run on the **`i2-local` server record** (`root@192.168.1.52`), which Coolify reaches
-over SSH — so the plugin has to exist on `i2` itself, and it does. `docker buildx` inside
+over SSH — so the plugin has to exist on `i2` itself, and it does. **Moving the panel did
+not move the apps**: `coolify` was migrated to `i3` on 2026-11-20, but `servers` still holds
+only `localhost` and `i2-local`, and every app in `applications` deploys to `i2-local`. The
+proof is the listener, not the panel: on 2026-11-21 03:00 `opencompany`'s container
+(`rhw5wyfye0axrw6d35ryetol-20261121T022856`) was `Up (healthy)` on **i2**'s host dockerd at
+`0.0.0.0:3001`, while `i3`'s dockerd ran no app containers at all. A panel move is therefore
+half a move — the app stays where its destination points until the destination changes. `docker buildx` inside
 the `coolify` container is absent by design (`docker: unknown command: docker buildx`);
 that only matters for a *localhost* destination, which would build in the panel container
 instead. All five apps here are `dockerfile` apps on `i2-local`, so one host install covers
@@ -113,6 +119,27 @@ address actually holds the listener before writing the NPM upstream:
 ssh root@192.168.1.52 'docker ps --format "{{.Names}}|{{.Ports}}" | grep <uuid-prefix>'
 ssh root@192.168.1.52 'ss -ltn | grep :<hostport>'
 ```
+
+## Builds are the load risk, not the panel
+
+A plain redeploy builds from cache and is cheap — deployment 99 on 2026-11-21 took **16 s**.
+A **forced** rebuild is not: Coolify passes `--no-cache`, and on `i2` that is 24 minutes of
+all-core compiling. On 2026-11-20 it drove load to 84 and OOM-killed five tasks, which is
+why `sshd` could not send a banner and four estate checks failed at once. The record is
+explicit — `application_deployment_queues.logs` contains `--no-cache` in deployments 93,
+95 and 98, and in none of the cached ones (90, 91, 92, 94, 96, 99).
+
+So the guard belongs on the build, not on the app:
+
+```bash
+ssh root@192.168.1.52 'systemctl set-property docker.service CPUQuota=400%'
+```
+
+BuildKit runs inside `docker.service`, so this caps a build at four of the eight cores while
+the app containers, which live in `docker.slice` scopes of their own, keep their shares. A
+forced rebuild then makes i2 slow instead of unreachable. Do not "fix" this by turning off
+`disable_build_cache` in `application_settings` — it is already `f` (cache on); the
+uncached path is the `force_rebuild` flag, and that is a choice made per deployment.
 
 Env values are encrypted at rest: `environment_variables.value` in Coolify's database reads
 back as a Laravel blob (`eyJpdiI6…`), not the setting. Read them through
