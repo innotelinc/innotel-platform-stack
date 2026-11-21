@@ -32,18 +32,48 @@ A deploy that used it says so in its log — `Docker <ver> with BuildKit and Bui
 detected on deployment server (i2-local)`. If that line is absent, the build fell back to
 the legacy builder.
 
-Builds run on the **`i2-local` server record** (`root@192.168.1.52`), which Coolify reaches
-over SSH — so the plugin has to exist on `i2` itself, and it does. **Moving the panel did
-not move the apps**: `coolify` was migrated to `i3` on 2026-11-20, but `servers` still holds
-only `localhost` and `i2-local`, and every app in `applications` deploys to `i2-local`. The
-proof is the listener, not the panel: on 2026-11-21 03:00 `opencompany`'s container
-(`rhw5wyfye0axrw6d35ryetol-20261121T022856`) was `Up (healthy)` on **i2**'s host dockerd at
-`0.0.0.0:3001`, while `i3`'s dockerd ran no app containers at all. A panel move is therefore
-half a move — the app stays where its destination points until the destination changes. `docker buildx` inside
-the `coolify` container is absent by design (`docker: unknown command: docker buildx`);
-that only matters for a *localhost* destination, which would build in the panel container
-instead. All five apps here are `dockerfile` apps on `i2-local`, so one host install covers
-every one of them.
+Builds run on whichever **server record** the app's destination points at, reached over SSH,
+so the plugin has to exist on that host. Verified 2026-11-21 on all four: `i1` (`192.168.1.51`),
+`i2`, `i3` and `i4` each report `docker buildx v0.39.1` — nothing needed installing.
+`docker buildx` inside the `coolify` container is absent by design (`docker: unknown command:
+docker buildx`), so a *localhost* destination (the panel's own dockerd) cannot build at all;
+that destination is for the panel, not for apps.
+
+**Moving the panel did not move the apps** (2026-11-20): `coolify` was migrated to `i3`, but
+`servers` still held only `localhost` and `i2-local`, so every app kept building and running
+on i2's dockerd — on 2026-11-21 03:00 `opencompany`'s container
+(`rhw5wyfye0axrw6d35ryetol-20261121T022856`) was `Up (healthy)` at **i2's** `0.0.0.0:3001`
+while i3's dockerd ran no app containers at all. A panel move is half a move: the app stays
+where its destination points until the destination changes. `i3-local` is now server record 2
+(2026-11-21) and `opencompany` and `signara` point at it. What is proven is the path, not yet
+a container: deploys reach i3 over SSH, pass the network check, and build. `opencompany`'s own
+build (Playwright/Chromium image, 10+ min cold) had not completed — its attempts were cancelled
+by competing deploys — so its **live** instance is still the `i2` one.
+
+## Adding a deploy host without the UI
+
+A server record is not just a row in `servers`: Coolify resolves `$server->settings` on
+every deployment, and a host added by hand without that row fails with a bare
+**500 `Server Error`** and no log line (the encrypted payload that actually breaks shows up
+later as `DecryptException: The payload is invalid`). The working shape for `i3-local`
+(2026-11-21), all four checks needed:
+
+1. **`server_settings` row.** Copy i2's row rather than inventing one — it carries the
+   sentinel token, timeout and cleanup defaults. Without it, `POST /api/v1/deploy` 500s.
+2. **`private_keys.private_key` is encrypted at rest.** An OpenSSH PEM pasted into the row
+   decrypts to nothing; every real row starts `eyJpdiI6…`. Either create the key through the
+   panel, or reuse an existing key id and authorize *its* public half on the new host —
+   `i3` runs the same `coolify` key as `i2` (fingerprint `SHA256:2u0Y…`).
+3. **The docker network named in `standalone_dockers.network` must exist on the host.**
+   Ours is `coolify`; on a bare host the deploy dies with
+   `Error response from daemon: network coolify not found`. `docker network create
+   --attachable coolify` is the fix (i2's copy is `10.0.1.0/24`).
+4. **The deploy host must accept that key as the `servers.user` it is told.** Coolify logs
+   `root@<ip>: Permission denied (publickey)` when the two disagree — the fingerprint in
+   `/root/.ssh/authorized_keys` on the target is the thing to compare, not the key name.
+
+`servers.proxy` stays `{"type":"NONE","redirect_enabled":true}`, like `i2-local`: no
+Traefik is installed on a deploy host here, and the app publishes a host port instead.
 
 ## Panel API authentication
 
@@ -85,7 +115,7 @@ panel as well as to what it deploys.
 | `servicedesk` | `https://servicedesk.innotel.site` | `8081:8000` | NPM 376 → `192.168.1.52:8081` |
 | `ontrak-bolt` | `https://bolt.innotel.site` | `3500:5173` | own cert (185) |
 | `clearpath` | `https://clearpath.innotel.site` | `8911:3000` | cert 163 (+ preview wildcard 184) |
-| `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | NPM 390 → `192.168.1.52:3001`, cert 156 |
+| `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | NPM 390 → `192.168.1.53:3001`, cert 156. Destination moved to `i3-local` on 2026-11-21; **until a build completes there the name answers 502** — point 390 back at `.52:3001` if i3 is not ready. |
 | `artex` | `https://artex.innotel.site` | `8790:8787` | NPM 377 → `192.168.1.52:8790` |
 
 **`opencompany` is published again** (2026-11-20). It had been left `running:healthy` with
@@ -140,6 +170,10 @@ the app containers, which live in `docker.slice` scopes of their own, keep their
 forced rebuild then makes i2 slow instead of unreachable. Do not "fix" this by turning off
 `disable_build_cache` in `application_settings` — it is already `f` (cache on); the
 uncached path is the `force_rebuild` flag, and that is a choice made per deployment.
+
+A rebuild on `i3` is not cheaper than one on `i2` — `opencompany`'s Dockerfile pulls
+Playwright's Chromium and a desktop library set, so a cold build ran past six minutes of
+apt and download. The CPU cap above is the guard until i3 has one too.
 
 Env values are encrypted at rest: `environment_variables.value` in Coolify's database reads
 back as a Laravel blob (`eyJpdiI6…`), not the setting. Read them through
