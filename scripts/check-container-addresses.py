@@ -209,7 +209,10 @@ EXPECTED: dict[str, dict[str, str]] = {
         "nas": "192.168.1.89",
         "regcache": "192.168.1.79",
         "rizzaura": "192.168.1.62",
-        "sage": "192.168.1.94",
+        # `sage` (`.94`) left this block on 2026-11-21: `incus list` on `.53` reports it
+        # RUNNING there and the `i2` copy is gone, so filed here it reports
+        # `i2 sage: not present` while the running container sits in no row. The row is in
+        # the `i3` block; the address is unchanged because it is pinned in its netplan.
         # `subscribe` (`.58`) returned here from `i3` on 2026-11-18 — see `copilotkit` above.
         "subscribe": "192.168.1.58",
     },
@@ -239,6 +242,11 @@ EXPECTED: dict[str, dict[str, str]] = {
         "copilotkit": "192.168.1.114",
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
+        # `sage` (`.94`) moved here from `i2` on 2026-11-21. It listens on 443 inside the
+        # container, but `.94` did not answer from the edge at the time of the move, so
+        # `sage.innotel.tech` is a dead door until its NIC is routed from this host — a
+        # separate finding from this table's.
+        "sage": "192.168.1.94",
         # `onyx` is imported here and **STOPPED**: it mounts the USB block device
         # (`main-pool-usb`, `/dev/sdc`) and must not run detached from it. It used to be an
         # `i2` row; `i2` is up and running on 2026-11-16 (owner) (§19), so this copy is the only one
