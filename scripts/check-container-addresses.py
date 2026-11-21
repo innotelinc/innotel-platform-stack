@@ -192,12 +192,13 @@ EXPECTED: dict[str, dict[str, str]] = {
         # netplan — so only the host key moves, as it did for `atheniq` and `mail` before.
         "atlas": "192.168.1.90",
         "blueprint": "192.168.1.76",
-        # `coolify` (`.85`) is new on 2026-11-18: the deploy panel left the host's Docker
-        # (where it published `:8000` on this host's own address) for a container of its
-        # own, so that the panel that manages other people's containers is not also the
-        # thing that shares a Docker daemon with them. Its database and `/data` were moved
-        # across, and `deploy.innotel.us` was repointed the same evening.
-        "coolify": "192.168.1.85",
+        # `coolify` (`.85`) **left this block on 2026-11-20**: the panel was live-migrated
+        # to `i3` (1.99 GB over `incus move`, which is why the panel went dark for half an
+        # hour) and answers from there, so the row lives in the `i3` block below. Filed
+        # here it reports `i2 coolify: not present`, and two rows for one address publish
+        # the same `address_latency` series twice — the duplicate the `regcache`/
+        # `rizzaura` note above describes. The stopped copy left on this host is the
+        # rollback and belongs in no row, same as `onyx-retired`.
         "clearpath": "192.168.1.83",
         # `copilotkit` (`.114`) came back here from `i3` on 2026-11-18, with `subscribe`
         # (`.58`) below. The address never moved — it is pinned in the container's netplan —
