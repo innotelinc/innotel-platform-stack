@@ -67,3 +67,25 @@ groups:
             silent a provider that breaks stays in the free-tier pools — the state
             this job exists to end. Check `/etc/cron.d/omniroute-selfheal` and
             `journalctl -t omniroute-selfheal` on the proxy container.
+
+      # The other half of the same blind spot, and the one that made 2026-11-21 look like
+      # silence: a run that starts and fails (the dashboard's 429 lockout, an unreachable
+      # gateway) publishes `last_status 0` and a fresh timestamp. Stale cannot see that -
+      # it is written for the job that never runs - and before this rule nothing did. The
+      # cron interval is 10 minutes, so 30 is three failed runs.
+      - alert: OmnirouteSelfhealFailing
+        expr: innotel_omniroute_selfheal_last_status == 0
+        for: 30m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: 'The OmniRoute self-heal job ran and failed'
+          description: >-
+            Three consecutive runs finished without doing their work, against a cron
+            interval of 10 minutes. The usual cause is the dashboard refusing the job's
+            own login (a 429 lockout, which the job now waits out twice inside a run) or
+            the gateway being unreachable; either way no provider is being probed, so a
+            connection that broke stays in the pools. Run
+            `omniroute-selfheal --dry-run --verbose` on the proxy container and read
+            `journalctl -t omniroute-selfheal`.

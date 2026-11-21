@@ -107,3 +107,33 @@ tests:
                 silent a provider that breaks stays in the free-tier pools — the state
                 this job exists to end. Check `/etc/cron.d/omniroute-selfheal` and
                 `journalctl -t omniroute-selfheal` on the proxy container.
+
+  # A run that starts and fails: the status goes to 0 while the timestamp keeps moving.
+  # The stale rule must stay quiet (the job is not silent) and the failure rule must fire.
+  - name: a failed run fires the failure alert
+    interval: 1m
+    input_series:
+      - series: 'innotel_omniroute_selfheal_last_status'
+        values: '1x2 0x40'
+      - series: 'innotel_omniroute_selfheal_last_run_timestamp'
+        values: '0+60x45'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: OmnirouteSelfhealFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: 'The OmniRoute self-heal job ran and failed'
+              description: >-
+                Three consecutive runs finished without doing their work, against a cron
+                interval of 10 minutes. The usual cause is the dashboard refusing the job's
+                own login (a 429 lockout, which the job now waits out twice inside a run) or
+                the gateway being unreachable; either way no provider is being probed, so a
+                connection that broke stays in the pools. Run
+                `omniroute-selfheal --dry-run --verbose` on the proxy container and read
+                `journalctl -t omniroute-selfheal`.
+      - eval_time: 40m
+        alertname: OmnirouteSelfhealStale
+        exp_alerts: []
