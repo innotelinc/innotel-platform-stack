@@ -92,7 +92,23 @@ how `opencompany` moved (2026-11-21):
   `192.168.1.53:3001`.
 - The cost: **no rebuild on i3**. A new version has to be built where building works (`i2`),
   pushed to the registry under a new tag, and the tag in `applications` updated before the
-  redeploy.
+  redeploy. `scripts/publish-image-to-i3.sh <repo> [tag]` does the push in one command from
+  i3: it hangs the reverse tunnel, tags and pushes on `i2`, then refuses to print a tag the
+  registry does not list.
+
+**Why `chatterbox` has not followed.** i3's root LV is 98 GB and sits at ~80 %, while the
+`incus` zpool beside it (`/dev/ubuntu-vg/incus`, 363 GB) has 332 GB idle. A 23.4 GB image
+needs more than that LV has free, and the image cannot be split across the two. The fix is to
+put Docker's store on the pool — a data-root move with the 14 containers stopped — not to
+delete anything. Until then `chatterbox` runs where it fits.
+
+A duplicate door made this look like drift: rows **389** (`192.168.1.52:4123`) and **391**
+(`192.168.1.53:4123`) both claimed `chatterbox.innotel.site`, so two `.conf` files fought over
+the `server_name` (nginx warned `conflicting server name` on every reload) and the drift check
+reported the second one as an orphan. Row **391** and `391.conf` were removed
+(`/root/retired-391-chatterbox-*.conf`), and **389** had been soft-deleted (`is_deleted=1`)
+which is why the panel could not see the door its own file was serving — un-deleted, it is the
+single source of truth again.
 
 ## Adding a deploy host without the UI
 
@@ -160,6 +176,7 @@ panel as well as to what it deploys.
 | `ontrak-bolt` | `https://bolt.innotel.site` | `3500:5173` | own cert (185) |
 | `clearpath` | `https://clearpath.innotel.site` | `8911:3000` | cert 163 (+ preview wildcard 184) |
 | `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | NPM 390 → `192.168.1.53:3001`, cert 156. On `i3-local` since 2026-11-21 as a **prebuilt image** from the local registry, because i3 cannot finish a Dockerfile build (see below). |
+| `chatterbox` | `https://chatterbox.innotel.site` | `4123:5123` | NPM 389 → `192.168.1.52:4123`. Still on `i2-local`: its `travisvn/chatterbox-tts-api` image is 23.4 GB and i3's root LV has ~20 GB free, so the pull does not fit (see the capacity note below). |
 | `artex` | `https://artex.innotel.site` | `8790:8787` | NPM 377 → `192.168.1.52:8790` |
 
 **`opencompany` is published again** (2026-11-20). It had been left `running:healthy` with
