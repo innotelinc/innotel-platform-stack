@@ -96,11 +96,15 @@ how `opencompany` moved (2026-11-21):
   i3: it hangs the reverse tunnel, tags and pushes on `i2`, then refuses to print a tag the
   registry does not list.
 
-**Why `chatterbox` has not followed.** i3's root LV is 98 GB and sits at ~80 %, while the
-`incus` zpool beside it (`/dev/ubuntu-vg/incus`, 363 GB) has 332 GB idle. A 23.4 GB image
-needs more than that LV has free, and the image cannot be split across the two. The fix is to
-put Docker's store on the pool — a data-root move with the 14 containers stopped — not to
-delete anything. Until then `chatterbox` runs where it fits.
+**Why `chatterbox` has not followed.** First the space: i3's root LV is 98 GB and `chatterbox`'s
+image is 23.4 GB, while the `incus` zpool beside it (`/dev/ubuntu-vg/incus`, 363 GB) has 332 GB
+idle and cannot hold a Docker image. Space was made the honest way — the 8.7 GB ISO build tree
+`/root/winbuild` now lives on a dataset on that pool (`incus/rootstore` mounted at
+`/srv/rootstore`, `/root/winbuild` is a symlink to it), which took the LV from 84 % to 64 % —
+and the pull then succeeded. The blocker turned out to be the **runtime**, not the disk: on i3
+the container came up `unhealthy` and never listened on 4123, so it was removed and the app
+returned to `i2-local`. Anything else that needs a GPU should be checked the same way before
+it is moved, because a pull that fits is not the same as a service that answers.
 
 A duplicate door made this look like drift: rows **389** (`192.168.1.52:4123`) and **391**
 (`192.168.1.53:4123`) both claimed `chatterbox.innotel.site`, so two `.conf` files fought over
@@ -176,7 +180,7 @@ panel as well as to what it deploys.
 | `ontrak-bolt` | `https://bolt.innotel.site` | `3500:5173` | own cert (185) |
 | `clearpath` | `https://clearpath.innotel.site` | `8911:3000` | cert 163 (+ preview wildcard 184) |
 | `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | NPM 390 → `192.168.1.53:3001`, cert 156. On `i3-local` since 2026-11-21 as a **prebuilt image** from the local registry, because i3 cannot finish a Dockerfile build (see below). |
-| `chatterbox` | `https://chatterbox.innotel.site` | `4123:5123` | NPM 389 → `192.168.1.52:4123`. Still on `i2-local`: its `travisvn/chatterbox-tts-api` image is 23.4 GB and i3's root LV has ~20 GB free, so the pull does not fit (see the capacity note below). |
+| `chatterbox` | `https://chatterbox.innotel.site` | `4123:5123` | NPM 389 → `192.168.1.52:4123`. Still on `i2-local`: it was deployed to `i3-local` on 2026-11-21 and came up ``unhealthy`` there — the 23.4 GB image pulled and unpacked, the container started, and then it stalled at its Python imports without ever binding the port (that image warns `NVIDIA Driver was not detected`, and i3 has no GPU), while the same image answers `/health` 200 on i2. It was rolled back rather than left holding 23 GB on a host that cannot run it. |
 | `artex` | `https://artex.innotel.site` | `8790:8787` | NPM 377 → `192.168.1.52:8790` |
 
 **`opencompany` is published again** (2026-11-20). It had been left `running:healthy` with
