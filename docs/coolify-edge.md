@@ -50,6 +50,34 @@ a container: deploys reach i3 over SSH, pass the network check, and build. `open
 build (Playwright/Chromium image, 10+ min cold) had not completed — its attempts were cancelled
 by competing deploys — so its **live** instance is still the `i2` one.
 
+## i3 cannot finish a build: Docker 29's buildkit session dies at export
+
+Recorded 2026-11-21, because it looks exactly like a slow build. On `i3` a Dockerfile deploy
+reaches `#15 exporting layers` after every layer is `CACHED`, the queue row's `updated_at`
+freezes on that line, and it never advances — 20+ minutes, with `containerd` writing ~1 MB per
+20 s and no image appearing in `docker images`. The daemon log names the moment:
+
+```
+level=error msg="healthcheck failed fatally"
+error="session healthcheck failed fatally: Unavailable: connection error: desc = \"transport:
+Error while dialing: only one connection allowed\""
+```
+
+That is BuildKit's client session dying as the export starts, so the build cannot complete
+regardless of free disk (25 GB), free CPU (host emptied of containers), or a daemon restart.
+It is specific to builds **driven from inside the Coolify helper container** against the
+mounted `/var/run/docker.sock`: the same host exports a small image fine (`alpine` 12.1 MB,
+`node:22-bookworm-slim` 329 MB both complete), while `opencompany`'s 5.18 GB image — which
+builds and exports normally on `i2` — never leaves `exporting layers` on `i3`. `i3` runs
+Docker **29.10.0** with the **containerd image store** (`driver-type:
+io.containerd.snapshotter.v1`); `i2` runs Docker 29.1.3 with the classic graph driver, which is
+where the image was built.
+
+Until that is fixed on `i3`, an app whose destination is `i3-local` cannot be deployed, so
+`opencompany` stays on `i2-local` and NPM 390 must point at `192.168.1.52:3001`. Two ways
+forward: pin `i3`'s engine to the version that works on `i2`, or publish the image to a
+registry and let the app use a prebuilt image instead of a Dockerfile build.
+
 ## Adding a deploy host without the UI
 
 A server record is not just a row in `servers`: Coolify resolves `$server->settings` on
@@ -115,7 +143,7 @@ panel as well as to what it deploys.
 | `servicedesk` | `https://servicedesk.innotel.site` | `8081:8000` | NPM 376 → `192.168.1.52:8081` |
 | `ontrak-bolt` | `https://bolt.innotel.site` | `3500:5173` | own cert (185) |
 | `clearpath` | `https://clearpath.innotel.site` | `8911:3000` | cert 163 (+ preview wildcard 184) |
-| `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | NPM 390 → `192.168.1.53:3001`, cert 156. Destination moved to `i3-local` on 2026-11-21; **until a build completes there the name answers 502** — point 390 back at `.52:3001` if i3 is not ready. |
+| `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | NPM 390 → `192.168.1.52:3001`, cert 156. Destination was moved to `i3-local` on 2026-11-21, but that host cannot finish the build (see below), so the door points back at the live `i2` copy. |
 | `artex` | `https://artex.innotel.site` | `8790:8787` | NPM 377 → `192.168.1.52:8790` |
 
 **`opencompany` is published again** (2026-11-20). It had been left `running:healthy` with
