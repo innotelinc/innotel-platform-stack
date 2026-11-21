@@ -68,15 +68,31 @@ regardless of free disk (25 GB), free CPU (host emptied of containers), or a dae
 It is specific to builds **driven from inside the Coolify helper container** against the
 mounted `/var/run/docker.sock`: the same host exports a small image fine (`alpine` 12.1 MB,
 `node:22-bookworm-slim` 329 MB both complete), while `opencompany`'s 5.18 GB image — which
-builds and exports normally on `i2` — never leaves `exporting layers` on `i3`. `i3` runs
-Docker **29.10.0** with the **containerd image store** (`driver-type:
-io.containerd.snapshotter.v1`); `i2` runs Docker 29.1.3 with the classic graph driver, which is
-where the image was built.
+builds and exports normally on `i2` — never leaves `exporting layers` on `i3`.`i3` runs Docker **29.10.0** with the **containerd image store** (`driver-type:
+io.containerd.snapshotter.v1`). `i2` is **not** the difference: it runs the same 29.10.0 and the
+same containerd store, and builds this very image without trouble — so an engine downgrade is
+not the fix, and what differs is the build being driven from inside the helper container on i3.
 
-Until that is fixed on `i3`, an app whose destination is `i3-local` cannot be deployed, so
-`opencompany` stays on `i2-local` and NPM 390 must point at `192.168.1.52:3001`. Two ways
-forward: pin `i3`'s engine to the version that works on `i2`, or publish the image to a
-registry and let the app use a prebuilt image instead of a Dockerfile build.
+An app on `i3-local` therefore cannot be **built** there, but it can be **pulled**. That is
+how `opencompany` moved (2026-11-21):
+
+- A `registry:2` runs on `i3` (`-p 5000:5000`, data in `/var/lib/registry`, `--restart
+  unless-stopped`); `/v2/` answers on both `127.0.0.1:5000` and `192.168.1.53:5000`.
+- The image was pushed **from `i2` through a reverse tunnel** — the tunnel is opened *from*
+  `i3` (`ssh -R 5000:127.0.0.1:5000 root@192.168.1.52`), so both ends speak to `127.0.0.1:5000`,
+  which Docker already accepts as insecure. No `daemon.json` edit and no daemon restart on
+  either host; the `i3` and `i2` roots are not authorized to each other, so `i3` generated a
+  dedicated `id_i3_push` key for the hop.
+- Coolify 4.7.5 has **no `registries` table**, and an anonymous local registry needs no
+  credentials row, so the app is just three columns: `build_pack='dockerimage'`,
+  `docker_registry_image_name='127.0.0.1:5000/opencompany'`,
+  `docker_registry_image_tag=<image-id sha>`. The deploy then pulls instead of building —
+  deployment 114 took ~6.5 min and started
+  `rhw5wyfye0axrw6d35ryetol-20261121T063458` on `0.0.0.0:3001` — and NPM 390 points at
+  `192.168.1.53:3001`.
+- The cost: **no rebuild on i3**. A new version has to be built where building works (`i2`),
+  pushed to the registry under a new tag, and the tag in `applications` updated before the
+  redeploy.
 
 ## Adding a deploy host without the UI
 
@@ -143,7 +159,7 @@ panel as well as to what it deploys.
 | `servicedesk` | `https://servicedesk.innotel.site` | `8081:8000` | NPM 376 → `192.168.1.52:8081` |
 | `ontrak-bolt` | `https://bolt.innotel.site` | `3500:5173` | own cert (185) |
 | `clearpath` | `https://clearpath.innotel.site` | `8911:3000` | cert 163 (+ preview wildcard 184) |
-| `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | NPM 390 → `192.168.1.52:3001`, cert 156. Destination was moved to `i3-local` on 2026-11-21, but that host cannot finish the build (see below), so the door points back at the live `i2` copy. |
+| `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | NPM 390 → `192.168.1.53:3001`, cert 156. On `i3-local` since 2026-11-21 as a **prebuilt image** from the local registry, because i3 cannot finish a Dockerfile build (see below). |
 | `artex` | `https://artex.innotel.site` | `8790:8787` | NPM 377 → `192.168.1.52:8790` |
 
 **`opencompany` is published again** (2026-11-20). It had been left `running:healthy` with
