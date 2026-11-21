@@ -200,13 +200,10 @@ EXPECTED: dict[str, dict[str, str]] = {
         # `rizzaura` note above describes. The stopped copy left on this host is the
         # rollback and belongs in no row, same as `onyx-retired`.
         "clearpath": "192.168.1.83",
-        # `copilotkit` (`.114`) came back here from `i3` on 2026-11-18, with `subscribe`
-        # (`.58`) below. The address never moved — it is pinned in the container's netplan —
-        # so only the host key changes, as it did for `atheniq` and `mail` before. Filed
-        # under `i3` it reported `i3 copilotkit: not present` while the running container sat
-        # in no row at all, which is the false alarm in both directions that this table's
-        # notes describe for `onyx`.
-        "copilotkit": "192.168.1.114",
+        # `copilotkit` (`.114`) went back to `i3` on 2026-11-21, so the row lives there;
+        # filed here it reported `i2 copilotkit: not present` while the running container
+        # sat in no row at all. The address never moved — it is pinned in the container's
+        # netplan — so only the host key changes, as it did for `atheniq` and `mail`.
         "genie-preview": "192.168.1.24",
         "monarch": "192.168.1.56",
         "nas": "192.168.1.89",
@@ -229,11 +226,17 @@ EXPECTED: dict[str, dict[str, str]] = {
     # containers while `i2` is reinstalled. Every one of them keeps the address it had —
     # it is pinned in the container's own netplan — so only the host key moved, which is
     # the point of the pin. `docs/estate-rebalance-2026-11-15.md` §14 has the cutover.
-    # `copilotkit` and `subscribe` came back to `i2` on 2026-11-18, which is why they are
-    # rows under `i2` and not here: filed here they reported `i3 copilotkit: not present`
-    # while the running container sat in no row at all — the same false alarm in both
-    # directions this table's own notes describe for `onyx`.
+    # `subscribe` (`.58`) is a row under `i2`, where it came back on 2026-11-18.
+    # `copilotkit` came back with it and then moved to `i3` again on 2026-11-21, so it is
+    # a row here: filed under `i2` it reported `i2 copilotkit: not present` while the
+    # running container sat in no row at all — the same false alarm in both directions
+    # this table's own notes describe for `onyx`.
     "i3": {
+        # `copilotkit` (`.114`) returned here from `i2` on 2026-11-21; `incus list` on
+        # `.53` reports it RUNNING at that address. It is the third move of this row
+        # between the two hosts, and the address is unchanged each time because it is
+        # pinned in the container's own netplan — only the host key follows the container.
+        "copilotkit": "192.168.1.114",
         "distro": "192.168.1.61",
         "magnate": "192.168.1.57",
         # `onyx` is imported here and **STOPPED**: it mounts the USB block device
