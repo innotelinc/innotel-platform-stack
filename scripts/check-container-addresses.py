@@ -251,7 +251,21 @@ EXPECTED: dict[str, dict[str, str]] = {
         # the rollback, which is why the name appears on two hosts and only one is a row.
         # This dict must hold **no** `onyx` row: filed here it reported `i3 onyx: not
         # present` on every run while the running container was in no row at all.
-        "pi": "192.168.1.70",
+        # `coolify` (`.85`) is a row here (2026-11-20), and the check is what asked for it:
+        # it reported `i3 coolify: running and not in the table` while a stopped copy sat
+        # in `i2`'s list. The deploy panel was live-migrated off `i2` that evening — 1.99 GB
+        # over `incus move`, which is why the panel went dark for half an hour and every
+        # door behind it read as dead — and it answers `.85:8000` from this host now.
+        # **This row is the reason the address must follow the container**: filed under
+        # `i2` it would report `i2 coolify: not present` on every run while a healthy panel
+        # served the estate from here. The stopped copy left on `i2` is the rollback, the
+        # same shape as `onyx-retired` above, and belongs in no row.
+        # `pi` (`.70`) **left this table on 2026-11-20**: the owner removed the container,
+        # so the row asserted an address nothing owns and `check-address-latency.py`, which
+        # dials every row, reddened the same run that noticed the absence. Same shape as
+        # `auvik`, `capstone`, `monitor`, `www`, `telno` and `ontrak-tix-db`: re-add the row
+        # with the address the day something is placed there.
+        "coolify": "192.168.1.85",
         "signara": "192.168.1.44",
     },
     "i4": {
