@@ -437,6 +437,10 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # `auth/token/create`, which is not a credential a check should hold — that is a person's
 # job and the message says so.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-vault-token-renewal.py --min-days 7 --prom ${TEXTFILE_DIR}/estate-check-vault-token-renewal.prom
+# The role and the provider it signs in through are two files holding the same origin list,
+# and on 2026-11-20 they disagreed: Vault allowed http callbacks the provider never had, so
+# a login started on http ended at "Missing auth_url". Both directions are failures here.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-oidc-redirect-agreement.py --prom ${TEXTFILE_DIR}/estate-check-oidc-redirect-agreement.prom
 
 # And the shape of the history rather than the moment (2026-11-17). The alerts read the
 # current value, which is right for paging and blind to a check that goes red and green

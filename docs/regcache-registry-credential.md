@@ -52,7 +52,7 @@ Blocker 2 is gone. Vault carries a dedicated policy and a token scoped to exactl
 |---|---|
 | policy | `regcache-writer`: `create`/`update`/`read` on `secret/data/cerulean/regcache`, `read` on its metadata |
 | token | `/vault/token/regcache.token` inside `cerulean-vault` (mode 600); copy at `/root/vault.token` on **i1** (mode 600); TTL 768 h, renewable |
-| address from i1 | `http://192.168.1.71:8200` — Cerulean Vault runs in `cerulean-vault` inside the `proxy` container on i2 |
+| address from i1 | `https://secrets.cerulean.innotel.us` — Cerulean Vault runs in `cerulean-vault` inside the `proxy` container on i2, and its port is published on that host's loopback only (2026-11-20: it used to answer over plain http on the LAN, which is how an OIDC sign-in ended up asking for an http callback) |
 
 Created once with the instance root token kept in `/vault/init/init.json` (mode 600, inside
 the container; it was read there and never copied off the host). The grant was then proven
@@ -61,7 +61,7 @@ from **i1**, the host that must run the rotation, not from inside Vault:
 ```bash
 curl -s -H "X-Vault-Token: $T" -X POST \
   -d '{"paths":["secret/data/cerulean/regcache"]}' \
-  http://192.168.1.71:8200/v1/sys/capabilities-self
+  https://secrets.cerulean.innotel.us/v1/sys/capabilities-self
 # {"secret/data/cerulean/regcache":["create","read","update"], ...}
 ```
 

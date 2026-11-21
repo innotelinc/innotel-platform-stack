@@ -31,7 +31,7 @@
 #                          `regcache-writer` policy token); without it the Vault
 #                          step is skipped and said so out loud
 #   --vault-path PATH      default cerulean/regcache
-#   --vault-addr URL       default http://192.168.1.71:8200 (Cerulean Vault, i2)
+#   --vault-addr URL       default https://secrets.cerulean.innotel.us (Cerulean Vault)
 #   --username NAME        Hub account, default innotel
 #   --container NAME       Docker container, default registry
 #   --incus NAME           Incus container holding it, default regcache
@@ -52,7 +52,10 @@ set -uo pipefail
 PAT_FILE=""
 VAULT_TOKEN_FILE=""
 VAULT_PATH="cerulean/regcache"
-VAULT_ADDR_DEFAULT="http://192.168.1.71:8200"
+# The vault's port is published on loopback only since 2026-11-20; it used to answer the UI
+# over plain http on the LAN, which is what let an OIDC login ask for an http callback. Every
+# client outside that host reaches it by name, over https, through the edge proxy.
+VAULT_ADDR_DEFAULT="https://secrets.cerulean.innotel.us"
 VAULT_ADDR_ARG=""
 USERNAME="innotel"
 CONTAINER="registry"
