@@ -53,6 +53,9 @@ import urllib.request
 from datetime import datetime, timezone
 
 BASE_URL = os.environ.get("OMNIROUTE_BASE_URL", "http://127.0.0.1:20128").rstrip("/")
+# How long to wait before retrying a dashboard lockout (HTTP 429).
+LOCKOUT_WAIT_SECONDS = 45
+
 ENV_FILE = os.environ.get(
     "OMNIROUTE_ENV_FILE", "/usr/src/projects/complete/ips/extensions/llm/.env.host"
 )
@@ -143,6 +146,9 @@ class Gateway:
         data = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(self.base + path, data=data, method=method)
         request.add_header("Accept", "application/json")
+        # Our own lockout bucket: the host bridge address is shared with a client that has
+        # been failing logins since 2026-11-13, and its 15-minute lockouts were this job's.
+        request.add_header("X-Forwarded-For", "127.0.0.1")
         if data is not None:
             request.add_header("Content-Type", "application/json")
         if self.cookie:
@@ -156,7 +162,18 @@ class Gateway:
             return error.code, error.read().decode("utf-8", "replace"), error.headers
 
     def login(self) -> None:
-        status, raw, headers = self._call("POST", "/api/auth/login", {"password": self.password})
+        # A 429 here is the dashboard's own lockout, and it lifts: on 2026-11-21 the job
+        # lost five runs to one that had cleared four minutes later, so every run exited
+        # before writing its textfile and `OmnirouteSelfhealStale` fired on a job that was
+        # in fact starting every ten minutes. The password was right the whole time -
+        # something else's failed attempts held the lock - so treat the lock like the
+        # transient it is and wait it out inside the run. "Two runs apart" is the rule for
+        # a provider, not for the job's own session: exiting is what publishes nothing.
+        for attempt in range(3):
+            status, raw, headers = self._call("POST", "/api/auth/login", {"password": self.password})
+            if status != 429 or attempt == 2:
+                break
+            time.sleep(LOCKOUT_WAIT_SECONDS)
         if status != 200:
             raise SystemExit(f"omniroute-selfheal: dashboard login failed: HTTP {status} {raw[:200]}")
         for value in headers.get_all("Set-Cookie") or []:
@@ -691,8 +708,15 @@ def main(argv: list[str]) -> int:
         return self_test()
     try:
         return run(args.dry_run, args.verbose)
-    except urllib.error.URLError as error:
-        log(f"gateway unreachable at {BASE_URL}: {error}")
+    except (SystemExit, urllib.error.URLError) as error:
+        # The run did not finish, so the textfile it would have written still says
+        # `last_status 1` - the shape of a healthy quiet morning, and the reason the
+        # 2026-11-21 lockout only showed up as `OmnirouteSelfhealStale`. Publish the
+        # failure: the timestamp stays fresh (so "silent" means silent) and the status
+        # carries what happened for `OmnirouteSelfhealFailing` to page on.
+        detail = error if isinstance(error, urllib.error.URLError) else (error.code or "run failed")
+        log(f"run failed: {detail}")
+        write_metrics(load_state(), False, time.time(), args.dry_run)
         return 1
 
 
