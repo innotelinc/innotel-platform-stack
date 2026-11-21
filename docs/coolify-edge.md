@@ -79,16 +79,25 @@ panel as well as to what it deploys.
 | `servicedesk` | `https://servicedesk.innotel.site` | `8081:8000` | NPM 376 → `192.168.1.52:8081` |
 | `ontrak-bolt` | `https://bolt.innotel.site` | `3500:5173` | own cert (185) |
 | `clearpath` | `https://clearpath.innotel.site` | `8911:3000` | cert 163 (+ preview wildcard 184) |
-| `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | cert 156 |
+| `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | NPM 390 → `192.168.1.52:3001`, cert 156 |
 | `artex` | `https://artex.innotel.site` | `8790:8787` | NPM 377 → `192.168.1.52:8790` |
 
-**`opencompany` runs without a door** (2026-11-20). Coolify reports the app
-`running:healthy`, but both of the names it was registered under are NPM rows with
-`enabled=0` — `opencompany.innotel.site` (row 332, http-only) and `openco.innotel.tech` — so
-`check-sso-redirects` called its four sign-in registrations dead and they are removed
-(`https://<name>/api/auth/sso/callback` for auth, `/signin` for logout). Re-publishing it
-means giving the app an `https` `fqdn`, enabling one door, and adding both URIs back; the
-check reports the mismatch until all three are done, which is why removing them is safe.
+**`opencompany` is published again** (2026-11-20). It had been left `running:healthy` with
+no door; row **390** now serves `https://opencompany.innotel.site` → `192.168.1.52:3001`
+with cert **156**, and `/api/health` answers **200 in ~0.2 s** through the edge. The
+`enabled=0` http-only row 332 was deleted, but NPM had left `332.conf` behind — a second
+`server_name opencompany.innotel.site` that would shadow the live vhost on the next
+reload — so the file was removed (copy at `/root/retired-332-opencompany.conf-20261120`).
+Both sign-in URIs are back on provider 62: `…/api/auth/sso/callback` (authorization,
+`PASS`) and `/signin` (logout, a `NOTE` beside it). `openco.innotel.tech` stays retired —
+it has no A record at all, so there is nothing for a door to answer.
+
+The app's Coolify record still says `fqdn=http://opencompany.innotel.site`: the API rejects
+`fqdn` on PATCH ("Use the domains field") and accepts `domains` with a 200 that does not
+rewrite it. So if the app builds its `redirect_uri` from that record, a sign-in can still
+bounce to `http`. The route map says the registration matches reality — `/signin` 200,
+`/api/auth/sso/callback` 307 without a code, `/api/auth/sso` 404 — but a completed browser
+sign-in has not been observed, the same limitation the other apps here carry.
 Every row has a `*.innotel.site` name. **No application may be left on a generated
 `sslip.io` name**: that name is Coolify's fallback when `fqdn` is empty, it resolves to
 whatever address the deploy host had at the time, it is not covered by the zone
