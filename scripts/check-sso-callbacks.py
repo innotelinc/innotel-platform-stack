@@ -69,6 +69,11 @@ MIN_BUFFER = 16 * 1024
 #: itself rejecting the bogus code, which is the right answer to this probe.
 GATEWAY_ERRORS = (502, 503, 504)
 
+#: The estate parks a retired name by pointing its server block at a closed port. The
+#: callback then cannot answer *by design*, which is a note, not the 2026-10-25 failure.
+PARKED_HOST = "127.0.0.1"
+PARKED_PORT = "9"
+
 #: Every public name that puts a sign-in gate in front of it. `gate` decides
 #: whether rule 2 applies: an oauth2-proxy session cookie is the large one.
 GATES: list[dict] = [
@@ -129,6 +134,17 @@ def buffer_of(block: str, directive: str) -> int | None:
     return _size(found.group(1)) if found else None
 
 
+def is_parked(block: str | None) -> bool:
+    """True when this server block forwards to the closed port the estate parks on."""
+    if not block:
+        return False
+    host = re.search(r'set\s+\$server\s+"?([^";\s]+)"?;', block, re.MULTILINE)
+    port = re.search(r'set\s+\$port\s+"?([0-9]+)"?;', block, re.MULTILINE)
+    return bool(
+        host and port and host.group(1).strip() == PARKED_HOST and port.group(1) == PARKED_PORT
+    )
+
+
 def audit(blocks: dict[str, str], probes: dict[str, int], gates: list[dict],
           minimum: int = MIN_BUFFER) -> Audit:
     """The two rules, over data the caller already has. Pure: the rules are the test."""
@@ -137,7 +153,13 @@ def audit(blocks: dict[str, str], probes: dict[str, int], gates: list[dict],
         host = gate["host"]
         callback = gate["callback"]
         status = probes.get(host)
-        if status is None:
+        block = blocks.get(host.lower())
+        if status is None and is_parked(block):
+            result.findings.append(Finding(
+                "callback_parked", "note",
+                f"{host} is parked at {PARKED_HOST}:{PARKED_PORT} — a retired name, so there "
+                "is no callback to answer and no person to sign in"))
+        elif status is None:
             result.findings.append(Finding(
                 "callback_unreachable", "fail",
                 f"{host} did not answer at all — the gate is down, not merely unhappy"))

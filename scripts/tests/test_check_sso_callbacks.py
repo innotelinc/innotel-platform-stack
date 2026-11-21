@@ -189,6 +189,29 @@ class AuditCase(unittest.TestCase):
         self.assertIn("onyx.innotel.us", result.failures[0].message)
 
 
+    def test_a_parked_retired_name_is_a_note_not_a_failure(self):
+        # tix.ontrak.technology was retired with OnTrak and parked at 127.0.0.1:9, so its
+        # callback cannot answer by design; calling that "the gate is down" is the same
+        # false alarm the retired NPM doors caused.
+        parked = (
+            "server {\n"
+            "  set $server \"127.0.0.1\";\n"
+            "  set $port 9;\n"
+            "  server_name tix.ontrak.technology;\n"
+            "}\n"
+        )
+        result = sso.audit({"tix.ontrak.technology": parked}, {},
+                           [_gate(host="tix.ontrak.technology",
+                                  callback="/api/sso/callback", gate="app")])
+        self.assertTrue(result.ok)
+        self.assertEqual([f.code for f in result.notes], ["callback_parked"])
+
+    def test_a_live_block_that_answers_nothing_still_fails(self):
+        result = sso.audit({"onyx.innotel.us": BIG}, {}, [_gate()])
+        self.assertFalse(result.ok)
+        self.assertEqual([f.code for f in result.failures], ["callback_unreachable"])
+
+
 class CannotRunCase(unittest.TestCase):
     def test_no_proxy_configuration_is_exit_two_and_a_published_failure(self):
         # Rule 3 again, at the entry point: silence is what 2026-10-25 looked like.
