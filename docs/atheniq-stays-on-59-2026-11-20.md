@@ -93,6 +93,19 @@ The `atheniq-next` client in Authentik (`AthenIQ Next (test)`, `client_id`
 which is stopped; the stopped lab's `config.yml` now holds the new value, so a later
 start is not broken by a dead secret, and nothing else in the estate used it.
 
+**Its redirect URIs went with the doors.** `check-sso-redirects` failed four
+registrations for names nothing served — `next.atheniq.courses` twice and
+`studio.next.atheniq.courses` twice — because the provider keeps its own list and the lab's
+NPM rows were parked (`next`, row 378) or pointing at an address with no route (`studio`,
+row 379 → `192.168.1.120`). All four are removed: the provider now holds none, which is
+the truthful state for a lab that is stopped. Starting it again needs three steps, in this
+order, because each one is the other's witness — start `.120`, enable row 379, then add
+`http(s)://studio.next.atheniq.courses/auth/complete/oidc/` back to the provider; until the
+last step `check-sso-redirects` reports the app asking for an unregistered URI, and until
+the second the provider lists a name no door serves. The `open_id` flow's own
+`/auth/complete/oidc/` path is Open edX's, so a moved name is a registration edit, not a
+code change.
+
 ## If this is ever revisited
 
 It needs a reason that is not "a newer image exists" — the fork image is built in CI

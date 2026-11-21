@@ -82,6 +82,13 @@ panel as well as to what it deploys.
 | `opencompany` | `https://opencompany.innotel.site` | `3001:3000` | cert 156 |
 | `artex` | `https://artex.innotel.site` | `8790:8787` | NPM 377 → `192.168.1.52:8790` |
 
+**`opencompany` runs without a door** (2026-11-20). Coolify reports the app
+`running:healthy`, but both of the names it was registered under are NPM rows with
+`enabled=0` — `opencompany.innotel.site` (row 332, http-only) and `openco.innotel.tech` — so
+`check-sso-redirects` called its four sign-in registrations dead and they are removed
+(`https://<name>/api/auth/sso/callback` for auth, `/signin` for logout). Re-publishing it
+means giving the app an `https` `fqdn`, enabling one door, and adding both URIs back; the
+check reports the mismatch until all three are done, which is why removing them is safe.
 Every row has a `*.innotel.site` name. **No application may be left on a generated
 `sslip.io` name**: that name is Coolify's fallback when `fqdn` is empty, it resolves to
 whatever address the deploy host had at the time, it is not covered by the zone

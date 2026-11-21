@@ -66,11 +66,21 @@ The proxy was already refusing it: `http://secrets.cerulean.innotel.us/` answers
 https URL, so a browser typing the name never stays on http. The origin that was actually open
 was Vault's own publish — `- "8200:8200"` on `0.0.0.0` served the whole UI (HTTP **200**) over
 plain http to anyone on the LAN, which is exactly where `http://192.168.1.71:8200/ui/…` in the
-log came from. It is now `- "127.0.0.1:8200:8200"`: the host's own checks keep a loopback
-address, and every other client reaches the vault by name over https through the proxy.
-Measured after the change: `http://192.168.1.71:8200/` from i1 is **connection refused**,
-`https://secrets.cerulean.innotel.us/ui/` answers 302, `http://secrets.cerulean.innotel.us/ui/`
-still 301s to it.
+log came from. The bind is now two addresses and no LAN one: `- "127.0.0.1:8200:8200"` for the
+host's own checks and `- "172.17.0.1:8200:8200"` for the edge proxy \u2014 a container on this same
+docker host, which reaches the UI through the bridge gateway, the shape `omniroute` already
+publishes (`172.17.0.1:20128`). Measured: `http://192.168.1.71:8200/` from i1 is **connection
+refused**, `https://secrets.cerulean.innotel.us/ui/vault/auth?with=oidc` answers **200**,
+`http://secrets.cerulean.innotel.us/ui/` still 301s.
+
+Loopback alone was wrong, and the way it was wrong is why the shape above has two addresses.
+With `127.0.0.1` only, the public door answered **502** while `/ui/` still answered **302**
+\u2014 that 302 is nginx's own rewrite (`if ($request_uri ~ "^/(ui/?)?$") { return 302 \u2026 }`) and never
+touches Vault, so the one probe that could tell the difference was a *proxied* path. NPM's row
+129 still forwarded to `192.168.1.71:8200`, an address Vault no longer listened on. Its
+`forward_host` now names `172.17.0.1`; the generated `proxy_host/129.conf` is written from that
+row, but only on NPM's next regeneration, so after a row edit the file is aligned and nginx
+reloaded \u2014 and the door is proved with the proxied page, never with `/ui/`.
 
 That left the role needing two forms rather than four: the https callback, its http form (the
 proxy accepts both, so a sign-in started at http still completes), and the CLI's loopback

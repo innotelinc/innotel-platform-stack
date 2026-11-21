@@ -26,6 +26,17 @@ WorkingDirectory=/opt/innotel/estate-checks
 EnvironmentFile=-/etc/innotel/estate-checks.env
 Environment=TEXTFILE_DIR=/var/lib/node_exporter/textfile
 
+# THIS IS THE EDGE'S JOB, NOT EVERY HOST'S
+# ----------------------------------------
+# Only this host's node_exporter is scraped, and every check below reads the rest of the
+# estate over ssh rather than asserting anything local — so the job belongs where the
+# textfile is read, and nowhere else. i1, i2, i3 and i4 each carried a copy of an older
+# revision with the timer *disabled*: dead weight that asserted nothing, published nothing
+# and showed up only as four `unit-drift` findings (2026-11-20, removed). Those hosts keep
+# `swap-ceiling-check`, which is the unit that is theirs. `install-estate-checks.sh`
+# installs whatever this file names, so running it on a worker host is exactly how that
+# drift comes back — do not; the worker hosts have nothing to install from here.
+
 # The checks are independent and almost all of their time is a socket wait, so the
 # unit submits them here instead of running them in order; the last line drains the
 # queue. Each submit still names its check by absolute path on an `ExecStart=`, which
