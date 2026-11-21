@@ -85,6 +85,17 @@ class Addresses(unittest.TestCase):
         self.assertEqual("https://192.168.1.5:443/", seen["url"])
 
 
+    def test_a_loopback_callback_is_not_a_name_that_outlived_anything(self) -> None:
+        """`vault login -method=oidc` binds 127.0.0.1:8250 on the person's machine, so the
+        estate serves nothing for it — on 2026-11-20 the name rule read that as a dead
+        registration the moment the vault's provider gained the CLI callback."""
+        for host in ("localhost", "127.0.0.1", "::1", "[::1]", "LOCALHOST"):
+            self.assertTrue(self.module.is_loopback(host), host)
+        for host in ("secrets.cerulean.innotel.us", "10.0.0.5", "localhost.innotel.us",
+                     "192.168.1.113"):
+            self.assertFalse(self.module.is_loopback(host), host)
+
+
 class Registrations(unittest.TestCase):
     """A URI's type decides nothing on its own — the provider's other entries do."""
 

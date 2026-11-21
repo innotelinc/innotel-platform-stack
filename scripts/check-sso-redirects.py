@@ -44,6 +44,14 @@ before anything was retired. The panel that published on `.113` was retired on
 2026-11-20, so a registration still naming that address is now dead rather than a
 judgement call: the forward it relied on no longer exists.
 
+A third shape has no name at all. `http://localhost:8250/oidc/callback` is the vault CLI's
+own callback — `vault login -method=oidc` binds that port on the person's machine — so no
+NPM host can ever serve it and no probe here can reach it. Judged by the name rule (as it
+was until 2026-11-20, when the vault's provider gained the CLI callback) it reads exactly
+like a retired name, a finding nobody could act on. Loopback authorities are a note for
+that reason: the series accounts for the registration, and nothing is asked of a proxy
+that could not answer.
+
 Nor is a type a verdict on its own. A URI Authentik keeps for *logout* is the
 normal shape here: these apps send the browser to their own `/signin` after a
 sign-out and keep that URI beside the authorization one, which is why
@@ -232,6 +240,23 @@ def is_address(host: str) -> bool:
     try:
         ipaddress.ip_address(host.strip("[]"))
         return True
+    except ValueError:
+        return False
+
+
+def is_loopback(host: str) -> bool:
+    """Whether a registered URI's authority is the loopback interface.
+
+    A loopback callback belongs to a CLI that binds the port on the person's own machine,
+    so the estate serves nothing for it and nothing can be probed. On 2026-11-20 the name
+    rule read the vault CLI's callback as a registration that "outlived the name" — true
+    of the rule's model and useless to a reader, because there is no name to restore.
+    """
+    host = host.strip("[]").strip().lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
 
@@ -438,6 +463,12 @@ def main() -> int:
                 continue
             if not host:
                 record("FAIL", uri, "not a usable URI")
+                continue
+            if is_loopback(host):
+                # A CLI callback, bound on the person's own machine: no NPM host can serve
+                # it and no probe here can reach it, so the name rule has nothing to say.
+                record("NOTE", uri, f"{host} is a loopback callback for a CLI client — it is "
+                                    "bound on the person's machine, not served here")
                 continue
             if is_address(host):
                 # A registration keyed to an address has no name to outlive, so the rule
