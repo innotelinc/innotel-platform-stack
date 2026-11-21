@@ -103,6 +103,16 @@ tests:
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="edge_front_door"}'
         values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="sso_ping"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="probe_audit"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="vaultwarden_config_drift"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="smtp_credentials"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="oidc_redirect_agreement"}'
+        values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="scan_share"}'
         values: '0x60'
     alert_rule_test:
@@ -193,6 +203,16 @@ tests:
       - series: 'innotel_estate_check_last_run_timestamp{check="vault_token_renewal"}'
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="edge_front_door"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="sso_ping"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="probe_audit"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="vaultwarden_config_drift"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="smtp_credentials"}'
+        values: '0x60'
+      - series: 'innotel_estate_check_last_run_timestamp{check="oidc_redirect_agreement"}'
         values: '0x60'
       - series: 'innotel_estate_check_last_run_timestamp{check="scan_share"}'
         values: '0x60'
@@ -386,6 +406,27 @@ tests:
             exp_annotations:
               summary: 'The edge_front_door check has never reported'
               description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `edge_front_door` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: sso_ping}
+            exp_annotations:
+              summary: 'The sso_ping check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `sso_ping` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: probe_audit}
+            exp_annotations:
+              summary: 'The probe_audit check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `probe_audit` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: vaultwarden_config_drift}
+            exp_annotations:
+              summary: 'The vaultwarden_config_drift check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `vaultwarden_config_drift` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+          - exp_labels: {severity: critical, team: platform, check: smtp_credentials}
+            exp_annotations:
+              summary: 'The smtp_credentials check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `smtp_credentials` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
+
+          - exp_labels: {severity: critical, team: platform, check: oidc_redirect_agreement}
+            exp_annotations:
+              summary: 'The oidc_redirect_agreement check has never reported'
+              description: 'No `innotel_estate_check_last_run_timestamp` series exists for the `oidc_redirect_agreement` check — it has not run, or its textfile is not in the directory node-exporter reads. Every other rule here keys on a series that exists, so this is the one that catches the check itself being absent. Check the timer and `TEXTFILE_DIR` on the edge.'
 
   - name: a zero-byte config names the app, not the check
     interval: 1m

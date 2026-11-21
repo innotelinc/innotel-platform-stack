@@ -118,7 +118,13 @@ class Tunnel:
     error: str = ""
 
 
-def probe_door(name: str, timeout: float = 15.0) -> Door:
+# The socket timeout is deliberately well past `SLOW_MS` below. A door that takes 2 s is
+# a warning and one that never answers is a failure; at 15 s the loaded edge produced the
+# failure instead, because the checks run six at a time against the same 2 vCPU and
+# `deploy.innotel.us` answered in 15.06 s on the 14:32 run - and in 2.5 s on the next one,
+# from a terminal. The status is what this check is for, so give a slow door the room to be
+# measured: `Finding("slow", "warn", ...)` is the line that reports it.
+def probe_door(name: str, timeout: float = 30.0) -> Door:
     """Fetch `name` over HTTPS from this host, following redirects."""
     door = Door(name)
     started = time.monotonic()

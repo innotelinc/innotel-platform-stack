@@ -189,6 +189,9 @@ groups:
           # "An unexpected error occurred" while every other check was green. A textfile
           # that stopped arriving here would be that same silence one layer up.
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="edge_front_door"}), "check", "edge_front_door", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="oidc_redirect_agreement"}), "check", "oidc_redirect_agreement", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="smtp_credentials"}), "check", "smtp_credentials", "check", ".*")
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="vaultwarden_config_drift"}), "check", "vaultwarden_config_drift", "check", ".*")
         for: 30m
         labels:
           severity: critical

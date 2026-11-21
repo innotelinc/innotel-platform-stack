@@ -151,7 +151,23 @@ CHECK_SCRIPTS = [
     # Publishing here is what makes a renewal that stops holding a metric instead of
     # an expiry nobody sees until the check above goes red.
     "check-vault-token-renewal",
+    # Three that publish into the family from ExecStart lines the unit already carries,
+    # and had no line here: their textfiles could have stopped arriving and
+    # `EstateCheckAbsent` - the rule that exists for exactly that - would not have named
+    # them. Found by the test below on 2026-11-21, the same way `check-media-doors` was.
+    "check-oidc-redirect-agreement",
+    "check-smtp-credentials",
+    "check-vaultwarden-config-drift",
 ]
+
+#: Checks that publish `innotel_estate_check_*` without a `scripts/check-*.py` of their
+#: own, so there is no `CHECK` constant to import. `probe-audit.sh` reports the healthcheck
+#: a container could not run; `sso-ping-probe.sh` is the edge's external `/ping` probe for
+#: the distroless oauth2-proxy gates, which cannot carry an in-container healthcheck at
+#: all. Both write the same family but live in `/usr/local/sbin`, so they are named here
+#: rather than imported - and their absence is a page, since a probe that stops
+#: publishing is the silence the rule is for.
+EXTERNAL_CHECKS = {"probe_audit", "sso_ping"}
 
 
 def _load(name: str):
@@ -186,7 +202,7 @@ def _case(text: str, name: str) -> str:
 class RuleCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.checks = {_load(name).CHECK for name in CHECK_SCRIPTS}
+        cls.checks = {_load(name).CHECK for name in CHECK_SCRIPTS} | EXTERNAL_CHECKS
         cls.text = RULES.read_text(encoding="utf-8")
 
     def test_there_is_an_absent_rule(self):
