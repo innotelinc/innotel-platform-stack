@@ -33,7 +33,7 @@ sender domains and parseroutes. A sub-key is not a substitute: it cannot back th
    ```bash
    curl -s -X POST -H "X-Vault-Token: $TOKEN" \
      --data '{"data":{"api_key":"…","secret_key":"…","inbound_user":"parse","inbound_password":"…"}}' \
-     https://192.168.1.71:8200/v1/cerulean/data/mailjet
+     https://secrets.cerulean.innotel.us/v1/cerulean/data/mailjet
    ```
 
 3. On `mail`: `/usr/local/sbin/vault-mailjet-env`, then
