@@ -1,0 +1,16 @@
+[Unit]
+Description=Re-pin the Asterisk Console's AMI settings every ten minutes
+
+[Timer]
+# Ten minutes, and fast after boot: an image update is exactly a container coming back, and
+# the window this covers is the gap between that and the next estate check. Cheap enough
+# that one login and two reads do not matter.
+OnBootSec=3m
+OnCalendar=*:0/10
+# `Persistent` so a reboot at 03:59 does not skip the run that would have repaired a reset
+# from the deploy before it.
+Persistent=true
+RandomizedDelaySec=20s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Drill the PBX break-glass path once a month
+
+[Timer]
+# The first of the month, early morning: the drill deliberately breaks one gate for the
+# length of five requests, so it must not land on a working hour. `Persistent` runs it
+# after a reboot that skipped the date rather than waiting another month.
+OnCalendar=*-*-01 04:40:00
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target

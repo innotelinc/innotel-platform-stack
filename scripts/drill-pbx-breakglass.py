@@ -22,6 +22,12 @@ The flag is armed through `docker exec` on the PBX host, and if it was already a
 the drill started it is left armed and the run says so: the drill does not tidy away a
 state somebody chose.
 
+The four LAN rows are measured from `--lan-host` (default `192.168.1.54`), not from where
+the drill runs. `gui_auth.php` treats the edge's own address as the authenticated SSO
+path and refuses it with "Sign-in is managed by Cerulean Authentik" whatever the flag
+says — the gate working, not the door — so a probe from the edge would report the
+break-glass path as broken from the one address it deliberately never serves.
+
     ./scripts/drill-pbx-breakglass.py --name pbx.telno.services \
         --token-file /root/.npm-token --ssh-key /root/.ssh/id_ed25519
 
@@ -33,6 +39,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import re
 import sys
 import time
 import urllib.error
@@ -40,7 +47,9 @@ import urllib.request
 
 DEAD_PORT = 9
 FLAG = "/run/freepbx-sso-break-glass"
-OUTPOST = "proxy_pass http://192.168.1.127:9000/outpost.goauthentik.io;"
+OUTPOST_LOCATION = "/outpost.goauthentik.io"
+PROXY_PASS = re.compile(
+    r"proxy_pass\s+(?P<scheme>https?)://(?P<authority>[^/;\s]+)(?P<path>[^;]*);")
 NPM_FIELDS = (
     "domain_names forward_scheme forward_host forward_port access_list_id "
     "certificate_id ssl_forced caching_enabled block_exploits advanced_config meta "
@@ -56,6 +65,27 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def outpost_proxy_pass(config: str) -> tuple[str, str] | None:
+    """The outpost's `proxy_pass` line, and the same line pointed at a dead port.
+
+    The drill used to match one literal (`http://192.168.1.127:9000/…`), which stopped
+    being true when the PBX got an outpost container of its own: the same location now
+    proxies to `authentik-pbx-outpost:9000`. The *address* is the estate's moving part and
+    the location is not, so what is read is the line inside `location /outpost.goauthentik.io`
+    and what is changed is only its authority.
+    """
+    start = config.find("location " + OUTPOST_LOCATION)
+    if start < 0:
+        return None
+    match = PROXY_PASS.search(config, start)
+    if match is None:
+        return None
+    line = match.group(0)
+    broken = (f"proxy_pass {match.group('scheme')}://127.0.0.1:{DEAD_PORT}"
+              f"{match.group('path')};")
+    return line, broken
+
+
 def status(url: str, timeout: int = 10) -> int | None:
     opener = urllib.request.build_opener(NoRedirect)
     try:
@@ -65,6 +95,31 @@ def status(url: str, timeout: int = 10) -> int | None:
         return error.code
     except (urllib.error.URLError, OSError):
         return None
+
+
+def lan_probe(host: str | None, key: str | None):
+    """A status probe for the LAN door, made from a host that is a plain LAN client.
+
+    The edge cannot make this measurement: `gui_auth.php` treats the edge's own address
+    as the authenticated SSO path and answers it with "Sign-in is managed by Cerulean
+    Authentik" (403) whatever the flag says. That is the gate doing its job, and it made
+    the drill report the LAN door as broken from the one address it must refuse. So the
+    door is asked from `--lan-host`, and `local` keeps the old behaviour for a run that is
+    happening on the PBX itself.
+    """
+    if not host or host == "local":
+        return status
+
+    def probe(url: str) -> int | None:
+        try:
+            done = ssh(host, f"curl -s -o /dev/null -w '%{{http_code}}' --max-time 8 {url}",
+                       key)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        code = done.stdout.strip()
+        return int(code) if code.isdigit() else None
+
+    return probe
 
 
 def npm(url: str, token: str, method: str, path: str, body: dict | None = None):
@@ -118,12 +173,12 @@ def freepbx_container(pbx: str, key: str | None) -> str:
     return names[0]
 
 
-def wait_for(url: str, wanted: int, seconds: int = 60) -> int | None:
+def wait_for(url: str, wanted: int, seconds: int = 60, probe=status) -> int | None:
     """Poll until `url` answers `wanted`, returning the last status seen."""
     last = None
     deadline = time.time() + seconds
     while time.time() < deadline:
-        last = status(url)
+        last = probe(url)
         if last == wanted:
             return last
         time.sleep(2)
@@ -139,6 +194,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pbx", default="192.168.1.52")
     parser.add_argument("--ssh-key")
     parser.add_argument("--lan-port", type=int, default=8083)
+    parser.add_argument("--lan-host", default="192.168.1.54",
+                        help="a plain LAN client that asks the :LAN-PORT door (default "
+                             "%(default)s); `local` asks it without ssh, which only "
+                             "measures the loopback path")
+    parser.add_argument("--lan-ssh-key",
+                        help="key for --lan-host (defaults to --ssh-key)")
     args = parser.parse_args(argv)
 
     try:
@@ -155,13 +216,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"no NPM host serves {args.name}", file=sys.stderr)
             return 2
         original = host.get("advanced_config") or ""
-        if OUTPOST not in original:
-            print(f"{args.name}: no outpost location at {OUTPOST} — this host does not "
-                  "use the pattern the drill closes", file=sys.stderr)
+        found = outpost_proxy_pass(original)
+        if found is None:
+            print(f"{args.name}: no proxy_pass inside `location {OUTPOST_LOCATION}` — "
+                  "this host does not use the pattern the drill closes", file=sys.stderr)
             return 2
-        broken = original.replace(OUTPOST,
-                                 OUTPOST.replace("192.168.1.127:9000",
-                                                 f"127.0.0.1:{DEAD_PORT}"))
+        outpost_line, dead_line = found
+        broken = original.replace(outpost_line, dead_line, 1)
         if broken == original:
             print("the broken config is identical to the original; refusing", file=sys.stderr)
             return 2
@@ -175,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
 
     edge_url = f"https://{args.name}/admin/config.php"
     lan_url = f"http://{args.pbx}:{args.lan_port}/admin/config.php"
+    lan = lan_probe(args.lan_host, args.lan_ssh_key or args.ssh_key)
     results: list[tuple[str, int | None, int]] = []
     restore_ok = False
     try:
@@ -183,11 +245,11 @@ def main(argv: list[str] | None = None) -> int:
         npm(args.npm_url, token, "PUT", f"/api/nginx/proxy-hosts/{host['id']}", body)
 
         results.append(("edge, gate unreachable", wait_for(edge_url, 500, 30), 500))
-        results.append(("LAN :8083, flag absent", status(lan_url), 403))
+        results.append(("LAN :8083, flag absent", lan(lan_url), 403))
         set_flag(args.pbx, container, args.ssh_key, True)
-        results.append(("LAN :8083, flag armed", wait_for(lan_url, 200, 20), 200))
+        results.append(("LAN :8083, flag armed", wait_for(lan_url, 200, 20, lan), 200))
         set_flag(args.pbx, container, args.ssh_key, False)
-        results.append(("LAN :8083, flag disarmed", wait_for(lan_url, 403, 20), 403))
+        results.append(("LAN :8083, flag disarmed", wait_for(lan_url, 403, 20, lan), 403))
     finally:
         try:
             body = {key: host[key] for key in NPM_FIELDS}

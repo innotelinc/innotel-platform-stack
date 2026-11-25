@@ -1,0 +1,22 @@
+[Unit]
+Description=Put the Asterisk Console's AMI settings back after an image update resets them
+Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/pbx-sso-2026-11-25.md
+
+# The console's settings live in its own volume and its start-up migration overwrites them
+# with the image's seed values (`freepbx`, on another compose network), which reads on the
+# page exactly like a connection that is merely down. The shipped image reads no AMI
+# environment variable, so the console's own settings API is the only durable place to say
+# it -- and this job says it again whenever the container comes back from an update.
+#
+# It is a reconciler, not an alarm. The alarm is `check-pbx-console.py` in
+# `estate-checks.service`: it asserts the link is live and publishes a textfile, so a
+# reset shows up there at worst one check late. This only shortens that window.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/innotel/estate-checks
+# No EnvironmentFile: the console's admin password is read from its own container over
+# ssh, the same way the check reads it, and is never written down here.
+ExecStart=/usr/bin/python3 /opt/innotel/estate-checks/ensure-console-ami.py

@@ -1,0 +1,26 @@
+[Unit]
+Description=Monthly drill of the PBX GUI's break-glass path (fail-closed gate, LAN flag)
+Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/pbx-sso-2026-11-25.md
+
+# `scripts/drill-pbx-breakglass.py` was written to be run by hand after the change that
+# made Authentik the PBX's only sign-in, and a drill nobody repeats proves the day it was
+# written. It closes one name's outpost (through the NPM API), measures five requests and
+# restores in a `finally`; every other name keeps its own gate throughout.
+#
+# Exit codes it reports: 0 every measurement matched, 1 one did not, 2 the drill could not
+# run, 3 **the restore failed**. A 3 is the case that needs a person immediately -- the
+# name is still pointing at a dead port -- and the next `estate-checks` run will also fail
+# `check-pbx-sso` for the same reason, which is the estate's own alarm path.
+#
+# It runs on the edge: the NPM API token (`/root/.npm-token`) and the key to the PBX host
+# both live here, and the drill probes the public name as a client would.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/innotel/estate-checks
+ExecStart=/usr/bin/python3 /opt/innotel/estate-checks/drill-pbx-breakglass.py --name pbx.innotel.site --token-file /root/.npm-token --ssh-key /root/.ssh/id_ed25519
+# Long enough for the five measurements and the restore, short enough that a hung run does
+# not sit in `activating` until the next month's timer fires behind it.
+TimeoutStartSec=300
