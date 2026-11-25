@@ -381,8 +381,10 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # box at .17 dropped about half the connects it proxied while the VM itself looked
 # healthy. The guest was retired on 2026-11-14 and `fax-staging.lab.innotel.us` went with
 # it; `deploy.innotel.us` returned on 2026-11-15 pointing at the Coolify panel's own host
-# (`192.168.1.113:8000`, no tunnel), which is what the check now probes and what the
-# series reports. See check-deploy-door.py.
+# (the `coolify` container on i3, `192.168.1.85:8000`, no tunnel), which is what the check
+# now probes and what the series reports. Since 2026-11-25 the name is behind the
+# `auth.innotel.us` forward-auth gate, so the check accepts that login page as the gate
+# rather than reading it as a wrong page. See check-deploy-door.py.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-deploy-door.py --prom ${TEXTFILE_DIR}/estate-check-deploy-door.prom
 
 # And that the Telno node still holds the records its legacy database has (2026-11-02).

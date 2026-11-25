@@ -1152,6 +1152,11 @@ services:
       FREEPBX_RTP_PORT_END: ${FREEPBX_RTP_PORT_END:-10120}
       FREEPBX_AMI_USER: ${FREEPBX_AMI_USER:-pbxportal}
       FREEPBX_AMI_SECRET: ${FREEPBX_AMI_SECRET:-}
+      # Asterisk Console (innotelinc/asterisk-console) AMI credential: the
+      # console's ami_secret, rendered into manager_console.conf on every boot
+      # (pbx/entrypoint-dograh.sh → ensure_console_ami). Empty keeps whatever
+      # manager_console.conf the asterisk-config volume already holds.
+      CONSOLE_AMI_SECRET: ${CONSOLE_AMI_SECRET:-}
       FREEPBX_CLIENT_ID: ${FREEPBX_CLIENT_ID:-pbxportal-api}
       FREEPBX_CLIENT_SECRET: ${FREEPBX_CLIENT_SECRET:-}
       # AvantFAX (fax UI at /fax) — the entrypoint converges the DB user +

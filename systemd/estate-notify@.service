@@ -1,26 +1,27 @@
 [Unit]
 Description=Announce a failed unit on the estate's notification channel
-Documentation=file:///usr/local/sbin/estate-notify.sh
+Documentation=file:///usr/local/sbin/estate-notify-once.sh
 
 # Started by another unit's OnFailure=, with %i set to that unit's name, e.g.
 #
 #   [Unit]
 #   OnFailure=estate-notify@%n
 #
-# %n already carries the type suffix; the .service is added back below.
+# %n already carries the type suffix; the wrapper takes `%i` and the notification
+# script resolves it against `systemctl show`. Nothing here restarts or repairs the
+# failed unit: the whole job is to make the failure visible. The channel is ntfy in
+# `proxy` (192.168.1.71:2586, topic `estate-alerts`); the credential is in
+# /etc/innotel/ntfy.env on the host that runs the timer. A host without that file
+# fails this unit with "CANNOT RUN", which is deliberate: a notification that cannot
+# be sent must not look like one that was.
 #
-# Nothing here restarts or repairs the failed unit: the whole job is to make the
-# failure visible. The channel is ntfy in `proxy` (192.168.1.71:2586, topic
-# `estate-alerts`); the credential is in /etc/innotel/ntfy.env on the host that
-# runs the timer. A host without that file fails this unit with
-# "CANNOT RUN", which is deliberate: a notification that cannot be sent must not
-# look like one that was.
+# The wrapper is the throttle: a unit that fails every five minutes must not page
+# every five minutes, so the first failure in a 30-minute window is published and
+# repeats are suppressed to the journal. It is `scripts/estate-notify-once.sh` in
+# this repository, installed at the path above on each host.
 
 [Service]
 Type=oneshot
-# %i is the failed unit's name without its type suffix (`estate-notify@%n` from
-# `OnFailure=` puts `media-orphans` here for `media-orphans.service`), so the
-# suffix is added back. Writing `%n.service` in OnFailure instead produces
-# `estate-notify@media-orphans.service.service`, which systemd still starts but
-# with a unit name that does not exist -- the notification then says nothing.
-ExecStart=/usr/local/sbin/estate-notify.sh %i.service
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/local/sbin/estate-notify-once.sh %i
+TimeoutStartSec=90

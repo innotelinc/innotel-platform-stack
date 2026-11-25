@@ -18,9 +18,12 @@ proxy hosts forward to those instead of to `.93`:
     fax-staging.lab.innotel.us  dials 172.18.0.1:8091  ->  127.0.0.1:3997  (fax staging)
 
 Both were retired with `.93` on 2026-11-14. `deploy.innotel.us` came back on 2026-11-15
-without a tunnel: the Coolify panel (4.7.5) runs on `192.168.1.113` — host `dev`, a VM of
-its own rather than an Incus guest — which the edge reaches directly, so there is no
-listener to probe. `fax-staging.lab.innotel.us` stays retired.
+without a tunnel: the Coolify panel (4.7.5) now runs in the `coolify` container on `i3`
+(`192.168.1.85:8000`), which the edge reaches directly, so there is no listener to probe.
+Since 2026-11-25 the name is one of the 27 NPM rows behind Authentik forward-auth, so a
+browser gets provider 35's login page before the panel. That login **is** the gate, and
+this check treats it as an open door rather than as somebody else's page; a login page
+from any other host is still a failure. `fax-staging.lab.innotel.us` stays retired.
 
 Three things break this without a word, and none of them is visible from either end alone:
 the ssh session dies and autossh does not come back (the name answers 502), the VM's
@@ -56,6 +59,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from estate_check import Audit, Finding, METRIC, write_prom  # noqa: E402
@@ -79,6 +83,14 @@ TUNNELS: dict[str, int] = {}
 #: door, and 200 alone would call it one. The panel answers `/` with a 302 to `/login`,
 #: which is followed, so the marker is read from the login page (measured 2026-11-15).
 DOORS: dict[str, str | None] = {"deploy.innotel.us": "coolify"}
+
+#: Doors whose page is not the panel itself because the estate's own forward-auth gate
+#: stands in front of it: name -> the auth host the browser is sent to. `deploy.innotel.us`
+#: joined the 27 gated rows on 2026-11-25 (`docs/authentik-forward-auth-audit-2026-11-25.md`),
+#: so a 200 carrying provider 35's login page is the gate answering, not a stranger's default
+#: page. The host has to be the estate's auth host: a login page anywhere else is still a
+#: wrong-page failure, which is the trap this marker exists for.
+GATES: dict[str, str] = {"deploy.innotel.us": "auth.innotel.us"}
 
 #: Statuses a working door gives. A 502/503/504 is the failure this exists for; the
 #: rest are answers (a gate's 401/403 is still an open door).
@@ -104,6 +116,8 @@ class Door:
     status: int | None = None
     ms: float | None = None
     body_has_marker: bool | None = None
+    #: Where the redirect chain ended, so a gate can be told from a stray 200.
+    final_url: str = ""
     cert_days: float | None = None
     cert_sans: list[str] = field(default_factory=list)
     error: str = ""
@@ -133,11 +147,13 @@ def probe_door(name: str, timeout: float = 30.0) -> Door:
     try:
         with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
             door.status = response.status
+            door.final_url = response.geturl()
             body = response.read(65536).decode("utf-8", "replace")
             if DOORS.get(name):
                 door.body_has_marker = DOORS[name] in body.lower()
     except urllib.error.HTTPError as error:  # a 4xx/5xx is an answer, and its status matters
         door.status = error.code
+        door.final_url = error.geturl()
         try:
             body = error.read(65536).decode("utf-8", "replace")
             if DOORS.get(name):
@@ -232,13 +248,26 @@ def audit(doors: list[Door], tunnels: list[Tunnel], unprobeable: str = "") -> Au
                 Finding("bad_status", "fail", f"{door.name}: answered {door.status} (a working door gives one of {sorted(GOOD_STATUS)})")
             )
         elif door.body_has_marker is False:
-            out.findings.append(
-                Finding(
-                    "wrong_page",
-                    "fail",
-                    f"{door.name}: answered {door.status} but the page is not the panel (no {DOORS[door.name]!r})",
+            gate = GATES.get(door.name)
+            gated = bool(gate and door.final_url
+                         and urlsplit(door.final_url).hostname == gate)
+            if gated:
+                out.findings.append(
+                    Finding(
+                        "gated",
+                        "note",
+                        f"{door.name}: the {gate} forward-auth gate answers before the panel "
+                        f"(answered {door.status}, and the login page is {gate}'s)",
+                    )
                 )
-            )
+            else:
+                out.findings.append(
+                    Finding(
+                        "wrong_page",
+                        "fail",
+                        f"{door.name}: answered {door.status} but the page is not the panel (no {DOORS[door.name]!r})",
+                    )
+                )
         if door.ms is not None and door.ms > SLOW_MS:
             out.findings.append(
                 Finding("slow", "warn", f"{door.name}: answered in {door.ms:.0f} ms — up, but past the {SLOW_MS} ms line")
