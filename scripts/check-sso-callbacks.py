@@ -89,9 +89,10 @@ GATES: list[dict] = [
     # the large-cookie buffer rule does not apply to it; its callback still has to get
     # through the proxy.
     {"host": "npm.cerulean.innotel.us", "callback": "/outpost.goauthentik.io/callback", "gate": "app"},
-    # The app's own SSO: its session cookie is an id, not an ID token, so rule 2
-    # does not apply, but the callback still has to get through the proxy.
-    {"host": "tix.ontrak.technology", "callback": "/api/sso/callback", "gate": "app"},
+    # `tix.ontrak.technology` was retired with OnTrak and its NPM row is soft-deleted
+    # (`is_deleted=1`), so it generates no server block and no longer puts a gate in
+    # front of anything. Keeping a retired name here reports a deliberate retirement as
+    # "the gate is down"; it comes back to this table only with a live gate.
 ]
 
 

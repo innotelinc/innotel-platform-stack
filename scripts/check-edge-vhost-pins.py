@@ -120,7 +120,9 @@ except ImportError:  # a bare copy still has to run: --prom is then simply unava
 #: The `check` label this check publishes under (`estate-checks.yml` alerts on it).
 CHECK = "edge_vhost_pins"
 DEFAULT_API = "http://192.168.1.71:81"
-DEFAULT_CONFIG_DIR = Path("/data/nginx")
+#: NPM runs in `cerulean-npm` on the edge, whose `/data` is `/usr/src/proxy/data`;
+#: `/data/nginx` was the host path before the 2026-11-15 move and is now empty.
+DEFAULT_CONFIG_DIR = Path("/usr/src/proxy/data/nginx")
 DEFAULT_PINS = SCRIPT_DIR / "edge-vhost-targets.tsv"
 DEFAULT_REDIRECT_PINS = SCRIPT_DIR / "edge-redirect-targets.tsv"
 PROXY_HOSTS = "/api/nginx/proxy-hosts"

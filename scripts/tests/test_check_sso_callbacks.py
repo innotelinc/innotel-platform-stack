@@ -85,7 +85,6 @@ class GateTableCase(unittest.TestCase):
                 ("uc.genie.innotel.us", "/oauth2/callback", "oauth2-proxy"),
                 ("nas.innotel.us", "/oauth2/callback", "oauth2-proxy"),
                 ("npm.cerulean.innotel.us", "/outpost.goauthentik.io/callback", "app"),
-                ("tix.ontrak.technology", "/api/sso/callback", "app"),
             ],
         )
 
@@ -177,10 +176,10 @@ class AuditCase(unittest.TestCase):
         self.assertEqual(sorted(f.code for f in result.failures), ["small_buffer", "small_buffer"])
 
     def test_an_app_gates_callback_is_probed_but_its_buffer_is_not_judged(self):
-        # tix's session cookie is an id, not an ID token: rule 2 does not apply, so a host
-        # with no proxy block here is not a finding — only its callback's answer is.
-        result = sso.audit({}, {"tix.ontrak.technology": 302},
-                           [_gate(host="tix.ontrak.technology", callback="/api/sso/callback",
+        # An app gate's session cookie is an id, not an ID token: rule 2 does not apply,
+        # so a host with no proxy block here is not a finding — only its answer is.
+        result = sso.audit({}, {"app.example": 302},
+                           [_gate(host="app.example", callback="/api/sso/callback",
                                   gate="app")])
         self.assertTrue(result.ok)
 
@@ -190,18 +189,17 @@ class AuditCase(unittest.TestCase):
 
 
     def test_a_parked_retired_name_is_a_note_not_a_failure(self):
-        # tix.ontrak.technology was retired with OnTrak and parked at 127.0.0.1:9, so its
-        # callback cannot answer by design; calling that "the gate is down" is the same
-        # false alarm the retired NPM doors caused.
+        # A retired name parked at 127.0.0.1:9 cannot answer by design; calling that "the
+        # gate is down" is the same false alarm the retired NPM doors caused.
         parked = (
             "server {\n"
             "  set $server \"127.0.0.1\";\n"
             "  set $port 9;\n"
-            "  server_name tix.ontrak.technology;\n"
+            "  server_name parked.example;\n"
             "}\n"
         )
-        result = sso.audit({"tix.ontrak.technology": parked}, {},
-                           [_gate(host="tix.ontrak.technology",
+        result = sso.audit({"parked.example": parked}, {},
+                           [_gate(host="parked.example",
                                   callback="/api/sso/callback", gate="app")])
         self.assertTrue(result.ok)
         self.assertEqual([f.code for f in result.notes], ["callback_parked"])
