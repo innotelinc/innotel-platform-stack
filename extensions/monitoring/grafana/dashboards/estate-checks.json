@@ -1,5 +1,5 @@
 {
-  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), whether the alert receiver actually delivers mail, and whether the mail domains' SPF/DKIM/DMARC records resolve in the public zone plus, for the outbound half, whether the SMTP chain sends at all (check-mail-relay.py shows up in the per-check panels beside them). The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Traffic — what was delivered, bounced, queued, authenticated and blocked in the last day — is the other dashboard, `mail.json`, built from `check-mail-traffic.py`'s counts. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
+  "__comment": "The estate host checks, as a dashboard. One panel per question the checks answer: are they green, what did they find, how fresh is a clean run, how long does every dialled address take to answer (the i4 WiFi power-save number), whether the alert receiver actually delivers mail, and whether the mail domains' SPF/DKIM/DMARC records resolve in the public zone plus, for the outbound half, whether the SMTP chain sends at all (check-mail-relay.py shows up in the per-check panels beside them). The last panel is the one check whose failure has no door and no mail symptom: which music-on-hold class lost its audio, counted on both sides of the mount. The metrics are written by scripts/check-*.py and described in scripts/estate_check.py; the rules that page on them are extensions/monitoring/prometheus/rules/estate-checks.yml. Traffic — what was delivered, bounced, queued, authenticated and blocked in the last day — is the other dashboard, `mail.json`, built from `check-mail-traffic.py`'s counts. Provisioned read-only from this repo — see provisioning/dashboards/dashboards.yml.",
   "annotations": {
     "list": []
   },
@@ -1230,6 +1230,99 @@
           "expr": "innotel_estate_vault_disk_temperature_celsius",
           "legendFormat": "{{device}}",
           "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "table",
+      "title": "Music on hold: files per class",
+      "description": "innotel_estate_check_moh_files, one row per class and side. `asterisk` is what `moh show files` will play; `console` is what the Asterisk Console says it published into its own volume. They disagreeing is the failure `check-pbx-moh.py` exists for — a class the console published that Asterisk does not know, or a class whose directory the mount no longer backs, is silence on hold and closes no door anywhere else. A zero is red because the class exists and plays nothing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "innotel_estate_check_moh_files",
+          "instant": true,
+          "format": "table",
+          "legendFormat": "__auto",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "class": "class",
+              "source": "read from",
+              "Value": "files"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "class",
+                "desc": false
+              }
+            ]
+          }
         }
       ]
     }

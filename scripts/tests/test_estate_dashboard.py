@@ -149,6 +149,17 @@ class DashboardCase(unittest.TestCase):
         panel = next(p for p in self.doc["panels"] if p["title"] == "Stuck processes")
         self.assertEqual([t["expr"] for t in panel["targets"]], ["innotel_estate_stuck_processes"])
 
+    def test_it_shows_which_music_on_hold_class_lost_its_audio(self):
+        # `check-pbx-moh.py` publishes a count per class and side. The status panel says the
+        # check is red; this one says which class, which is the difference between a page
+        # and a five-minute investigation. If the metric is renamed the panel must move
+        # with it, or the page goes quiet exactly when hold music does.
+        self.assertIn("innotel_estate_check_moh_files", self.raw)
+        panel = next(p for p in self.doc["panels"]
+                     if p["title"] == "Music on hold: files per class")
+        self.assertEqual([t["expr"] for t in panel["targets"]],
+                         ["innotel_estate_check_moh_files"])
+
     def test_the_rationale_is_written_where_the_next_reader_looks(self):
         # Grafana ignores unknown top-level keys, which is what lets `__comment` carry the
         # "why" beside the JSON rather than in a separate doc nobody opens.

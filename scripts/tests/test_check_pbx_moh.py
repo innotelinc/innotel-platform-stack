@@ -35,6 +35,19 @@ COUNT /var/lib/asterisk/moh/default|1
 COUNT /var/lib/asterisk/moh/jazz|0
 """
 
+#: The image's own `/etc/asterisk/musiconhold.conf`, copied from the PBX. The console's
+#: include is the line this check adds, and its position after FreePBX's generated file
+#: is what lets the console's `[default]` win.
+MUSICONHOLD = """;
+; Music on hold class definitions
+; This is using the new 1.2 config file format, and will not work with 1.0
+; based Asterisk systems
+;
+#include musiconhold_custom.conf
+#include musiconhold_additional.conf
+#include musiconhold_console.conf
+"""
+
 
 def load():
     spec = importlib.util.spec_from_file_location("check_pbx_moh", CHECK)
@@ -107,6 +120,52 @@ class ParseCase(unittest.TestCase):
                          "/var/lib/asterisk/moh/")
         self.assertIsNone(self.moh.mount_at(found[:1], "/var/lib/asterisk/moh"))
 
+    def test_the_includes_are_read_in_the_order_asterisk_reads_them(self):
+        self.assertEqual(self.moh.parse_includes(MUSICONHOLD),
+                         ["musiconhold_custom.conf", "musiconhold_additional.conf",
+                          "musiconhold_console.conf"])
+
+    def test_an_include_may_be_absolute_and_still_means_the_same_file(self):
+        self.assertEqual(
+            self.moh.parse_includes('#include "/etc/asterisk/musiconhold_console.conf"\n'),
+            ["musiconhold_console.conf"])
+
+    def test_a_commented_mention_of_the_include_is_not_an_include(self):
+        # The file is full of `;` comments, and a note that names the file must not satisfy
+        # the assertion — that is exactly how a missing include would hide.
+        self.assertEqual(self.moh.parse_includes(";#include musiconhold_console.conf\n"), [])
+
+    def test_the_console_file_must_come_after_freepbx_generated_one(self):
+        self.assertEqual(self.moh.include_problem(self.moh.parse_includes(MUSICONHOLD)), "")
+        self.assertIn("does not include", self.moh.include_problem(
+            ["musiconhold_custom.conf", "musiconhold_additional.conf"]))
+        self.assertIn("before musiconhold_additional.conf", self.moh.include_problem(
+            ["musiconhold_console.conf", "musiconhold_additional.conf"]))
+
+    def test_a_missing_musiconhold_conf_is_its_own_finding(self):
+        # None is a missing file, not an empty one: without it Asterisk has no classes at
+        # all, which is worse than a class pointing at the wrong directory.
+        self.assertIn("does not exist", self.moh.include_problem(None))
+
+    def test_the_per_class_counts_carry_both_sides_the_panel_charts(self):
+        classes = self.moh.parse_classes(CLASSES)
+        series = self.moh.moh_series(classes, {"/var/lib/asterisk/moh/default": 1,
+                                                "/var/lib/asterisk/moh/jazz": 2},
+                                     {"default": 1, "jazz": 0})
+        self.assertIn('# TYPE innotel_estate_check_moh_files gauge', series)
+        self.assertIn('innotel_estate_check_moh_files{check="pbx_moh",class="default",'
+                      'source="asterisk"} 1', series)
+        self.assertIn('innotel_estate_check_moh_files{check="pbx_moh",class="jazz",'
+                      'source="asterisk"} 2', series)
+        self.assertIn('innotel_estate_check_moh_files{check="pbx_moh",class="jazz",'
+                      'source="console"} 0', series)
+
+    def test_a_published_class_with_no_asterisk_class_is_still_charted(self):
+        # The drift case: the console says it published `hold`, Asterisk has no class. The
+        # panel has to show the file that plays nowhere, not silently leave the row out.
+        series = self.moh.moh_series([], {}, {"hold": 3})
+        self.assertIn('class="hold",source="console"} 3', series)
+
     def test_the_check_publishes_under_its_own_name(self):
         self.assertEqual(self.moh.CHECK, "pbx_moh")
 
@@ -116,6 +175,11 @@ class ParseCase(unittest.TestCase):
         # losing the second one silently changes what a regenerated config means.
         self.assertEqual(self.moh.MOH_MOUNT, "/var/lib/asterisk/moh")
         self.assertEqual(self.moh.CONSOLE_PATH, "/data/media/moh")
+
+    def test_the_include_paths_are_the_ones_the_pbx_uses(self):
+        self.assertEqual(self.moh.INCLUDE_FILE, "/etc/asterisk/musiconhold.conf")
+        self.assertEqual(self.moh.CONSOLE_INCLUDE, "musiconhold_console.conf")
+        self.assertEqual(self.moh.FREEPBX_INCLUDE, "musiconhold_additional.conf")
 
 
 if __name__ == "__main__":

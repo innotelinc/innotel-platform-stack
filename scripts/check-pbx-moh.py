@@ -29,7 +29,19 @@ WHAT IT ASSERTS
      actually plays from, which is not the same fact as the directory existing;
   4. every class with audio in the console's own publish directory has an Asterisk
      class. A published class nothing plays is silence, and the console calls that
-     published.
+     published;
+  5. `/var/lib/asterisk/moh` is mounted **read-only**. The console owns the audio and
+     Asterisk only reads it, so a write through this mount edits the console's store —
+     and nothing else would say so;
+  6. `musiconhold.conf` includes `musiconhold_console.conf` **after**
+     `musiconhold_additional.conf`. Asterisk lets a later definition win, and FreePBX's
+     own `[default]` points at the mount itself; the include is one line in a file the
+     image ships stock, so an image update or a recreated config volume silently
+     reinstates silence while every mount still looks right.
+
+It also publishes the files it counted per class
+(`innotel_estate_check_moh_files{class="…",source="asterisk|console"}`), so the
+dashboard says *which* class went quiet rather than only that the check went red.
 
 Reads the two containers over ssh, the way `check-pbx-console.py` does. No credential is
 used or stored: everything here is `docker exec` and `docker inspect`.
@@ -72,6 +84,15 @@ MOH_MOUNT = "/var/lib/asterisk/moh"
 #: The second path the same directory is mounted at: the one the console's generated
 #: config names. A call does not need it, so its absence is a note rather than a failure.
 CONSOLE_PATH = "/data/media/moh"
+#: The file Asterisk's class definitions come from, and the two includes whose order is
+#: load-bearing: later definitions win, and FreePBX's generated `[default]` reads the
+#: mount itself rather than a class subdirectory of it.
+INCLUDE_FILE = "/etc/asterisk/musiconhold.conf"
+CONSOLE_INCLUDE = "musiconhold_console.conf"
+FREEPBX_INCLUDE = "musiconhold_additional.conf"
+#: What the include read prints when the file is absent, so "missing" is a finding
+#: rather than an unreadable container.
+MISSING_MARKER = "@@NO-MUSICONHOLD-CONF@@"
 
 
 class Drift(Exception):
@@ -236,6 +257,82 @@ def parse_dir(text: str) -> str:
     return ""
 
 
+def parse_includes(text: str) -> list[str]:
+    """The `#include`d filenames in `musiconhold.conf`, in the order Asterisk reads them.
+
+    Asterisk reads the file top to bottom and a later section replaces an earlier one of
+    the same name, so the order of these lines is the whole point: the console's file has
+    to come after FreePBX's generated one. Only the basename is kept — the include may be
+    relative to `/etc/asterisk` or absolute, and both mean the same file to Asterisk.
+    """
+    included: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("#include"):
+            continue
+        value = stripped[len("#include"):].strip().strip('"')
+        if value:
+            included.append(value.rsplit("/", 1)[-1])
+    return included
+
+
+def include_problem(included: list[str] | None) -> str:
+    """What is wrong with the include order, or '' when the console's file wins.
+
+    `included` is None when `musiconhold.conf` itself is absent, which is a different
+    finding from the include line being gone: without the file Asterisk has no class
+    definitions at all.
+    """
+    if included is None:
+        return (f"{INCLUDE_FILE} does not exist inside FreePBX, so no class file is "
+                "included and every class `moh show classes` should name is gone")
+    if CONSOLE_INCLUDE not in included:
+        return (f"{INCLUDE_FILE} does not include {CONSOLE_INCLUDE}, so the console's "
+                "classes are never defined — Asterisk falls back to FreePBX's own "
+                "[default], which reads the mount itself and plays silence over the "
+                "class subdirectories")
+    if FREEPBX_INCLUDE in included and included.index(CONSOLE_INCLUDE) < included.index(
+            FREEPBX_INCLUDE):
+        return (f"{CONSOLE_INCLUDE} is included before {FREEPBX_INCLUDE}, so FreePBX's "
+                "generated [default] replaces the console's — mode=files then reads "
+                "the mount itself, which is a directory of class subdirectories, and "
+                "the caller hears silence")
+    return ""
+
+
+def escape_label(value: str) -> str:
+    """Escape a label value the way the textfile format requires (\\, \", newline)."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def moh_series(classes: list[MohClass], in_asterisk: dict[str, int],
+               published: dict[str, int]) -> str:
+    """The per-class file counts, as its own metric family.
+
+    One series per class and side, so a panel can say *which* class lost its audio rather
+    than only that the check is red: `source="asterisk"` is what `moh show files` will
+    play, `source="console"` is what the console says it published. They disagreeing is
+    the failure this whole check exists for, and it is invisible in a single status.
+    """
+    counts: dict[str, dict[str, int]] = {}
+    for moh_class in classes:
+        counts.setdefault(moh_class.name, {})["asterisk"] = in_asterisk.get(
+            moh_class.directory.rstrip("/"), 0)
+    for name, number in published.items():
+        counts.setdefault(name, {})["console"] = number
+    lines = [
+        "# HELP innotel_estate_check_moh_files Readable, non-empty audio files per "
+        "music-on-hold class, as each side counts them",
+        "# TYPE innotel_estate_check_moh_files gauge",
+    ]
+    for name in sorted(counts):
+        for source in sorted(counts[name]):
+            lines.append(
+                f'innotel_estate_check_moh_files{{check="{CHECK}",'
+                f'class="{escape_label(name)}",source="{source}"}} {counts[name][source]}')
+    return "\n".join(lines)
+
+
 #: Counts the readable, non-empty files in each immediate subdirectory of `$d`.
 #: `-r` as well as `-s`: a file the asterisk user cannot open is as silent as a missing
 #: one, and the mount can be right while the mode on the console's copy is not.
@@ -252,6 +349,22 @@ for c in "$d"/*/; do
   printf 'COUNT %s|%s\\n' "${c%/}" "$n"
 done
 """
+
+
+def read_includes(pbx: str, container: str, ssh_key: str | None) -> list[str] | None:
+    """The includes `musiconhold.conf` carries, or None when the file is not there.
+
+    A missing file is a finding rather than an unreadable container, so the command still
+    exits 0 and prints a marker: `cat` failing would be reported as "could not read",
+    which is the wrong exit code and the wrong alert.
+    """
+    script = (f"if [ -r {INCLUDE_FILE} ]; then cat {INCLUDE_FILE}; "
+              f"else printf '%s\\n' {MISSING_MARKER}; fi")
+    text = run(ssh_command(
+        pbx, f"docker exec {shlex.quote(container)} sh -c {shlex.quote(script)}", ssh_key))
+    if MISSING_MARKER in text:
+        return None
+    return parse_includes(text)
 
 
 def count_directories(pbx: str, container: str, directory: str,
@@ -291,9 +404,9 @@ def main(argv: list[str] | None = None) -> int:
         if audit is not None:
             audit.findings.append(Finding(code=code, level="warn", message=message))
 
-    def publish(ran_ok: bool) -> None:
+    def publish(ran_ok: bool, extra: str | None = None) -> None:
         if args.prom and HAVE_TELEMETRY:
-            write_prom(args.prom, CHECK, audit, ran_ok)
+            write_prom(args.prom, CHECK, audit, ran_ok, extra=extra)
         elif args.prom:
             print("check-pbx-moh: --prom needs estate_check.py beside this file", file=sys.stderr)
 
@@ -313,6 +426,7 @@ def main(argv: list[str] | None = None) -> int:
         in_asterisk = parse_counts(count_directories(args.pbx, freepbx, MOH_MOUNT,
                                                      args.ssh_key))
         publish_text = count_directories(args.pbx, console, "", args.ssh_key)
+        included = read_includes(args.pbx, freepbx, args.ssh_key)
     except Unreadable as error:
         print(f"FAIL  {error}", file=sys.stderr)
         publish(False)
@@ -330,12 +444,26 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"PASS  {'mount':24} {mounted.get('Source', '?')} at {MOH_MOUNT}")
         if mounted.get("RW"):
-            note("mount_rw", f"{MOH_MOUNT} is mounted read-write; Asterisk only reads it, "
-                             "and the console writes its store, so ro is the intended shape")
+            message = (f"{MOH_MOUNT} is mounted read-write inside {freepbx}; Asterisk only "
+                       "reads it and the console owns the audio, so a write through this "
+                       "mount edits the console's store — ro is the intended shape")
+            failures.append(message)
+            fail("mount_rw", message)
+            print(f"FAIL  {'mount_ro':24} {MOH_MOUNT} is mounted read-write")
     if mount_at(moh_mounts, CONSOLE_PATH) is None:
         note("console_path", f"{freepbx} does not mount the media directory at "
                              f"{CONSOLE_PATH}; Asterisk reads {MOH_MOUNT} so calls are "
                              "unaffected, but the console-generated path is only a directory")
+
+    # 1b. The include that defines the classes, in the order that lets it win.
+    problem = include_problem(included)
+    if problem:
+        failures.append(problem)
+        fail("include_order", problem)
+        print(f"FAIL  {'includes':24} {problem}")
+    else:
+        print(f"PASS  {'includes':24} {CONSOLE_INCLUDE} after "
+              f"{FREEPBX_INCLUDE if FREEPBX_INCLUDE in included else 'nothing else'}")
 
     # 2. Every class Asterisk knows reads a directory under the mount, with audio in it.
     if not classes:
@@ -414,7 +542,7 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print("every published class plays from the console's audio" if not failures
           else f"{len(failures)} assertion(s) no longer hold")
-    publish(True)
+    publish(True, moh_series(classes, in_asterisk, published))
     return 0 if not failures else 1
 
 
