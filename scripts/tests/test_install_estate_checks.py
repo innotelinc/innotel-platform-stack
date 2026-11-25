@@ -103,6 +103,25 @@ class InstallerCase(unittest.TestCase):
         self.assertEqual(sorted(name for name in self.files if not (SCRIPTS / name).is_file()),
                          [])
 
+    def test_every_script_a_unit_schedules_from_the_install_directory_is_installed(self):
+        # The derivation above only sees `estate-checks.service`. Two of the estate's jobs
+        # are timers of their own — the console's AMI reconciler and the monthly
+        # break-glass drill — and their scripts sit in the same directory, so a unit
+        # installed without its script is `203/EXEC` on a schedule nobody is watching.
+        # This reads every unit in `systemd/`, not a list, for the same reason the
+        # checks' list is derived: the next job of this shape must arrive without an edit.
+        units = sorted((ROOT / "systemd").glob("*.service")) + sorted(
+            (ROOT / "systemd").glob("*.timer"))
+        wanted = {
+            name
+            for path in units
+            for name in re.findall(rf"{re.escape(INSTALL_DIR)}/([A-Za-z0-9._-]+\.py)",
+                                   path.read_text(encoding="utf-8"))
+        }
+        self.assertTrue(wanted, "no unit names a script in the install directory")
+        self.assertEqual(sorted(wanted - set(self.files)), [],
+                         "a unit schedules a script the installer does not copy")
+
     def test_it_resolves_its_own_checkout_from_any_cwd(self):
         # The derivation reads the unit from *this* repository, so where it is run from
         # must not matter: `sudo` runs it from `/` and a deploy step that only works from
@@ -206,6 +225,30 @@ class DriftGuard(unittest.TestCase):
         self.install()
         self.assertEqual((self.unit_dest / "estate-checks.timer").read_bytes(),
                          (ROOT / "systemd" / "estate-checks.timer").read_bytes())
+
+    def test_the_jobs_that_are_not_checks_travel_with_their_units(self):
+        # `estate-checks.service` is not the only thing on a schedule, and these four
+        # units plus their two scripts were installed by hand until the installer knew
+        # about them. A fresh install now carries them, and the same drift guard holds
+        # the installed copies to the revision.
+        self.install()
+        for name in ("console-ami-pin.service", "console-ami-pin.timer",
+                     "pbx-breakglass-drill.service", "pbx-breakglass-drill.timer"):
+            installed = self.unit_dest / name
+            self.assertTrue(installed.is_file(), f"{name} was not installed")
+            self.assertEqual(installed.read_bytes(), (ROOT / "systemd" / name).read_bytes(), name)
+        for name in ("ensure-console-ami.py", "drill-pbx-breakglass.py"):
+            self.assertTrue((self.dest / name).is_file(), f"{name} was not installed")
+
+    def test_a_companion_unit_that_changed_after_the_install_is_named(self):
+        self.install()
+        target = self.unit_dest / "console-ami-pin.timer"
+        target.write_text(target.read_text(encoding="utf-8") + "\n# hand edit\n",
+                          encoding="utf-8")
+        done = self.run_installer("--verify", "--ref", "HEAD")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("DRIFT", done.stderr)
+        self.assertIn("console-ami-pin.timer", done.stderr)
 
     def test_a_unit_that_changed_after_the_install_is_named(self):
         self.install()

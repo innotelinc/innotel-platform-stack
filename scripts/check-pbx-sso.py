@@ -38,7 +38,11 @@ WHAT IT ASSERTS
   4. `:8083` is still LAN-only — `raw PREROUTING` returns 192.168.1.0/24 and drops the
      rest, in that order — and the rule is still in the script that persists it;
   5. the break-glass flag is not left armed (a warning: an armed flag is a LAN-only
-     password door).
+     password door);
+  6. the drill that measures all of this still runs — `pbx-breakglass-drill.timer`
+     enabled and firing, its last run clean and less than five weeks old. A monthly
+     timer that stopped is invisible for a month, and the drill is the only thing that
+     proves the fail-closed gate and the LAN flag still behave as written.
 
 Run it on the edge (where the NPM API and the PBX are both reachable), or anywhere with
 the token and a key to the PBX:
@@ -57,15 +61,16 @@ import json
 import re
 import subprocess
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:  # the estate's shared telemetry contract, beside this file when it is installed
-    from estate_check import Audit, Finding, write_prom  # noqa: E402
+    from estate_check import Audit, Finding, unit_state, write_prom  # noqa: E402
     HAVE_TELEMETRY = True
 except ImportError:  # a bare copy still has to run: --prom is then simply unavailable
-    Audit = Finding = write_prom = None  # type: ignore[assignment]
+    Audit = Finding = write_prom = unit_state = None  # type: ignore[assignment]
     HAVE_TELEMETRY = False
 
 #: The `check` label this check publishes under (`estate-checks.yml` alerts on it).
@@ -92,6 +97,11 @@ BREAK_GLASS_GUARD = "empty($_SESSION['AMP_user']) && !is_file(" + repr(BREAK_GLA
 IDENTITY_HEADERS = ("username", "groups", "email", "name", "uid")
 ACL_SCRIPT = "/usr/local/sbin/capstone-wan-acl.sh"
 LAN = "192.168.1.0/24"
+#: The monthly drill, and how quiet it may be: a month plus a week, so a timer that
+#: stopped is named before the second month's date arrives.
+DRILL_TIMER = "pbx-breakglass-drill.timer"
+DRILL_SERVICE = "pbx-breakglass-drill.service"
+DRILL_MAX_AGE = 35 * 24 * 60 * 60
 
 
 class Drift(Exception):
@@ -262,6 +272,43 @@ def check_break_glass(pbx: str, container: str, ssh_key: str | None) -> list[str
                                            "local password form is open to the LAN"]
 
 
+def check_drill() -> list[str]:
+    """The monthly drill is scheduled, and its last run was clean and recent.
+
+    The drill deliberately breaks one gate for five requests, so it is not part of the
+    half-hourly run; that is exactly why its own schedule has to be read somewhere. A
+    timer that stopped leaves no symptom at all — the estate looks the way it did on the
+    day the drill last passed.
+    """
+    if unit_state is None:
+        return []  # a bare copy: the drill cannot be read without estate_check.py
+    try:
+        timer = unit_state(DRILL_TIMER)
+        last = unit_state(DRILL_SERVICE)
+    except RuntimeError as error:
+        raise Unreadable(str(error)) from error
+    failures: list[str] = []
+    if timer.load != "loaded" or timer.enabled != "enabled":
+        failures.append(f"{DRILL_TIMER} is not enabled (LoadState={timer.load or 'unreadable'}, "
+                        f"UnitFileState={timer.enabled or 'none'}) — the break-glass path is "
+                        "then drilled only when somebody remembers")
+    elif timer.active != "active":
+        failures.append(f"{DRILL_TIMER} is enabled but not active "
+                        f"(ActiveState={timer.active}) — the date exists and nothing fires it")
+    if last.exited_at is None:
+        failures.append(f"{DRILL_SERVICE} has never run — the drill is installed and has not "
+                        "measured the gate once")
+    elif not last.last_run_ok:
+        failures.append(f"{DRILL_SERVICE}'s last run was not clean (Result={last.result}, "
+                        f"ExecMainStatus={last.exit_status}); exit 3 means the drill could "
+                        "not restore the NPM row, which needs a person now")
+    elif time.time() - last.exited_at > DRILL_MAX_AGE:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(last.exited_at))
+        failures.append(f"{DRILL_SERVICE} last ran at {when}, more than five weeks ago — the "
+                        "monthly timer has stopped and the fail-closed path is unproven")
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Check the PBX's Authentik-only sign-in.")
     parser.add_argument("--npm-url", default="http://127.0.0.1:81")
@@ -325,6 +372,12 @@ def main(argv: list[str] | None = None) -> int:
         for message in found:
             fail("port_acl", message)
         print(f"{'FAIL' if found else 'PASS'}  {':8083':24} LAN-only in raw PREROUTING")
+        found = check_drill()
+        failures += found
+        for message in found:
+            fail("drill", message)
+        print(f"{'FAIL' if found else 'PASS'}  {'break-glass drill':24} monthly timer live, "
+              "last run clean")
         warnings += check_break_glass(args.pbx, container, args.ssh_key)
     except Unreadable as error:
         print(f"FAIL  {error}", file=sys.stderr)

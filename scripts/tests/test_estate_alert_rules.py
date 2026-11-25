@@ -75,6 +75,11 @@ CHECK_SCRIPTS = [
     # settings and the console's own client are three owners outside this repo, and the
     # link can go down without a single door closing.
     "check-pbx-console",
+    # The audio a call on hold plays (2026-11-25), added with the mount and the class
+    # definition that publish it. Three owners outside this repository can drop it and
+    # leave the PBX answering everything while `mode=files` plays silence, so a textfile
+    # that stops arriving must be named rather than read as a quiet green.
+    "check-pbx-moh",
     "check-mount-stacks",
     # The mail server's traffic, which is the only source the mail dashboard has.
     "check-mail-traffic",

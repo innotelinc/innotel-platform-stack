@@ -328,6 +328,13 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # owners outside this repository, and a textfile that stops arriving would put the page
 # back to simulated with every other light green.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-pbx-console.py --prom ${TEXTFILE_DIR}/estate-check-pbx-console.prom
+# And that a call on hold still has audio (2026-11-25). The console's classes are
+# published through a mount from its own volume, a class definition in the
+# `asterisk-config` volume and a `MOH_PUBLISH_DIR` setting on the console — three
+# owners outside this repository. Every one of them fails silently: a dropped mount
+# leaves FreePBX's stock files and no class subdirectory, so `mode=files` plays nothing
+# and the caller hears silence while every door answers.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-pbx-moh.py --prom ${TEXTFILE_DIR}/estate-check-pbx-moh.prom
 
 # And the learner-facing door itself (2026-11-14): `class.atheniq.courses` is where every
 # classroom link in `atheniq-work` goes, and it has to be *behind* a sign-in rather than

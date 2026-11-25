@@ -280,3 +280,96 @@ def count_cpus(spec: str) -> int:
         else:
             total += 1
     return total
+
+
+# --------------------------------------------------------------------------------------
+# The state of a scheduled job (a timer, and the oneshot it fires)
+# --------------------------------------------------------------------------------------
+
+
+@dataclass
+class UnitState:
+    """What `systemctl show` says about one unit, in the fields a check needs.
+
+    Two of the estate's jobs are timers of their own rather than entries in
+    `estate-checks.service`: the console's AMI reconciler (every ten minutes) and the
+    break-glass drill (monthly). A timer that has stopped is the one failure with no
+    symptom — the textfile it would have written is simply older, and a monthly drill is
+    invisible for a month — so the checks that own those subjects read the schedule and
+    the last verdict here.
+    """
+
+    name: str
+    load: str = ""
+    active: str = ""
+    enabled: str = ""
+    result: str = ""
+    exit_status: str = ""
+    #: When the unit last exited, as unix seconds; None if it has never run.
+    exited_at: float | None = None
+
+    @property
+    def enabled_and_active(self) -> bool:
+        return self.load == "loaded" and self.enabled == "enabled" and self.active == "active"
+
+    @property
+    def last_run_ok(self) -> bool:
+        return self.result == "success" and self.exit_status == "0"
+
+
+def systemd_time(text: str) -> float | None:
+    """A `systemctl show` timestamp (`Wed 2026-11-25 14:00:23 EST`) as unix seconds.
+
+    systemd 249 (the edge) has no `--timestamp=unix`, so the human form is what is read:
+    `%Z` takes the zone abbreviation systemd prints, and `mktime` reads the result as the
+    host's own local time — the host that produced the string. `n/a` is how systemd spells
+    "never", and that has to be None rather than an age of zero.
+    """
+    text = text.strip()
+    if not text or text in {"n/a", "0", "never"}:
+        return None
+    # The zone abbreviation is optional: without it the second format parses the rest.
+    candidates = [text]
+    if len(text.split()) > 4:
+        candidates.append(" ".join(text.split()[:-1]))
+    for candidate in candidates:
+        for fmt in ("%a %Y-%m-%d %H:%M:%S %Z", "%a %Y-%m-%d %H:%M:%S"):
+            try:
+                return time.mktime(time.strptime(candidate, fmt))
+            except ValueError:
+                continue
+    return None
+
+
+def unit_state(name: str, runner=None, timeout: int = 15) -> UnitState:
+    """Ask systemd about one unit on **this** host.
+
+    Only a job installed here can be read this way, which is why the checks that use it
+    run on the edge: that is where `console-ami-pin.timer` and
+    `pbx-breakglass-drill.timer` are installed. `runner` is injectable for the tests.
+    """
+    command = ["systemctl", "show", name, "-p", "LoadState", "-p", "ActiveState",
+               "-p", "UnitFileState", "-p", "Result", "-p", "ExecMainStatus",
+               "-p", "ExecMainExitTimestamp"]
+    call = runner or subprocess.run
+    try:
+        done = call(command, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f"systemctl show {name}: {error}") from error
+    if done.returncode != 0:
+        detail = (done.stderr or done.stdout).strip().splitlines()
+        raise RuntimeError(f"systemctl show {name}: {detail[0] if detail else 'failed'}")
+    values: dict[str, str] = {}
+    for line in done.stdout.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key.strip()] = value.strip()
+    return UnitState(
+        name=name,
+        load=values.get("LoadState", ""),
+        active=values.get("ActiveState", ""),
+        enabled=values.get("UnitFileState", ""),
+        result=values.get("Result", ""),
+        exit_status=values.get("ExecMainStatus", ""),
+        exited_at=systemd_time(values.get("ExecMainExitTimestamp", "")),
+    )

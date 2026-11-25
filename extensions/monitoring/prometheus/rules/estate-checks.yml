@@ -185,6 +185,12 @@ groups:
           # in the console's volume, and the client that reconnects on its own. A textfile
           # that stopped arriving would put the page back to simulated silently.
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="console_ami"}), "check", "console_ami", "check", ".*")
+          # The audio a caller hears on hold (2026-11-25): the classes are published
+          # through a mount from the console's volume and a definition inside the PBX's
+          # `asterisk-config` volume, and a mount dropped by a redeploy leaves stock
+          # files where the class subdirectories should be. Nothing else notices, and a
+          # textfile that stopped arriving would be the same silence on hold.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="pbx_moh"}), "check", "pbx_moh", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="retired_instances"}), "check", "retired_instances", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="sso_redirects"}), "check", "sso_redirects", "check", ".*")
           # The media apps a request crosses (2026-11-17). Every door in front of a

@@ -26,6 +26,16 @@
 # script runs `systemctl daemon-reload`, since an edited unit that was never reloaded keeps
 # running the old text, which is the other trap the checklist names.
 #
+# THE JOBS THAT ARE NOT CHECKS
+# ----------------------------
+# `estate-checks.service` is not the only thing on a schedule. The console's AMI reconciler
+# and the monthly break-glass drill are timers of their own, with scripts in this same
+# directory — the derivation above cannot see them, because no `ExecStart=` in the check
+# unit names them, and that is how they came to be installed by hand. They are listed below
+# and installed (and drift-checked) with the same guard: a unit installed without its
+# script is `203/EXEC` on a schedule nobody is watching, and these two are precisely the
+# jobs that run when nothing else is looking.
+#
 # It still does not start or restart anything: starting is what would hide the 203/EXEC this
 # is meant to prevent, and the checklist's last step is a person reading `ExecMainStatus`.
 #
@@ -67,6 +77,21 @@ unit_dest=${UNIT_DEST:-/etc/systemd/system}
 # service installed without its timer never runs, and a timer without its service fires into
 # nothing, both of them silently.
 UNIT_FILES=(estate-checks.service estate-checks.timer)
+# The jobs of their own: the reconciler that re-pins the console's AMI settings every ten
+# minutes, and the drill that measures the break-glass path monthly. Their scripts live in
+# the install directory like the checks', so they are installed from the same checkout and
+# compared with the same revision.
+COMPANION_UNITS=(
+  console-ami-pin.service
+  console-ami-pin.timer
+  pbx-breakglass-drill.service
+  pbx-breakglass-drill.timer
+)
+COMPANION_SCRIPTS=(
+  ensure-console-ami.py
+  drill-pbx-breakglass.py
+)
+ALL_UNITS=("${UNIT_FILES[@]}" "${COMPANION_UNITS[@]}")
 
 die() { printf 'install-estate-checks: %s\n' "$*" >&2; exit 2; }
 
@@ -97,7 +122,7 @@ unit_files() {
 }
 
 all_files() {
-  { unit_files; printf '%s\n' "${SIBLINGS[@]}" "${SHARED[@]}"; } | sort -u
+  { unit_files; printf '%s\n' "${SIBLINGS[@]}" "${SHARED[@]}" "${COMPANION_SCRIPTS[@]}"; } | sort -u
 }
 
 ref=${REF:-}
@@ -180,7 +205,7 @@ if [ "$verify" -eq 1 ]; then
   # The unit is the other half of the list, and the same invisibility applies: a unit an
   # edit behind names a script the directory no longer has, and the `-` on every ExecStart
   # turns that into a silent textfile rather than an error.
-  for name in "${UNIT_FILES[@]}"; do
+  for name in "${ALL_UNITS[@]}"; do
     if [ ! -f "$root/systemd/$name" ]; then
       continue
     fi
@@ -237,7 +262,7 @@ done < <(all_files)
 
 # The unit half of the guard, before anything is written over /etc: a checkout on a branch
 # has a unit that differs from main's, and installing that is how the two lists came apart.
-for name in "${UNIT_FILES[@]}"; do
+for name in "${ALL_UNITS[@]}"; do
   if [ -f "$root/systemd/$name" ]; then
     check_drift_at "systemd/$name" "$root/systemd/$name"
   fi
@@ -277,7 +302,7 @@ fi
 # made "the unit is right" and "the checks are right" two separate facts a person had to keep
 # level by hand.
 unit_changed=0
-for name in "${UNIT_FILES[@]}"; do
+for name in "${ALL_UNITS[@]}"; do
   if [ ! -f "$root/systemd/$name" ]; then
     continue
   fi
@@ -315,6 +340,7 @@ cat <<EOF
 
 next, from docs/unit-apply-checklist.md:
   systemctl enable --now estate-checks.timer   # if it is not enabled yet
+  systemctl enable --now console-ami-pin.timer pbx-breakglass-drill.timer
   systemctl start estate-checks.service
   systemctl show -p Result -p ExecMainStatus estate-checks.service
 EOF

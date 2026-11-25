@@ -28,7 +28,11 @@ WHAT IT ASSERTS
   2. the console's stored settings name the PBX host and port, and a manager user;
   3. a login on `<ami_host>:<ami_port>` with those credentials is accepted — the path the
      console itself uses;
-  4. `/api/dashboard` reports `ami.connected: true` with no `lastError`.
+  4. `/api/dashboard` reports `ami.connected: true` with no `lastError`;
+  5. the reconciler that keeps the settings pinned is itself still on a schedule —
+     `console-ami-pin.timer` enabled and firing, and its last run clean. A timer that
+     stopped is invisible otherwise: the page stays right until the next image update
+     resets the settings, and then it is wrong until somebody notices.
 
 The console's admin password is read from its own container environment over ssh, never
 from this repository and never printed: the check logs in the way the page does.
@@ -38,6 +42,7 @@ Run it on the edge (it needs the PBX over ssh and the console's HTTP port):
     ./scripts/check-pbx-console.py
     ./scripts/check-pbx-console.py --pbx 192.168.1.52 --ssh-key /root/.ssh/id_ed25519
     ./scripts/check-pbx-console.py --prom ${TEXTFILE_DIR}/estate-check-pbx-console.prom
+    ./scripts/check-pbx-console.py --pin-timer ''   # not on the edge, where the timer is
 
 Exit codes: 0 = the link is live, 1 = drift, 2 = something could not be read.
 """
@@ -49,16 +54,17 @@ import json
 import socket
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:  # the estate's shared telemetry contract, beside this file when it is installed
-    from estate_check import Audit, Finding, write_prom  # noqa: E402
+    from estate_check import Audit, Finding, unit_state, write_prom  # noqa: E402
     HAVE_TELEMETRY = True
 except ImportError:  # a bare copy still has to run: --prom is then simply unavailable
-    Audit = Finding = write_prom = None  # type: ignore[assignment]
+    Audit = Finding = write_prom = unit_state = None  # type: ignore[assignment]
     HAVE_TELEMETRY = False
 
 #: The `check` label this check publishes under (`estate-checks.yml` alerts on it).
@@ -241,6 +247,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--console-url", default=f"http://192.168.1.52:{CONSOLE_PORT}")
     parser.add_argument("--console-user", default="admin")
     parser.add_argument("--ssh-key")
+    parser.add_argument("--pin-timer", default="console-ami-pin.timer", metavar="UNIT",
+                        help="the reconciler timer to assert, on this host (default "
+                             "%(default)s; pass an empty string off the edge)")
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here")
     args = parser.parse_args(argv)
 
@@ -357,6 +366,48 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAIL  {'console client':24} not connected")
     if connected and last_error:
         note("last_error", f"connected now, but the last error was {last_error!r}")
+
+    # 5. The reconciler that makes the settings durable is itself on a schedule. Read here
+    # rather than over ssh because it is installed on the host this check runs on — the
+    # edge — and a job nobody reads is the same silence one layer out.
+    if args.pin_timer:
+        if not HAVE_TELEMETRY or unit_state is None:
+            print(f"NOTE  {'AMI pin timer':24} needs estate_check.py beside this file")
+        else:
+            try:
+                timer = unit_state(args.pin_timer)
+                last = unit_state(args.pin_timer.removesuffix(".timer") + ".service")
+            except RuntimeError as error:
+                print(f"FAIL  {error}", file=sys.stderr)
+                publish(False)
+                return 2
+            problems = []
+            if timer.load != "loaded" or timer.enabled != "enabled":
+                problems.append(
+                    f"{args.pin_timer} is not enabled (LoadState={timer.load or 'unreadable'}, "
+                    f"UnitFileState={timer.enabled or 'none'}) — an image update's reset "
+                    "would not be repaired until somebody runs the job by hand")
+            elif timer.active != "active":
+                problems.append(f"{args.pin_timer} is enabled but not active "
+                                f"(ActiveState={timer.active}) — the schedule exists and "
+                                "nothing is firing it")
+            if last.exited_at is None:
+                problems.append(f"{last.name} has never run since it was enabled — the "
+                                "timer is installed and has not fired once")
+            elif not last.last_run_ok:
+                problems.append(f"{last.name}'s last run was not clean (Result={last.result}, "
+                                f"ExecMainStatus={last.exit_status})")
+            elif time.time() - last.exited_at > 2 * 60 * 60:
+                when = time.strftime("%Y-%m-%d %H:%M", time.localtime(last.exited_at))
+                problems.append(f"{last.name} last ran at {when}, over two hours ago — it is "
+                                "scheduled every ten minutes, so the timer has stopped")
+            if problems:
+                failures += problems
+                for problem in problems:
+                    fail("ami_pin_timer", problem)
+                print(f"FAIL  {'AMI pin timer':24} {problems[0]}")
+            else:
+                print(f"PASS  {'AMI pin timer':24} {args.pin_timer} enabled and firing")
 
     for failure in failures:
         print(f"      {failure}")

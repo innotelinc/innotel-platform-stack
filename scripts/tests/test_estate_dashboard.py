@@ -130,7 +130,10 @@ class DashboardCase(unittest.TestCase):
         # the unit's own list by then — the same silent green, four checks wide, that this
         # test exists to catch, and it had been green on the panel while it drifted.
         # `check-pbx-console` is the 46th, the same day: the console's AMI link read
-        # "Simulated" twice while every other light was green.
+        # "Simulated" twice while every other light was green. `check-pbx-moh` is the
+        # 47th: the classes are published through a mount from the console's volume, and
+        # a mount dropped by a redeploy leaves a directory of subdirectories that
+        # `mode=files` plays as silence — no door closes, so nothing else reports it.
         unit = UNIT.read_text(encoding="utf-8")
         checks = set(re.findall(r"/opt/innotel/estate-checks/(check-[a-z0-9-]+)\.py", unit))
         self.assertTrue(checks, "the unit must run the checks")
