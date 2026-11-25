@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """`systemctl show` is the only witness for a timer that has stopped.
 
-The estate's two companion jobs — the console's AMI reconciler and the monthly
-break-glass drill — are read by `estate_check.unit_state`, and the fields it returns are
+The estate's companion jobs — the console's AMI reconciler, the music-on-hold config
+reconciler and the monthly break-glass drill — are read by `estate_check.unit_state`, and
+the fields it returns are
 the whole verdict. These cases pin the parsing to the text a systemd 249 host actually
 prints (the edge's version, captured 2026-11-25), because a parser that quietly returns
 `None` for the last run reads exactly like a job that has never run.

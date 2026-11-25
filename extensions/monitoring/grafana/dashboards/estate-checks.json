@@ -88,7 +88,7 @@
       "id": 2,
       "type": "stat",
       "title": "Checks reporting",
-      "description": "How many checks have a series at all — one per ExecStart line in systemd/estate-checks.service, held in step by scripts/tests/test_estate_dashboard.py. Fewer than expected means a textfile is missing, which is the silence `EstateCheckAbsent` exists to catch.",
+      "description": "How many checks have a series at all — one per ExecStart line in systemd/estate-checks.service, held in step by scripts/tests/test_estate_dashboard.py. Fewer than expected means a textfile is missing, which is the silence `EstateCheckAbsent` exists to catch. `probe_audit` and `sso_ping` are separate jobs on the edge that publish this metric family too, so they are excluded: the panel counts the unit's checks, not every writer.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -139,7 +139,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "count(innotel_estate_check_last_run_timestamp)",
+          "expr": "count(innotel_estate_check_last_run_timestamp{check!~\"probe_audit|sso_ping\"})",
           "instant": true,
           "legendFormat": "reporting",
           "refId": "A"

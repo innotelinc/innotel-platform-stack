@@ -1,0 +1,15 @@
+[Unit]
+Description=Reconcile the console's music-on-hold classes every ten minutes
+
+[Timer]
+# Ten minutes, and fast after boot: a redeploy is exactly a volume coming back, and the
+# window this covers is the gap between that and the next estate check.
+OnBootSec=3m
+OnCalendar=*:0/10
+# `Persistent` so a reboot at 03:59 does not skip the run that would have repaired a
+# volume recreated by the deploy before it.
+Persistent=true
+RandomizedDelaySec=20s
+
+[Install]
+WantedBy=timers.target

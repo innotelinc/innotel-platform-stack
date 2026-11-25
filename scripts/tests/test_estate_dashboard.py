@@ -140,6 +140,12 @@ class DashboardCase(unittest.TestCase):
         panel = next(p for p in self.doc["panels"] if p["title"] == "Checks reporting")
         green = panel["fieldConfig"]["defaults"]["thresholds"]["steps"][-1]["value"]
         self.assertEqual(green, len(checks), f"the unit runs {sorted(checks)}")
+        # The count sat at 50 while four checks were missing from the unit: 47
+        # checks plus `probe_audit`, `sso_ping` and one series still inside Prometheus's
+        # five-minute staleness window. The `unless`-style exclusion names the two separate
+        # jobs on the edge that publish the same metric family, because the panel counts
+        # the unit's checks and not every writer of `last_run_timestamp`.
+        self.assertIn('check!~"probe_audit|sso_ping"', panel["targets"][0]["expr"])
 
     def test_it_shows_the_processes_stuck_for_over_an_hour(self):
         # The check arrived on 2026-11-02 after an 18-hour `docker exec` took i4 to load 13

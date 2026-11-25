@@ -181,6 +181,15 @@ class ParseCase(unittest.TestCase):
         self.assertEqual(self.moh.CONSOLE_INCLUDE, "musiconhold_console.conf")
         self.assertEqual(self.moh.FREEPBX_INCLUDE, "musiconhold_additional.conf")
 
+    def test_the_config_timer_is_the_reconciler_the_installer_installs(self):
+        # The check asserts the timer by name, and the installer installs it by name. If
+        # the two drift, the check reads a unit nobody installs and the repair job is
+        # never asserted — the same silence one layer out that this timer exists for.
+        self.assertEqual(self.moh.DEFAULT_TIMER, "pbx-moh-config.timer")
+        units = CHECK.parents[1] / "systemd"
+        self.assertTrue((units / "pbx-moh-config.service").is_file())
+        self.assertTrue((units / "pbx-moh-config.timer").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,7 +37,11 @@ WHAT IT ASSERTS
      `musiconhold_additional.conf`. Asterisk lets a later definition win, and FreePBX's
      own `[default]` points at the mount itself; the include is one line in a file the
      image ships stock, so an image update or a recreated config volume silently
-     reinstates silence while every mount still looks right.
+     reinstates silence while every mount still looks right;
+  7. the reconciler that puts those two files back (`pbx-moh-config.timer`) is enabled,
+     active, and its last run is clean and recent. It is read on this host, the edge,
+     where it is installed: a repair job that stopped is invisible until the next
+     volume is recreated, which is the one moment nobody is watching.
 
 It also publishes the files it counted per class
 (`innotel_estate_check_moh_files{class="…",source="asterisk|console"}`), so the
@@ -51,6 +55,7 @@ Run it on the edge (it needs the PBX over ssh):
     ./scripts/check-pbx-moh.py
     ./scripts/check-pbx-moh.py --pbx 192.168.1.52 --ssh-key /root/.ssh/id_ed25519
     ./scripts/check-pbx-moh.py --prom ${TEXTFILE_DIR}/estate-check-pbx-moh.prom
+    ./scripts/check-pbx-moh.py --config-timer ''   # not on the edge, where it is installed
 
 Exit codes: 0 = every published class plays from readable audio, 1 = drift, 2 = something
 could not be read.
@@ -62,16 +67,17 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:  # the estate's shared telemetry contract, beside this file when it is installed
-    from estate_check import Audit, Finding, write_prom  # noqa: E402
+    from estate_check import Audit, Finding, unit_state, write_prom  # noqa: E402
 
     HAVE_TELEMETRY = True
 except ImportError:  # a bare copy still has to run: --prom is then simply unavailable
-    Audit = Finding = write_prom = None  # type: ignore[assignment]
+    Audit = Finding = unit_state = write_prom = None  # type: ignore[assignment]
     HAVE_TELEMETRY = False
 
 #: The `check` label this check publishes under (`estate-checks.yml` alerts on it).
@@ -93,6 +99,9 @@ FREEPBX_INCLUDE = "musiconhold_additional.conf"
 #: What the include read prints when the file is absent, so "missing" is a finding
 #: rather than an unreadable container.
 MISSING_MARKER = "@@NO-MUSICONHOLD-CONF@@"
+#: The timer that writes the class file and the include back after a recreated volume.
+#: It is installed beside this check on the edge, which is where `unit_state` reads it.
+DEFAULT_TIMER = "pbx-moh-config.timer"
 
 
 class Drift(Exception):
@@ -392,6 +401,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pbx", default="192.168.1.52")
     parser.add_argument("--ssh-key")
     parser.add_argument("--prom", metavar="PATH", help="write a Prometheus textfile here")
+    parser.add_argument("--config-timer", default=DEFAULT_TIMER, metavar="UNIT",
+                        help="the reconciler timer to assert on this host (default "
+                             "%(default)s); pass '' off the edge, where it is not installed")
     args = parser.parse_args(argv)
 
     audit = Audit() if HAVE_TELEMETRY else None
@@ -536,6 +548,48 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAIL  {name:24} no audio in the console's store")
     if with_audio and not (with_audio - known):
         print(f"PASS  {'console publish':24} {len(with_audio)} class(es) from {publish_dir}")
+
+    # 4. The reconciler that owns the two config files is itself on a schedule. Read here
+    # rather than over ssh because it is installed on the host this check runs on — the
+    # edge — and a job nobody reads is the same silence one layer out.
+    if args.config_timer:
+        if not HAVE_TELEMETRY or unit_state is None:
+            print(f"NOTE  {'MOH config timer':24} needs estate_check.py beside this file")
+        else:
+            try:
+                timer = unit_state(args.config_timer)
+                last = unit_state(args.config_timer.removesuffix(".timer") + ".service")
+            except RuntimeError as error:
+                print(f"FAIL  {error}", file=sys.stderr)
+                publish(False)
+                return 2
+            problems = []
+            if timer.load != "loaded" or timer.enabled != "enabled":
+                problems.append(
+                    f"{args.config_timer} is not enabled (LoadState={timer.load or 'unreadable'}, "
+                    f"UnitFileState={timer.enabled or 'none'}) — a recreated volume would "
+                    "keep playing silence until somebody ran the repair by hand")
+            elif timer.active != "active":
+                problems.append(f"{args.config_timer} is enabled but not active "
+                                f"(ActiveState={timer.active}) — the schedule exists and "
+                                "nothing is firing it")
+            if last.exited_at is None:
+                problems.append(f"{last.name} has never run since it was enabled — the "
+                                "timer is installed and has not fired once")
+            elif not last.last_run_ok:
+                problems.append(f"{last.name}'s last run was not clean (Result={last.result}, "
+                                f"ExecMainStatus={last.exit_status})")
+            elif time.time() - last.exited_at > 2 * 60 * 60:
+                when = time.strftime("%Y-%m-%d %H:%M", time.localtime(last.exited_at))
+                problems.append(f"{last.name} last ran at {when}, over two hours ago — it is "
+                                "scheduled every ten minutes, so the timer has stopped")
+            if problems:
+                failures += problems
+                for problem in problems:
+                    fail("config_timer", problem)
+                print(f"FAIL  {'MOH config timer':24} {problems[0]}")
+            else:
+                print(f"PASS  {'MOH config timer':24} {args.config_timer} enabled and firing")
 
     for failure in failures:
         print(f"      {failure}")

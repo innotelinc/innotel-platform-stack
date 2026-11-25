@@ -28,13 +28,14 @@
 #
 # THE JOBS THAT ARE NOT CHECKS
 # ----------------------------
-# `estate-checks.service` is not the only thing on a schedule. The console's AMI reconciler
-# and the monthly break-glass drill are timers of their own, with scripts in this same
-# directory — the derivation above cannot see them, because no `ExecStart=` in the check
-# unit names them, and that is how they came to be installed by hand. They are listed below
-# and installed (and drift-checked) with the same guard: a unit installed without its
-# script is `203/EXEC` on a schedule nobody is watching, and these two are precisely the
-# jobs that run when nothing else is looking.
+# `estate-checks.service` is not the only thing on a schedule. The console's AMI
+# reconciler, the music-on-hold config reconciler and the monthly break-glass drill are
+# timers of their own, with scripts in this same directory — the derivation above cannot
+# see them, because no `ExecStart=` in the check unit names them, and that is how they
+# came to be installed by hand. They are listed below and installed (and drift-checked)
+# with the same guard: a unit installed without its script is `203/EXEC` on a schedule
+# nobody is watching, and these are precisely the jobs that run when nothing else is
+# looking.
 #
 # It still does not start or restart anything: starting is what would hide the 203/EXEC this
 # is meant to prevent, and the checklist's last step is a person reading `ExecMainStatus`.
@@ -78,17 +79,21 @@ unit_dest=${UNIT_DEST:-/etc/systemd/system}
 # nothing, both of them silently.
 UNIT_FILES=(estate-checks.service estate-checks.timer)
 # The jobs of their own: the reconciler that re-pins the console's AMI settings every ten
-# minutes, and the drill that measures the break-glass path monthly. Their scripts live in
-# the install directory like the checks', so they are installed from the same checkout and
-# compared with the same revision.
+# minutes, the one that puts the console's music-on-hold classes back after a recreated
+# `asterisk-config` volume, and the drill that measures the break-glass path monthly.
+# Their scripts live in the install directory like the checks', so they are installed from
+# the same checkout and compared with the same revision.
 COMPANION_UNITS=(
   console-ami-pin.service
   console-ami-pin.timer
+  pbx-moh-config.service
+  pbx-moh-config.timer
   pbx-breakglass-drill.service
   pbx-breakglass-drill.timer
 )
 COMPANION_SCRIPTS=(
   ensure-console-ami.py
+  ensure-pbx-moh.py
   drill-pbx-breakglass.py
 )
 ALL_UNITS=("${UNIT_FILES[@]}" "${COMPANION_UNITS[@]}")
@@ -340,7 +345,7 @@ cat <<EOF
 
 next, from docs/unit-apply-checklist.md:
   systemctl enable --now estate-checks.timer   # if it is not enabled yet
-  systemctl enable --now console-ami-pin.timer pbx-breakglass-drill.timer
+  systemctl enable --now console-ami-pin.timer pbx-moh-config.timer pbx-breakglass-drill.timer
   systemctl start estate-checks.service
   systemctl show -p Result -p ExecMainStatus estate-checks.service
 EOF

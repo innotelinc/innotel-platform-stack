@@ -1,0 +1,19 @@
+[Unit]
+Description=Put the console's music-on-hold classes back after a recreated config volume
+Documentation=https://github.com/innotelinc/innotel-platform-stack/blob/main/docs/pbx-sso-2026-11-25.md
+
+# The console's classes and the include that lets them win are hand-written inside the
+# FreePBX `asterisk-config` volume, and a redeploy recreates that volume from the image:
+# `musiconhold_console.conf` comes back missing and `musiconhold.conf` stock. Every mount
+# is still right, so nothing closes and nothing else reports — every call on hold just
+# plays silence. This is the repair on a schedule; the alarm is `check-pbx-moh.py` in
+# `estate-checks.service`, which also asserts this timer.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/innotel/estate-checks
+# No EnvironmentFile: everything here is `docker exec` and `docker inspect` over ssh, the
+# same way the check reads the PBX, and no credential is stored.
+ExecStart=/usr/bin/python3 /opt/innotel/estate-checks/ensure-pbx-moh.py

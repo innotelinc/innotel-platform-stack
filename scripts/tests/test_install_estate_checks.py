@@ -227,17 +227,19 @@ class DriftGuard(unittest.TestCase):
                          (ROOT / "systemd" / "estate-checks.timer").read_bytes())
 
     def test_the_jobs_that_are_not_checks_travel_with_their_units(self):
-        # `estate-checks.service` is not the only thing on a schedule, and these four
-        # units plus their two scripts were installed by hand until the installer knew
+        # `estate-checks.service` is not the only thing on a schedule, and these six
+        # units plus their three scripts were installed by hand until the installer knew
         # about them. A fresh install now carries them, and the same drift guard holds
         # the installed copies to the revision.
         self.install()
         for name in ("console-ami-pin.service", "console-ami-pin.timer",
+                     "pbx-moh-config.service", "pbx-moh-config.timer",
                      "pbx-breakglass-drill.service", "pbx-breakglass-drill.timer"):
             installed = self.unit_dest / name
             self.assertTrue(installed.is_file(), f"{name} was not installed")
             self.assertEqual(installed.read_bytes(), (ROOT / "systemd" / name).read_bytes(), name)
-        for name in ("ensure-console-ami.py", "drill-pbx-breakglass.py"):
+        for name in ("ensure-console-ami.py", "ensure-pbx-moh.py",
+                     "drill-pbx-breakglass.py"):
             self.assertTrue((self.dest / name).is_file(), f"{name} was not installed")
 
     def test_a_companion_unit_that_changed_after_the_install_is_named(self):

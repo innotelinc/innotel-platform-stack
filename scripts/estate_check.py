@@ -345,7 +345,7 @@ def unit_state(name: str, runner=None, timeout: int = 15) -> UnitState:
     """Ask systemd about one unit on **this** host.
 
     Only a job installed here can be read this way, which is why the checks that use it
-    run on the edge: that is where `console-ami-pin.timer` and
+    run on the edge: that is where `console-ami-pin.timer`, `pbx-moh-config.timer` and
     `pbx-breakglass-drill.timer` are installed. `runner` is injectable for the tests.
     """
     command = ["systemctl", "show", name, "-p", "LoadState", "-p", "ActiveState",
