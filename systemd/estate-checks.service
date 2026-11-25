@@ -322,6 +322,12 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # :8083 on the LAN. The check reads all three, plus the session guard on the
 # break-glass 403 without which a successful sign-in is refused.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-pbx-sso.py --prom ${TEXTFILE_DIR}/estate-check-pbx-sso.prom
+# And that the console's AMI link is live rather than "Simulated" (2026-11-25). The
+# `ami-bridge` sidecar is what makes the published 5038 reach Asterisk at all, the
+# console's settings live in its own volume, and its client reconnects on its own — three
+# owners outside this repository, and a textfile that stops arriving would put the page
+# back to simulated with every other light green.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-pbx-console.py --prom ${TEXTFILE_DIR}/estate-check-pbx-console.prom
 
 # And the learner-facing door itself (2026-11-14): `class.atheniq.courses` is where every
 # classroom link in `atheniq-work` goes, and it has to be *behind* a sign-in rather than

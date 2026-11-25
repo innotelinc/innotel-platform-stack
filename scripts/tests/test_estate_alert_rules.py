@@ -70,6 +70,11 @@ CHECK_SCRIPTS = [
     # `raw PREROUTING` rule a docker restart loses. Its arrival moved the dashboard's
     # reporting threshold with it, in the same change.
     "check-pbx-sso",
+    # The console's live AMI link (2026-11-25), added the day the page read "Simulated ·
+    # AMI connection closed" while every other check was green: the sidecar, the stored
+    # settings and the console's own client are three owners outside this repo, and the
+    # link can go down without a single door closing.
+    "check-pbx-console",
     "check-mount-stacks",
     # The mail server's traffic, which is the only source the mail dashboard has.
     "check-mail-traffic",

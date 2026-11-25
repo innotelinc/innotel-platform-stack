@@ -129,6 +129,8 @@ class DashboardCase(unittest.TestCase):
         # `check-pbx-sso` is the 45th (2026-11-25). The number had drifted four behind
         # the unit's own list by then — the same silent green, four checks wide, that this
         # test exists to catch, and it had been green on the panel while it drifted.
+        # `check-pbx-console` is the 46th, the same day: the console's AMI link read
+        # "Simulated" twice while every other light was green.
         unit = UNIT.read_text(encoding="utf-8")
         checks = set(re.findall(r"/opt/innotel/estate-checks/(check-[a-z0-9-]+)\.py", unit))
         self.assertTrue(checks, "the unit must run the checks")

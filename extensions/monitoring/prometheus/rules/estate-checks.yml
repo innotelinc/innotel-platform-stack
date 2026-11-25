@@ -179,6 +179,12 @@ groups:
           # arriving would leave the form's return visible only to whoever opened the
           # GUI and found it asking for a password again.
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="pbx_sso"}), "check", "pbx_sso", "check", ".*")
+          # The console's live AMI link (2026-11-25): the page said "Simulated · AMI
+          # connection closed" while every other check was green. Its three owners are
+          # the `ami-bridge` sidecar (a stopped deploy leaves it `Created`), the settings
+          # in the console's volume, and the client that reconnects on its own. A textfile
+          # that stopped arriving would put the page back to simulated silently.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="console_ami"}), "check", "console_ami", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="retired_instances"}), "check", "retired_instances", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="sso_redirects"}), "check", "sso_redirects", "check", ".*")
           # The media apps a request crosses (2026-11-17). Every door in front of a
@@ -198,12 +204,12 @@ groups:
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="oidc_redirect_agreement"}), "check", "oidc_redirect_agreement", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="smtp_credentials"}), "check", "smtp_credentials", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="vaultwarden_config_drift"}), "check", "vaultwarden_config_drift", "check", ".*")
-          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="sso_login"}), "check", "sso_login", "check", ".*")
-          # The voice vhost's identity headers (2026-11-22): nginx's own `location /`
-          # re-declares proxy_set_header, so server-level lines are never inherited and
-          # NPM regenerates the file from its row without them. Their loss is a second
-          # login, and a check that stops reporting must not be the thing that hides it.
-          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="npm_auth_headers"}), "check", "npm_auth_headers", "check", ".*")
+          # No branch for `sso_login` or `npm_auth_headers` (removed 2026-11-25): both
+          # named checks that do not exist. `/usr/local/sbin/npm-auth-headers.sh` rewrites
+          # vhost files on its own timer but publishes no verdict, and nothing has
+          # published `sso_login` since its script was retired. A branch for a series
+          # nothing writes is not coverage — it is a permanent "never reported" page, and
+          # it made this rule the thing that would have cried wolf.
         for: 30m
         labels:
           severity: critical
