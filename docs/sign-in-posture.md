@@ -22,6 +22,13 @@ when nobody uses it.
 > **`oauth2-proxy` gateway** that runs the browser through an authorization-code
 > flow against Cerulean Authentik. There is no outpost and no `auth_request`
 > anywhere in the path.
+>
+> **Correction (2026-11-25): forward-auth gates are back.** 27 NPM proxy hosts
+> again carry the `auth_request` /outpost snippet, and `deploy.innotel.us` was
+> one of them. The contract below still describes every other door; the gates
+> are a separate front door with their own rule — the auth host decides the
+> provider, and the provider decides the cookie domain — recorded in
+> [`authentik-forward-auth-audit-2026-11-25.md`](authentik-forward-auth-audit-2026-11-25.md).
 
 ---
 
