@@ -126,6 +126,9 @@ class DashboardCase(unittest.TestCase):
         # children on all four hosts: a container that leaks them holds the PID space it
         # was given, `docker exec` fails against it, and nothing else here looks at the
         # reaper. The two lines met in this merge, so 33 is neither side's number.
+        # `check-pbx-sso` is the 45th (2026-11-25). The number had drifted four behind
+        # the unit's own list by then — the same silent green, four checks wide, that this
+        # test exists to catch, and it had been green on the panel while it drifted.
         unit = UNIT.read_text(encoding="utf-8")
         checks = set(re.findall(r"/opt/innotel/estate-checks/(check-[a-z0-9-]+)\.py", unit))
         self.assertTrue(checks, "the unit must run the checks")

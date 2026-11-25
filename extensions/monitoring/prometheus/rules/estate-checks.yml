@@ -173,6 +173,12 @@ groups:
           # And the check that reads history instead of the moment: its own series
           # is the one place a flapping check is visible.
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="estate_flaps"}), "check", "estate_flaps", "check", ".*")
+          # And the PBX's password door (2026-11-25): NPM's row, the framework file
+          # FreePBX will overwrite, and the iptables rule a docker restart loses are
+          # three owners, none of them in this repository. A textfile that stopped
+          # arriving would leave the form's return visible only to whoever opened the
+          # GUI and found it asking for a password again.
+          or label_replace(absent(innotel_estate_check_last_run_timestamp{check="pbx_sso"}), "check", "pbx_sso", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="retired_instances"}), "check", "retired_instances", "check", ".*")
           or label_replace(absent(innotel_estate_check_last_run_timestamp{check="sso_redirects"}), "check", "sso_redirects", "check", ".*")
           # The media apps a request crosses (2026-11-17). Every door in front of a

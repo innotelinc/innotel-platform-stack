@@ -65,6 +65,11 @@ CHECK_SCRIPTS = [
     # the failure this list exists to catch.
     "check-edge-vhost-pins",
     "check-edge-sso-door",
+    # The PBX's Authentik-only sign-in (2026-11-25). Three owners outside this repo can
+    # undo it: NPM's row, `gui_auth.php` (framework code an upgrade overwrites), and the
+    # `raw PREROUTING` rule a docker restart loses. Its arrival moved the dashboard's
+    # reporting threshold with it, in the same change.
+    "check-pbx-sso",
     "check-mount-stacks",
     # The mail server's traffic, which is the only source the mail dashboard has.
     "check-mail-traffic",

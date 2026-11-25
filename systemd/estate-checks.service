@@ -315,6 +315,14 @@ ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add 
 # in this container, and all three verdicts hold.
 ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-edge-sso-door.py --prom ${TEXTFILE_DIR}/estate-check-edge-sso-door.prom
 
+# And the PBX's own sign-in posture (2026-11-25): the FreePBX GUI has no password
+# door. Three owners outside this repository can put it back — NPM's row (the identity
+# headers live inside `location /admin`, not at server level), `gui_auth.php`
+# (framework code an upgrade overwrites), and the `raw PREROUTING` rule that keeps
+# :8083 on the LAN. The check reads all three, plus the session guard on the
+# break-glass 403 without which a successful sign-in is refused.
+ExecStart=-/usr/bin/python3 /opt/innotel/estate-checks/run-estate-checks.py add /usr/bin/python3 /opt/innotel/estate-checks/check-pbx-sso.py --prom ${TEXTFILE_DIR}/estate-check-pbx-sso.prom
+
 # And the learner-facing door itself (2026-11-14): `class.atheniq.courses` is where every
 # classroom link in `atheniq-work` goes, and it has to be *behind* a sign-in rather than
 # merely up. A door that answers 200 anonymously reads as healthy everywhere else — the app
