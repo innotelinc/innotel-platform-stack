@@ -213,17 +213,28 @@ PY
   fi
 
   running_before=$(docker ps -q 2>/dev/null | wc -l)
-  echo "added apparmor-profile=$PROFILE to $DAEMON; restarting docker"
+  # Restarting dockerd without live-restore stops every container on the host, and
+  # on 2026-11-22 one such bounce also left a container's port publish unregistered
+  # (gateway.innotel.us answered 502). Refuse unless live-restore is genuinely on.
+  if [ "${FORCE_DOCKER_RESTART:-0}" != 1 ] &&
+     [ "$(docker info --format '{{.LiveRestoreEnabled}}' 2>/dev/null)" != true ]; then
+    echo "refusing to restart docker: live-restore is off, so this bounce would stop all $running_before running containers." >&2
+    echo "add \"live-restore\": true to $DAEMON and restart once deliberately, or re-run with FORCE_DOCKER_RESTART=1." >&2
+    restore_daemon
+    exit 1
+  fi
+  echo "added apparmor-profile=$PROFILE to $DAEMON; restarting docker ($running_before containers running)"
   if ! systemctl restart docker; then
     echo "docker did not restart; rolling $DAEMON back" >&2
     restore_daemon
     systemctl start docker
     exit 1
   fi
-  sleep 5
+  for _ in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 2; done
   running_after=$(docker ps -q 2>/dev/null | wc -l)
   if [ "$running_after" -lt "$running_before" ]; then
-    echo "warning: containers running $running_before → $running_after after the restart" >&2
+    echo "warning: containers running $running_before → $running_after after the restart; check docker ps -a" >&2
+    exit 1
   fi
 fi
 
