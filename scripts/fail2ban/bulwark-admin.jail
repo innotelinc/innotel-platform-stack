@@ -1,0 +1,29 @@
+# fail2ban jail — failed Bulwark administrator logins.
+#
+# Install on the host that terminates HTTP for Bulwark (the mail host,
+# 192.168.1.15, or whatever fronts it), then:
+#     install -m 0644 bulwark-admin.conf /etc/fail2ban/filter.d/
+#     install -m 0644 bulwark-admin.jail /etc/fail2ban/jail.d/bulwark-admin.conf
+#     fail2ban-client reload
+#
+# The estate's own hosts share the LAN and are whitelisted: the 10-minute
+# checks and the admin workstation must never be locked out of the surface
+# they are responsible for.
+[bulwark-admin]
+
+enabled  = true
+filter   = bulwark-admin
+port     = http,https
+backend  = auto
+
+# Adjust to wherever Bulwark's access log lands on that host. When Bulwark runs
+# under Coolify, its nginx log is normally the container's stdout; point this at
+# the file the host actually writes.
+logpath  = /var/log/nginx/access.log
+
+maxretry = 5
+findtime = 10m
+bantime  = 1h
+
+# Loopback, the whole LAN, and Docker bridges are never banned.
+ignoreip = 127.0.0.1/8 ::1 192.168.1.0/24 172.16.0.0/12 10.0.0.0/8
