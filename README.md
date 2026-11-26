@@ -35,6 +35,9 @@ and edge are platform services; everything else is a business function that cons
 > security boundaries between them. Every product repository carries a
 > [docs/stack.md](docs/stack.md)-style section that points back here, so the ecosystem
 > definition lives in exactly one place. **Landing page:** [innotelinc.github.io/innotel-platform-stack](https://innotelinc.github.io/innotel-platform-stack)
+>
+> **Product landing pages:** [AthenIQ Evo](https://innotelinc.github.io/atheniq-evo/) ·
+> [Telno](https://innotelinc.github.io/telno/)
 
 ---
 
